@@ -1,0 +1,191 @@
+swagger: "2.0"
+info:
+  version: "0.0.1"
+  title: Hello World App
+# during dev, should point to your local machine
+host: localhost:10010
+# basePath prefixes all resource paths 
+basePath: /
+# 
+schemes:
+  # tip: remove http to make production-grade
+  - http
+  - https
+# format of bodies a client can send (Content-Type)
+consumes:
+  - application/json
+# format of the responses to the client (Accepts)
+produces:
+  - application/json
+paths:
+  /ensembl: 
+    get: 
+      summary: "Proxy to Gramene's Ensembl REST installation"
+      description: "Please refer to rest.ensembl.org for documentation\n"
+      tags: 
+        - "Ensembl REST"
+      responses: 
+        200: 
+          description: "Ensembl REST response"
+  /reactome: 
+    get: 
+      summary: "Proxy to Gramene's Plant Reactome REST API"
+      description: "Reactome RESTful API <a href='http://reactomews.oicr.on.ca:8080/ReactomeRESTfulAPI/ReactomeRESTFulAPI.html'>documentation</a>"
+      tags: 
+        - "Plant Reactome REST"
+      responses: 
+        200: 
+          description: "plant reactome response"
+  /reactome/pathwayHierarchy/{species}: 
+    get: 
+      summary: "pathway hierarchy"
+      description: "Get the pathway hierarchy for a specified species as displayed in Reactome pathway browser."
+      tags: 
+        - "Plant Reactome REST"
+      produces: 
+        - "application/xml"
+      responses: 
+        200: 
+          description: "String - XML text containing pathways and reactions"
+      parameters: 
+        - 
+          name: "species"
+          in: "path"
+          description: "Full species name that should be encoded for URL (e.g. oryza+sativa, or zea+mays)"
+          type: "string"
+          required: true
+  /{collection}: 
+    x-swagger-router-controller: mongo
+    get: 
+      summary: "MongoDB"
+      operationId: get
+      description: "Fetch documents from a collection"
+      parameters: 
+        - 
+          name: "collection"
+          in: "path"
+          description: "name of collection"
+          enum: 
+            - "genes"
+            - "genetrees"
+            - "maps"
+            - "domains"
+            - "taxonomy"
+            - "GO"
+            - "PO"
+          type: "string"
+          required: true
+        - 
+          name: "q"
+          in: "query"
+          description: "string for free text search"
+          type: "string"
+          required: false
+        - 
+          name: "rows"
+          in: "query"
+          description: "number of rows to return (default: 20)"
+          type: "integer"
+          required: false
+        - 
+          name: "start"
+          in: "query"
+          description: "offset into results list"
+          type: "integer"
+          required: false
+        - 
+          name: "fl"
+          in: "query"
+          description: "list of fields to return"
+          type: "array"
+          items:
+            type: "string"
+          required: false
+        - 
+          name: "wt"
+          in: "query"
+          description: "response format, if `fl` is specified, this value may be either 'tab' or 'json'. If `fl` is not specified, this parameter is ignored and JSON documents are always returned."
+          enum:
+            - "json"
+            - "tab"
+            - ""
+          type: "string"
+          required: false
+        - 
+          name: "idList"
+          in: "query"
+          description: "a comma separated list of document ids"
+          type: "array"
+          items:
+            type: "string"
+          required: false
+      tags: 
+        - "MongoDB collections"
+      responses: 
+        200: 
+          schema:
+            # a pointer to a definition
+            $ref: "#/definitions/HelloWorldResponse"
+          description: "MongoDB response object"
+  /search/genes: 
+    get: 
+      summary: "Genes"
+      description: "This is the entry point for searching our solr genes core.\n"
+      parameters: 
+        - 
+          name: "q"
+          in: "query"
+          description: "query string."
+          required: true
+          type: "string"
+        - 
+          name: "fl"
+          in: "query"
+          description: "List of fields to include in response (default all)."
+          type: "string"
+      tags: 
+        - "Solr search"
+      responses: 
+        200: 
+          description: "Solr response object"
+
+  /hello:
+    # binds a127 app logic to a route
+    x-swagger-router-controller: hello_world
+    get:
+      description: Returns 'Hello' to the caller
+      # used as the method name of the controller
+      operationId: hello
+      parameters:
+        - name: name
+          in: query
+          description: The name of the person to whom to say hello
+          required: false
+          type: string
+      responses:
+        "200":
+          description: Success
+          schema:
+            # a pointer to a definition
+            $ref: "#/definitions/HelloWorldResponse"
+        # responses may fall through to errors
+        default:
+          description: Error
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+  /swagger:
+    x-swagger-pipe: swagger_raw
+# complex objects have schema definitions
+definitions:
+  HelloWorldResponse:
+    required:
+      - name
+    properties:
+      name:
+        type: string
+  ErrorResponse:
+    required:
+      - message
+    properties:
+      message:
+        type: string

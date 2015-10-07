@@ -1,0 +1,25 @@
+{
+  "name": "hello-world",
+  "version": "0.0.1",
+  "private": true,
+  "description": "New Swagger API Project",
+  "keywords": [],
+  "author": "",
+  "license": "",
+  "main": "app.js",
+  "dependencies": {
+    "JSONStream": "^1.0.6",
+    "csv-stringify": "0.0.8",
+    "express": "^4.12.3",
+    "gramene-mongodb-config": "^1.0.0",
+    "isnumber": "^1.0.0",
+    "lodash": "^3.10.1",
+    "mongo-sanitize": "^1.0.0",
+    "q": "^1.4.1",
+    "swagger-express-mw": "^0.1.0"
+  },
+  "devDependencies": {
+    "should": "^7.1.0",
+    "supertest": "^1.0.0"
+  }
+}
