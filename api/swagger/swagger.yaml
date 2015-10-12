@@ -54,7 +54,85 @@ paths:
           description: "Full species name that should be encoded for URL (e.g. oryza+sativa, or zea+mays)"
           type: "string"
           required: true
-  /{collection}: 
+  /search:
+    x-swagger-router-controller: solr
+    get:
+      summary: "Genes"
+      operationId: genes
+      description: "This is the entry point for searching our solr genes core.\n"
+      parameters:
+        -
+          name: "q"
+          in: "query"
+          description: "query string."
+          required: false
+          type: "string"
+        -
+          name: "fl"
+          in: "query"
+          description: "List of fields to include in response (default all)."
+          required: false
+          type: "array"
+          items:
+            type: "string"
+        -
+          name: "fq"
+          in: "query"
+          description: "Facet query parameters"
+          required: false
+          type: "array"
+          items:
+            type: "string"
+        -
+          name: "rows"
+          in: "query"
+          description: "number of rows to return (default: 20)"
+          required: false
+          type: "integer"
+        -
+          name: "start"
+          in: "query"
+          description: "offset into results list"
+          type: "integer"
+          required: false
+      tags:
+        - "Solr search"
+      responses:
+        200:
+          description: "Solr response object"
+          schema:
+            $ref: "#/definitions/SolrResponse"
+  /suggest:
+    x-swagger-router-controller: solr
+    get:
+      summary: "Genes"
+      operationId: suggestions
+      description: "This is the entry point for searching our solr genes core.\n"
+      parameters:
+        -
+          name: "q"
+          in: "query"
+          description: "query string."
+          required: true
+          type: "string"
+        -
+          name: "rows"
+          in: "query"
+          description: "number of rows to return (default: 20)"
+          required: false
+          type: "integer"
+        -
+          name: "start"
+          in: "query"
+          description: "offset into results list"
+          type: "integer"
+          required: false
+      tags:
+        - "Solr search"
+      responses:
+        200:
+          description: "Solr response object"
+  /{collection}:
     x-swagger-router-controller: mongo
     get: 
       summary: "MongoDB"
@@ -127,27 +205,6 @@ paths:
             # a pointer to a definition
             $ref: "#/definitions/HelloWorldResponse"
           description: "MongoDB response object"
-  /search/genes: 
-    get: 
-      summary: "Genes"
-      description: "This is the entry point for searching our solr genes core.\n"
-      parameters: 
-        - 
-          name: "q"
-          in: "query"
-          description: "query string."
-          required: true
-          type: "string"
-        - 
-          name: "fl"
-          in: "query"
-          description: "List of fields to include in response (default all)."
-          type: "string"
-      tags: 
-        - "Solr search"
-      responses: 
-        200: 
-          description: "Solr response object"
 
   /hello:
     # binds a127 app logic to a route
@@ -189,3 +246,89 @@ definitions:
     properties:
       message:
         type: string
+  SolrResponse:
+    required:
+     - header
+     - response
+    properties:
+      - header:
+        type: object
+        $ref: '#/definitions/SolrResponseHeader'
+      - response:
+        type: object
+        $ref: '#/definitions/SolrResponseBody'
+  SolrResponseHeader:
+    required:
+     - status
+     - QTime
+    properties:
+      status:
+        type: integer
+      QTime:
+        type: integer
+  SolrResponseBody:
+    required:
+      - start
+      - maxScore
+      - numFound
+    properties:
+      numFound:
+        type: integer
+      start:
+        type: integer
+      maxScore:
+        type: float
+      docs:
+        type: array
+        items:
+          type: object
+          oneOf:
+           - $ref: '#/definitions/SolrGeneDocument'
+           - $ref: '#/definitions/SolrSuggestionDocument'
+  SolrGeneDocument:
+    required:
+      - id
+      - name
+      - description
+      - taxon_id
+      - biotype
+      - score
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+      description:
+        type: string
+      taxon_id:
+        type: integer
+        minimum: 0
+      biotype:
+        type: string
+        enum:
+          - "protein_coding"
+          - "miRNA"
+          - "ncRNA"
+          - "low_confidence"
+          - "transposable_element"
+          - "snoRNA"
+          - "tRNA"
+          - "misc_RNA"
+          - "undefined"
+          - "pseudogene"
+          - "tRNA_pseudogene"
+          - "nontranslating_CDS"
+          - "snRNA"
+          - "rRNA"
+          - "antisense"
+          - "SRP_RNA"
+          - "tmRNA"
+          - "ribozyme"
+          - "RNase_MRP_RNA"
+          - "telomerase_RNA"
+          - "P_RNA"
+          - "RNase_P_RNA"
+          - "vault_RNA"
+  SolrSuggestionDocument:
+    required:
+      - asdf

@@ -16,6 +16,7 @@
     "lodash": "^3.10.1",
     "mongo-sanitize": "^1.0.0",
     "q": "^1.4.1",
+    "request": "^2.64.0",
     "swagger-express-mw": "^0.1.0"
   },
   "devDependencies": {
