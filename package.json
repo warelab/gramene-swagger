@@ -1,11 +1,11 @@
 {
-  "name": "hello-world",
+  "name": "gramene-swagger",
   "version": "0.0.1",
   "private": true,
-  "description": "New Swagger API Project",
+  "description": "Gramene API - Made using swagger",
   "keywords": [],
-  "author": "",
-  "license": "",
+  "author": "mycrobe",
+  "license": "MIT",
   "main": "app.js",
   "dependencies": {
     "JSONStream": "^1.0.6",

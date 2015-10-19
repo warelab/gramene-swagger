@@ -1,7 +1,7 @@
 swagger: "2.0"
 info:
   version: "0.0.1"
-  title: Hello World App
+  title: Gramene API
 # during dev, should point to your local machine
 host: localhost:10010
 # basePath prefixes all resource paths 
@@ -76,9 +76,17 @@ paths:
           items:
             type: "string"
         -
+          name: "facet.field"
+          in: "query"
+          description: "Facet field parameters"
+          required: false
+          type: "array"
+          items:
+            type: "string"
+        -
           name: "fq"
           in: "query"
-          description: "Facet query parameters"
+          description: "Field query parameters"
           required: false
           type: "array"
           items:
@@ -101,7 +109,7 @@ paths:
         200:
           description: "Solr response object"
           schema:
-            $ref: "#/definitions/SolrResponse"
+            $ref: "#/definitions/SolrGeneResponse"
   /suggest:
     x-swagger-router-controller: solr
     get:
@@ -200,10 +208,7 @@ paths:
       tags: 
         - "MongoDB collections"
       responses: 
-        200: 
-          schema:
-            # a pointer to a definition
-            $ref: "#/definitions/HelloWorldResponse"
+        200:
           description: "MongoDB response object"
 
   /hello:
@@ -222,41 +227,27 @@ paths:
       responses:
         "200":
           description: Success
-          schema:
-            # a pointer to a definition
-            $ref: "#/definitions/HelloWorldResponse"
         # responses may fall through to errors
         default:
           description: Error
-          schema:
-            $ref: "#/definitions/ErrorResponse"
   /swagger:
     x-swagger-pipe: swagger_raw
 # complex objects have schema definitions
 definitions:
-  HelloWorldResponse:
+  SolrGeneResponse:
     required:
-      - name
-    properties:
-      name:
-        type: string
-  ErrorResponse:
-    required:
-      - message
-    properties:
-      message:
-        type: string
-  SolrResponse:
-    required:
-     - header
+     - responseHeader
      - response
     properties:
-      - header:
+      responseHeader:
         type: object
         $ref: '#/definitions/SolrResponseHeader'
-      - response:
+      response:
         type: object
-        $ref: '#/definitions/SolrResponseBody'
+        $ref: '#/definitions/SolrGeneResponseBody'
+      facet_counts:
+        type: object
+        $ref: '#/definitions/SolrFacetDocument'
   SolrResponseHeader:
     required:
      - status
@@ -266,7 +257,7 @@ definitions:
         type: integer
       QTime:
         type: integer
-  SolrResponseBody:
+  SolrGeneResponseBody:
     required:
       - start
       - maxScore
@@ -277,14 +268,33 @@ definitions:
       start:
         type: integer
       maxScore:
-        type: float
+        type: integer
       docs:
         type: array
         items:
           type: object
-          oneOf:
-           - $ref: '#/definitions/SolrGeneDocument'
-           - $ref: '#/definitions/SolrSuggestionDocument'
+          $ref: '#/definitions/SolrGeneDocument'
+  SolrFacetDocument:
+    required:
+      - facet_queries
+      - facet_fields
+      - facet_dates
+      - facet_ranges
+      - facet_intervals
+      - facet_heatmaps
+    properties:
+      facet_queries:
+        type: object
+      facet_fields:
+        type: object
+      facet_dates:
+        type: object
+      facet_ranges:
+        type: object
+      facet_intervals:
+        type: object
+      facet_heatmaps:
+        type: object
   SolrGeneDocument:
     required:
       - id
@@ -303,6 +313,8 @@ definitions:
       taxon_id:
         type: integer
         minimum: 0
+      score:
+        type: number
       biotype:
         type: string
         enum:
@@ -329,6 +341,4 @@ definitions:
           - "P_RNA"
           - "RNase_P_RNA"
           - "vault_RNA"
-  SolrSuggestionDocument:
-    required:
-      - asdf
+#  SolrSuggestionDocument:

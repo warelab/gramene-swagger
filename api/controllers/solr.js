@@ -9,15 +9,18 @@ module.exports = {
 };
 
 function genes(req, res) {
-  solrRequest(req, res, solrHelper.streamGenes);
+  solrRequest(req, res, solrHelper.streamGenes, {facet: true});
 }
 
 function suggestions(req, res) {
   solrRequest(req, res, solrHelper.streamSuggestions);
 }
 
-function solrRequest(req, res, streamMethod) {
+function solrRequest(req, res, streamMethod, additionalParams) {
   var params = _.mapValues(req.swagger.params, 'value');
+  if(additionalParams) {
+    _.assign(params, additionalParams);
+  }
   var solrStream = streamMethod(params);
 
   solrStream.pipe(res);
