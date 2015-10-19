@@ -10,7 +10,7 @@ describe('controllers', function() {
 
     describe('GET /hello', function() {
 
-      it('should return a default string', function(done) {
+      xit('should return a default string', function(done) {
 
         request(server)
           .get('/hello')
@@ -26,7 +26,7 @@ describe('controllers', function() {
           });
       });
 
-      it('should accept a name parameter', function(done) {
+      xit('should accept a name parameter', function(done) {
 
         request(server)
           .get('/hello')
