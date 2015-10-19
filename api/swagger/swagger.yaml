@@ -18,6 +18,22 @@ consumes:
 produces:
   - application/json
 paths:
+  /docs:
+    get:
+      summary: "Web site describing this API"
+      tags:
+        - "Swagger"
+      responses:
+        200:
+          description: "HTML documentation for this web service, powered by swagger."
+  /gramene.json:
+    get:
+      summary: "Get the Swagger JSON document describing services available from this web service."
+      tags:
+        - "Swagger"
+      responses:
+        200:
+          description: "YAML document"
   /ensembl: 
     get: 
       summary: "Proxy to Gramene's Ensembl REST installation"
