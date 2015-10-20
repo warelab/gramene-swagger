@@ -3,8 +3,8 @@
 var SwaggerExpress = require('swagger-express-mw');
 var express = require('express');
 var app = express();
-var fs = require('fs');
-var yaml = require('js-yaml');
+//var fs = require('fs');
+//var yaml = require('js-yaml');
 
 module.exports = app;
 
@@ -13,7 +13,7 @@ var config = {
 };
 
 // load the YAML-encoded schema. We will stream this out as JSON for swagger-ui
-var schema = yaml.load(fs.readFileSync(__dirname + '/api/swagger/swagger.yaml', 'utf8'));
+//var schema = yaml.load(fs.readFileSync(__dirname + '/api/swagger/swagger.yaml', 'utf8'));
 
 SwaggerExpress.create(config, function (err, swaggerExpress) {
   if (err) { throw err; }
@@ -28,14 +28,14 @@ SwaggerExpress.create(config, function (err, swaggerExpress) {
 
   // define routes
   app.get('/', function (req, res, next) { // redirect to /docs with the correct schema
-    res.redirect('/docs?url=/gramene.json');
+    res.redirect('/docs?url=/swagger');
   });
 
   app.use('/docs', express.static('node_modules/swagger-ui/dist'));
 
-  app.get('/gramene.json', function (req, res, next) { // return top level info
-    res.json(schema);
-  });
+  //app.get('/gramene.json', function (req, res, next) { // return top level info
+  //  res.json(schema);
+  //});
 
 });
 

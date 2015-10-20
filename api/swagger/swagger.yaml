@@ -1,9 +1,9 @@
 swagger: "2.0"
 info:
-  version: "0.0.1"
-  title: Gramene API
+  version: "0.48.0"
+  title: Gramene API for release 48
 # during dev, should point to your local machine
-host: localhost:10010
+#host: localhost:10010
 # basePath prefixes all resource paths 
 basePath: /
 # 
@@ -22,58 +22,50 @@ paths:
     get:
       summary: "Web site describing this API"
       tags:
-        - "Swagger"
+        - "API Documentation"
       responses:
         200:
           description: "HTML documentation for this web service, powered by swagger."
-  /gramene.json:
-    get:
-      summary: "Get the Swagger JSON document describing services available from this web service."
-      tags:
-        - "Swagger"
-      responses:
-        200:
-          description: "YAML document"
-  /ensembl: 
-    get: 
-      summary: "Proxy to Gramene's Ensembl REST installation"
-      description: "Please refer to rest.ensembl.org for documentation\n"
-      tags: 
-        - "Ensembl REST"
-      responses: 
-        200: 
-          description: "Ensembl REST response"
-  /reactome: 
-    get: 
-      summary: "Proxy to Gramene's Plant Reactome REST API"
-      description: "Reactome RESTful API <a href='http://reactomews.oicr.on.ca:8080/ReactomeRESTfulAPI/ReactomeRESTFulAPI.html'>documentation</a>"
-      tags: 
-        - "Plant Reactome REST"
-      responses: 
-        200: 
-          description: "plant reactome response"
-  /reactome/pathwayHierarchy/{species}: 
-    get: 
-      summary: "pathway hierarchy"
-      description: "Get the pathway hierarchy for a specified species as displayed in Reactome pathway browser."
-      tags: 
-        - "Plant Reactome REST"
-      produces: 
-        - "application/xml"
-      responses: 
-        200: 
-          description: "String - XML text containing pathways and reactions"
-      parameters: 
-        - 
-          name: "species"
-          in: "path"
-          description: "Full species name that should be encoded for URL (e.g. oryza+sativa, or zea+mays)"
-          type: "string"
-          required: true
+#  /ensembl:
+#    get:
+#      summary: "Proxy to Gramene's Ensembl REST installation"
+#      description: "Please refer to rest.ensembl.org for documentation\n"
+#      tags:
+#        - "Ensembl REST"
+#      responses:
+#        200:
+#          description: "Ensembl REST response"
+#  /reactome:
+#    get:
+#      summary: "Proxy to Gramene's Plant Reactome REST API"
+#      description: "Reactome RESTful API <a href='http://reactomews.oicr.on.ca:8080/ReactomeRESTfulAPI/ReactomeRESTFulAPI.html'>documentation</a>"
+#      tags:
+#        - "Plant Reactome REST"
+#      responses:
+#        200:
+#          description: "plant reactome response"
+#  /reactome/pathwayHierarchy/{species}:
+#    get:
+#      summary: "pathway hierarchy"
+#      description: "Get the pathway hierarchy for a specified species as displayed in Reactome pathway browser."
+#      tags:
+#        - "Plant Reactome REST"
+#      produces:
+#        - "application/xml"
+#      responses:
+#        200:
+#          description: "String - XML text containing pathways and reactions"
+#      parameters:
+#        -
+#          name: "species"
+#          in: "path"
+#          description: "Full species name that should be encoded for URL (e.g. oryza+sativa, or zea+mays)"
+#          type: "string"
+#          required: true
   /search:
     x-swagger-router-controller: solr
     get:
-      summary: "Genes"
+      summary: "Gramene Data"
       operationId: genes
       description: "This is the entry point for searching our solr genes core.\n"
       parameters:
@@ -120,7 +112,7 @@ paths:
           type: "integer"
           required: false
       tags:
-        - "Solr search"
+        - "Search"
       responses:
         200:
           description: "Solr response object"
@@ -152,7 +144,7 @@ paths:
           type: "integer"
           required: false
       tags:
-        - "Solr search"
+        - "Search"
       responses:
         200:
           description: "Solr response object"
@@ -222,30 +214,10 @@ paths:
             type: "string"
           required: false
       tags: 
-        - "MongoDB collections"
+        - "Data access"
       responses: 
         200:
           description: "MongoDB response object"
-
-  /hello:
-    # binds a127 app logic to a route
-    x-swagger-router-controller: hello_world
-    get:
-      description: Returns 'Hello' to the caller
-      # used as the method name of the controller
-      operationId: hello
-      parameters:
-        - name: name
-          in: query
-          description: The name of the person to whom to say hello
-          required: false
-          type: string
-      responses:
-        "200":
-          description: Success
-        # responses may fall through to errors
-        default:
-          description: Error
   /swagger:
     x-swagger-pipe: swagger_raw
 # complex objects have schema definitions
