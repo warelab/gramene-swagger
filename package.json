@@ -13,7 +13,6 @@
     "express": "^4.12.3",
     "gramene-mongodb-config": "^1.0.0",
     "isnumber": "^1.0.0",
-    "js-yaml": "^3.4.3",
     "lodash": "^3.10.1",
     "mongo-sanitize": "^1.0.0",
     "q": "^1.4.1",
