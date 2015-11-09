@@ -1,8 +1,9 @@
 'use strict';
 
 var request = require('request');
+var version = require('gramene-mongodb-config').getMongoConfig().version;
 
-var urlBase = 'http://brie:8946/solr/';
+var urlBase = 'http://brie:8983/solr/';
 
 module.exports = {
   streamGenes: streamGenes,
@@ -10,11 +11,11 @@ module.exports = {
 };
 
 function streamGenes(params) {
-  return solrStream(urlBase + 'newgenes/query', params);
+  return solrStream(urlBase + 'genes' + version + '/query', params);
 }
 
 function streamSuggestions(params) {
-  return solrStream(urlBase + 'suggestions/try', params);
+  return solrStream(urlBase + 'suggestions' + version + '/try', params);
 }
 
 function solrStream(uri, params) {
