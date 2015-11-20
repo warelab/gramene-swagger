@@ -60,16 +60,20 @@ function buildQuery(params, nonSchemaParams) {
     qExprs.push({'_id': {'$in': list}});
   }
 
-  qExprs.concat(_.map(nonSchemaParams, function(value, key) {
+  function maybeCastToNumber(x) {
+    return isNumber(x) ? +x : x;
+  }
+
+  _.forEach(nonSchemaParams, function(value, key) {
     var expr = {};
     if (Array.isArray(value)) {
-      expr[key] = {'$in': value.map(function (x) {return isNumber(x) ? +x : x;})};
+      expr[key] = {'$in': value.map(maybeCastToNumber)};
     }
     else {
-      expr[key] = value;
+      expr[key] = maybeCastToNumber(value);
     }
-    return expr;
-  }));
+    qExprs.push(expr);
+  });
 
   if (qExprs.length > 1) {
     result = {'$and': qExprs};
