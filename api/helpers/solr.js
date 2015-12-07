@@ -14,7 +14,7 @@ module.exports = {
 
 function streamGenes(params) {
   if (params.wt === 'bed') {
-    params.fl = ['region,start,end,strand,id'];
+    params.fl = ['region,start,end,strand,id,taxon_id'];
     params.wt = 'csv';
     params.sort = 'gene_idx asc';
     params.isBed = true;
@@ -39,6 +39,9 @@ function solrStream(uri, params) {
     else if (params.wt === 'json') {
       r.headers['content-type'] = 'application/json';
     }
+    else if (params.isBed) {
+      r.headers['content-type'] = 'text/tab-separated-values';
+    }
     else {
       r.headers['content-type'] = 'text/plain';
     }
@@ -51,8 +54,14 @@ function solrStream(uri, params) {
   if (params.isBed) {
     return stream.pipe(csv2()).pipe(through2.obj(function (chunk, enc, callback) {
       if (chunk[0] !== 'region') {
-        chunk[3] = (chunk[3] === '1') ? '+' : '-';
-        this.push(chunk.join('\t')+'\n');
+        var strand = (chunk[3] === '1') ? '+' : '-';
+        this.push(chunk[0]
+          +'\t'+chunk[1]
+          +'\t'+chunk[2]
+          +'\t'+chunk[4]
+          +'\t'+chunk[5]
+          +'\t'+strand
+          +'\n');
       }
       callback();
     }));
