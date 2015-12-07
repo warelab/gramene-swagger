@@ -45,9 +45,9 @@ function buildQuery(params, nonSchemaParams) {
   // location query
   if (params.l) {
     var a = params.l.split(':');
-    var m = a[0], r = a[1], s = a[2], e = a[3];
+    var t = a[0], r = a[1], s = a[2], e = a[3];
     qExprs.push(
-      {'location.map': m},
+      {'location.taxon_id': t},
       {'location.region': r},
       {'location.start': {'$lte': +e}},
       {'location.end': {'$gte': +s}});
