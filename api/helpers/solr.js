@@ -55,12 +55,13 @@ function solrStream(uri, params) {
     return stream.pipe(csv2()).pipe(through2.obj(function (chunk, enc, callback) {
       if (chunk[0] !== 'region') {
         var strand = (chunk[3] === '1') ? '+' : '-';
-        this.push(chunk[0]
-          +'\t'+chunk[1]
-          +'\t'+chunk[2]
-          +'\t'+chunk[4]
-          +'\t'+chunk[5]
-          +'\t'+strand
+        var start = chunk[1] - 1;
+        this.push(chunk[0] // chromosome (region)
+          +'\t'+start      // start
+          +'\t'+chunk[2]   // end
+          +'\t'+chunk[4]   // name
+          +'\t'+chunk[5]   // score (taxon_id)
+          +'\t'+strand     // strand
           +'\n');
       }
       callback();
