@@ -17,6 +17,8 @@ consumes:
 # format of the responses to the client (Accepts)
 produces:
   - application/json
+  - application/xml
+  - text/plain
 paths:
   /docs:
     get:
@@ -84,6 +86,17 @@ paths:
           items:
             type: "string"
         -
+          name: "wt"
+          in: "query"
+          description: "response format defaults to 'json'."
+          enum:
+            - "json"
+            - "xml"
+            - "csv"
+            - "bed"
+          type: "string"
+          required: false
+        - 
           name: "facet.field"
           in: "query"
           description: "Facet field parameters"

@@ -2,6 +2,8 @@
 
 var request = require('request');
 var version = require('gramene-mongodb-config').getMongoConfig().version;
+var through2 = require('through2');
+var csv2 = require('csv2');
 
 var urlBase = 'http://brie:8983/solr/';
 
@@ -11,6 +13,12 @@ module.exports = {
 };
 
 function streamGenes(params) {
+  if (params.wt === 'bed') {
+    params.fl = ['region,start,end,strand,id'];
+    params.wt = 'csv';
+    params.sort = 'gene_idx asc';
+    params.isBed = true;
+  }
   return solrStream(urlBase + 'genes' + version + '/query', params);
 }
 
@@ -25,13 +33,30 @@ function solrStream(uri, params) {
   // A call to res.contentType() in the controller
   // is overwritten by response stream from SOLR
   stream.on('response', function stripHeaders(r) {
-    r.headers['content-type'] = 'application/json';
+    if (params.wt === 'xml') {
+      r.headers['content-type'] = 'application/xml';
+    }
+    else if (params.wt === 'json') {
+      r.headers['content-type'] = 'application/json';
+    }
+    else {
+      r.headers['content-type'] = 'text/plain';
+    }
   });
 
   stream.on('error', function error(err) {
     console.log(err);
   });
-
+  
+  if (params.isBed) {
+    return stream.pipe(csv2()).pipe(through2.obj(function (chunk, enc, callback) {
+      if (chunk[0] !== 'region') {
+        chunk[3] = (chunk[3] === '1') ? '+' : '-';
+        this.push(chunk.join('\t')+'\n');
+      }
+      callback();
+    }));
+  }
   return stream;
 }
 
