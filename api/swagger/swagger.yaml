@@ -180,6 +180,7 @@ paths:
             - "taxonomy"
             - "GO"
             - "PO"
+            - "pathways"
           type: "string"
           required: true
         - 
