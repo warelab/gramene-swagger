@@ -3,7 +3,7 @@ info:
   version: "0.48.2"
   title: Gramene API for release 48
 # basePath prefixes all resource paths 
-basePath: /
+basePath: /48
 # during dev, should point to your local machine
 #host: localhost:10010/{basePath}
 # 

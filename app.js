@@ -32,7 +32,7 @@ SwaggerExpress.create(config, function (err, swaggerExpress) {
 
   // define routes
   app.get('/', function (req, res, next) { // redirect to /docs with the correct schema
-    res.redirect('/docs?url=/swagger');
+    res.redirect('/48/docs?url=/48/swagger');
   });
 
   app.use('/docs', express.static('node_modules/swagger-ui/dist'));
