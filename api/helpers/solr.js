@@ -33,18 +33,22 @@ function solrStream(uri, params) {
   // A call to res.contentType() in the controller
   // is overwritten by response stream from SOLR
   stream.on('response', function stripHeaders(r) {
-    if (params.wt === 'xml') {
-      r.headers['content-type'] = 'application/xml';
+    var type;
+    switch(params.wt) {
+      case 'xml':
+        type = 'application/xml';
+        break;
+      case 'json':
+        type = 'application/json';
+        break;
+      case 'bed':
+        type = 'text/tab-separated-values';
+        break;
+      default:
+        type = 'text/plain';
     }
-    else if (params.wt === 'json') {
-      r.headers['content-type'] = 'application/json';
-    }
-    else if (params.isBed) {
-      r.headers['content-type'] = 'text/tab-separated-values';
-    }
-    else {
-      r.headers['content-type'] = 'text/plain';
-    }
+
+    r.headers['content-type'] = type;
   });
 
   stream.on('error', function error(err) {
@@ -52,19 +56,19 @@ function solrStream(uri, params) {
   });
   
   if (params.isBed) {
-    return stream.pipe(csv2()).pipe(through2.obj(function (chunk, enc, callback) {
-      if (chunk[0] !== 'region') {
-        var strand = (chunk[3] === '1') ? '+' : '-';
-        var start = chunk[1] - 1;
-        this.push(chunk[0] // chromosome (region)
+    return stream.pipe(csv2()).pipe(through2.obj(function (values, enc, done) {
+      if (values[0] !== 'region') {
+        var strand = (values[3] === '1') ? '+' : '-';
+        var start = values[1] - 1;
+        this.push(values[0] // chromosome (region)
           +'\t'+start      // start
-          +'\t'+chunk[2]   // end
-          +'\t'+chunk[4]   // name
-          +'\t'+chunk[5]   // score (taxon_id)
+          +'\t'+values[2]   // end
+          +'\t'+values[4]   // name
+          +'\t'+values[5]   // score (taxon_id)
           +'\t'+strand     // strand
           +'\n');
       }
-      callback();
+      done();
     }));
   }
   return stream;
