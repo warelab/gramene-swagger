@@ -2,17 +2,16 @@
 
 var sanitize = require('mongo-sanitize')
   , isNumber = require("isnumber")
-  , collections = require('gramene-mongodb-config')
   , _ = require('lodash');
 
 module.exports = {
   cursorPromise: cursorPromise
 };
 
-function cursorPromise(params, nonSchemaParams) {
-  var mongoCollectionPromise = collections[params.collection].mongoCollection();
-  var query = buildQuery(params, nonSchemaParams);
-  var options = {};
+function cursorPromise(mongoCollectionPromise, params, nonSchemaParams) {
+  var query, options;
+  query = buildQuery(params, nonSchemaParams);
+  options = {};
 
   if (params.rows) {
     if (params.rows !== -1) options.limit = params.rows;
