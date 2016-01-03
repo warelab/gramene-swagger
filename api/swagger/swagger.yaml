@@ -19,6 +19,7 @@ produces:
   - application/json
   - application/xml
   - text/plain
+  - text/tab-separated-values
 paths:
   /docs:
     get:
@@ -229,6 +230,8 @@ paths:
       responses:
         200:
           description: "MongoDB response object"
+          schema:
+            $ref: "#/definitions/MongoMapsResponse"
   /domains:
     x-swagger-router-controller: mongo
     get:
@@ -247,6 +250,8 @@ paths:
       responses:
         200:
           description: "MongoDB response object"
+          schema:
+            $ref: "#/definitions/InterProResponse"
   /taxonomy:
     x-swagger-router-controller: mongo
     get:
@@ -265,6 +270,8 @@ paths:
       responses:
         200:
           description: "MongoDB response object"
+          schema:
+            $ref: "#/definitions/TaxonomyResponse"
   /GO:
     x-swagger-router-controller: mongo
     get:
@@ -283,6 +290,8 @@ paths:
       responses:
         200:
           description: "MongoDB response object"
+          schema:
+            $ref: "#/definitions/OntologyResponse"
   /PO:
     x-swagger-router-controller: mongo
     get:
@@ -301,6 +310,8 @@ paths:
       responses:
         200:
           description: "MongoDB response object"
+          schema:
+            $ref: "#/definitions/OntologyResponse"
   /pathways:
     x-swagger-router-controller: mongo
     get:
@@ -319,6 +330,8 @@ paths:
       responses:
         200:
           description: "MongoDB response object"
+          schema:
+            $ref: "#/definitions/ReactomeEntityResponse"
   /swagger:
     x-swagger-pipe: swagger_raw
 # complex objects have schema definitions
@@ -958,6 +971,242 @@ definitions:
           score:
             type: number
             minimum: 0.0
+
+  MongoMapsResponse:
+    required:
+      - _id
+      - db
+      - taxon_id
+      - system_name
+      - type
+      - length
+      - regions
+      - num_genes
+    properties:
+      _id:
+        type: string
+      db:
+        type: string
+      taxon_id:
+        type: integer
+        minimum: 0
+      system_name:
+        type: string
+      type:
+        type: string
+        enum:
+          - "genome"
+      length:
+        type: integer
+        minimum: 0
+      regions:
+        $ref: '#/definitions/Region'
+      num_genes:
+        type: integer
+        minimum: 0
+
+  Region:
+    required:
+      - names
+      - lengths
+    properties:
+      names:
+        type: array
+        items:
+          type: string
+      lengths:
+        type: array
+        items:
+          type: integer
+          minimum: 0
+
+  Term:
+    required:
+      - _id
+      - id
+      - name
+      - ancestors
+    properties:
+      _id:
+        type: integer
+      id:
+        type: string
+      name:
+        type: string
+      ancestors:
+        type: array
+        items:
+          type: integer
+
+  InterProResponse:
+    type: array
+    items:
+      $ref: '#/definitions/InterProDomain'
+
+  TaxonomyResponse:
+    type: array
+    items:
+      $ref: '#/definitions/Taxon'
+
+  OntologyResponse:
+    type: array
+    items:
+      $ref: '#/definitions/OntologyTerm'
+
+  ReactomeEntityResponse:
+    type: array
+    items:
+      $ref: '#/definitions/ReactomeEntity'
+
+  InterProDomain:
+    allOf:
+      - $ref: '#/definitions/Term'
+      -
+        required:
+          - parents
+          - type
+          - description
+          - abstract
+          - PFAM
+          - PROFILE
+          - SMART
+          - PANDIT
+          - MSDsite
+          - BLOCKS
+          - PROSITEDOC
+          - PDB
+          - CATH
+          - SCOP
+        properties:
+          parents:
+            type: array
+            items:
+              type: integer
+          type:
+            type: string
+          description:
+            type: string
+          abstract:
+            type: string
+          PFAM:
+            type: string
+          PROFILE:
+            type: string
+          SMART:
+            type: string
+          PANDIT:
+            type: string
+          MSDsite:
+            type: string
+          BLOCKS:
+            type: string
+          PROSITEDOC:
+            type: string
+          PDB:
+            type: array
+            items:
+              type: string
+          CATH:
+            type: array
+            items:
+              type: string
+          SCOP:
+            type: array
+            items:
+              type: string
+
+  Taxon:
+    allOf:
+      - $ref: '#/definitions/Term'
+      -
+        required:
+          - xref
+          - synonym
+          - namespace
+        properties:
+           namespace:
+             type: string
+           synonym:
+             type: array
+             items:
+               type: string
+           xref:
+             type: array
+             items:
+               type: string
+  OntologyTerm:
+    allOf:
+      - $ref: '#/definitions/Term'
+      -
+        required:
+          - synonym
+          - is_a
+          - namespace
+          - def
+          - comment
+        properties:
+          synonym:
+            type: array
+            items:
+              type: string
+          is_a:
+            type: array
+            items:
+              type: integer
+          namespace:
+            type: string
+          def:
+            type: string
+          relationship:
+            type: array
+            items:
+              type: string
+          subset:
+            type: array
+            items:
+              type: string
+          is_obsolete:
+            type: string
+            enum:
+              - "1"
+          consider:
+            type: array
+            items:
+              type: integer
+          comment:
+            type: array
+            items:
+              type: string
+
+  ReactomeEntity:
+    allOf:
+      - $ref: '#/definitions/Term'
+      -
+        required:
+          - lineage
+          - type
+          - parents
+          - synonyms
+        properties:
+          lineage:
+            type: array
+            items:
+              type: array
+              items:
+                type: integer
+          type:
+            type: string
+          parents:
+            type: array
+            items:
+              type: integer
+          synonyms:
+            type: array
+            items:
+              type: string
+
+
+
 parameters:
   q:
     name: "q"
