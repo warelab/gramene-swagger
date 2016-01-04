@@ -139,7 +139,7 @@ paths:
         200:
           description: "Gene search response object"
           schema:
-            $ref: "#/definitions/SolrGeneResponse"
+            $ref: "#/definitions/SearchResponse"
   /suggest:
     x-swagger-router-controller: solr
     get:
@@ -336,7 +336,7 @@ paths:
     x-swagger-pipe: swagger_raw
 # complex objects have schema definitions
 definitions:
-  SolrResponseHeader:
+  ResponseHeader:
     required:
      - status
      - QTime
@@ -348,7 +348,7 @@ definitions:
         type: integer
       params:
         type: object
-  SolrSuggestDocument:
+  Suggestion:
     required:
      - category
      - id
@@ -374,7 +374,7 @@ definitions:
       score:
         type: number
         minimum: 0
-  SolrSuggestDoclist:
+  Suggestions:
     required:
       - docs
       - maxScore
@@ -384,7 +384,7 @@ definitions:
       docs:
         type: array
         items:
-          $ref: "#/definitions/SolrSuggestDocument"
+          $ref: "#/definitions/Suggestion"
       maxScore:
         type: number
         minimum: 0.0
@@ -394,7 +394,7 @@ definitions:
       start:
         type: integer
         minimum: 0
-  SolrSuggestGroups:
+  SuggestionType:
     required:
      - groupValue
      - doclist
@@ -402,8 +402,8 @@ definitions:
       groupValue:
         type: string
       doclist:
-        $ref: "#/definitions/SolrSuggestDoclist"
-  SolrSuggestCategory:
+        $ref: "#/definitions/Suggestions"
+  Category:
     type: object
     required:
      - matches
@@ -414,23 +414,23 @@ definitions:
       groups:
         type: array
         items:
-          $ref: "#/definitions/SolrSuggestGroups"
-  SolrSuggestGrouped:
+          $ref: "#/definitions/SuggestionType"
+  GroupedBy:
     required:
      - category
     properties:
       category:
-        $ref: "#/definitions/SolrSuggestCategory"
+        $ref: "#/definitions/Category"
   SolrSuggestResponse:
     required:
      - responseHeader
      - grouped
     properties:
       responseHeader:
-        $ref: "#/definitions/SolrResponseHeader"
+        $ref: "#/definitions/ResponseHeader"
       grouped:
-        $ref: "#/definitions/SolrSuggestGrouped"
-  SolrGeneDocument:
+        $ref: "#/definitions/GroupedBy"
+  Result:
     required:
       - id
       - name
@@ -477,7 +477,7 @@ definitions:
     properties:
       facet_fields:
         type: object
-  SolrGeneResponseBody:
+  Results:
     required:
       - start
       - maxScore
@@ -492,16 +492,16 @@ definitions:
       docs:
         type: array
         items:
-          $ref: "#/definitions/SolrGeneDocument"
-  SolrGeneResponse:
+          $ref: "#/definitions/Result"
+  SearchResponse:
     required:
      - responseHeader
      - response
     properties:
       responseHeader:
-        $ref: "#/definitions/SolrResponseHeader"
+        $ref: "#/definitions/ResponseHeader"
       response:
-        $ref: "#/definitions/SolrGeneResponseBody"
+        $ref: "#/definitions/Results"
       facet_counts:
         $ref: "#/definitions/SolrFacetDocument"
 
