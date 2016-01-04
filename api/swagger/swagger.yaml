@@ -332,6 +332,26 @@ paths:
           description: "MongoDB response object"
           schema:
             $ref: "#/definitions/ReactomeEntityResponse"
+
+  /{collection}:
+    x-swagger-router-controller: mongo
+    get:
+      summary: "MongoDB"
+      operationId: get
+      description: "Legacy method for backward-compatibility. No schema specified for response document."
+      parameters:
+        - $ref: "#/parameters/collection"
+        - $ref: "#/parameters/q"
+        - $ref: "#/parameters/rows"
+        - $ref: "#/parameters/start"
+        - $ref: "#/parameters/fl"
+        - $ref: "#/parameters/wt"
+        - $ref: "#/parameters/idList"
+      tags:
+        - "Data access"
+      responses:
+        200:
+          description: "MongoDB response object"
   /swagger:
     x-swagger-pipe: swagger_raw
 # complex objects have schema definitions
@@ -1252,3 +1272,17 @@ parameters:
     items:
       type: "string"
     required: false
+  collection:
+    name: "collection"
+    in: "path"
+    description: "name of collection"
+    enum:
+      - "genes"
+      - "genetrees"
+      - "maps"
+      - "domains"
+      - "taxonomy"
+      - "GO"
+      - "PO"
+    type: "string"
+    required: true

@@ -6,17 +6,29 @@ var mongoCollections = require('gramene-mongodb-config');
 var JSONStream = require('JSONStream');
 var csvStringify = require('csv-stringify');
 
-//module.exports = {
-//  get: get
-//};
+(function init() {
+  var toExport = {};
 
-// add a function to the controller for each mongo collection.
-_.forOwn(mongoCollections, function(coll, name) {
-  module.exports[name] = getFactory(coll.mongoCollection());
-});
+  // add a function to the controller for each mongo collection.
+  _.forOwn(mongoCollections, function (coll, name) {
+    toExport[name] = getFactory(coll.mongoCollection());
+  });
+
+  module.exports.get = function get(req, res) {
+    var collection, toCall;
+    collection = req.swagger.params.collection;
+    toCall = toExport[collection];
+    if (!toCall) {
+      throw new Error("Required parameter `collection` not an allowed value");
+    }
+    return toCall(req, res);
+  };
+
+  module.exports = toExport;
+}());
 
 function getFactory(collectionPromise) {
-  return function get(req, res) {
+  return function _get(req, res) {
     var params, nonSchemaParams, returnCsv,
       cursorPromise, transformer, mimetype;
 
