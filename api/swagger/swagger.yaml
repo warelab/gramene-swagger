@@ -1,6 +1,6 @@
 swagger: "2.0"
 info:
-  version: "0.49.2"
+  version: "0.49.3"
   title: Gramene API for release 49
 # basePath prefixes all resource paths
 basePath: /
