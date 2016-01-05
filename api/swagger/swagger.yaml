@@ -775,7 +775,6 @@ definitions:
   GeneRepresentative:
     required:
       - id
-      - name
       - description
       - taxon_id
     properties:
