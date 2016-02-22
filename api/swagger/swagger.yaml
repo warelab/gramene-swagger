@@ -534,6 +534,7 @@ definitions:
       - system_name
       - biotype
       - db_type
+      - gene_idx
       - location
       - gene_structure
       - annotations
@@ -553,6 +554,9 @@ definitions:
         items:
           type: string
       taxon_id:
+        type: integer
+        minimum: 0
+      gene_idx:
         type: integer
         minimum: 0
       system_name:
