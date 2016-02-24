@@ -989,7 +989,6 @@ definitions:
             type: string
           score:
             type: number
-            minimum: 0.0
 
   MongoMapsResponse:
     required:
