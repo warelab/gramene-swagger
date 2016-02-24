@@ -1,6 +1,6 @@
 swagger: "2.0"
 info:
-  version: "0.49.2"
+  version: "0.49.3"
   title: Gramene API for release 49
 # basePath prefixes all resource paths
 basePath: /
@@ -19,6 +19,7 @@ produces:
   - application/json
   - application/xml
   - text/plain
+  - text/tab-separated-values
 paths:
   /docs:
     get:
@@ -30,7 +31,7 @@ paths:
           description: "HTML documentation for this web service, powered by swagger."
 #  /ensembl:
 #    get:
-#      summary: "Proxy to Gramene's Ensembl REST installation"
+#      summary: "Proxy to Gramenes Ensembl REST installation"
 #      description: "Please refer to rest.ensembl.org for documentation\n"
 #      tags:
 #        - "Ensembl REST"
@@ -39,8 +40,8 @@ paths:
 #          description: "Ensembl REST response"
 #  /reactome:
 #    get:
-#      summary: "Proxy to Gramene's Plant Reactome REST API"
-#      description: "Reactome RESTful API <a href='http://reactomews.oicr.on.ca:8080/ReactomeRESTfulAPI/ReactomeRESTFulAPI.html'>documentation</a>"
+#      summary: "Proxy to Gramenes Plant Reactome REST API"
+#      description: "Reactome RESTful API <a href=http://reactomews.oicr.on.ca:8080/ReactomeRESTfulAPI/ReactomeRESTFulAPI.html>documentation</a>"
 #      tags:
 #        - "Plant Reactome REST"
 #      responses:
@@ -88,7 +89,7 @@ paths:
         -
           name: "wt"
           in: "query"
-          description: "response format defaults to 'json'."
+          description: "response format defaults to json."
           enum:
             - "json"
             - "xml"
@@ -136,9 +137,9 @@ paths:
         - "Search"
       responses:
         200:
-          description: "Solr response object"
+          description: "Gene search response object"
           schema:
-            $ref: "#/definitions/SolrGeneResponse"
+            $ref: "#/definitions/SearchResponse"
   /suggest:
     x-swagger-router-controller: solr
     get:
@@ -168,105 +169,335 @@ paths:
         - "Search"
       responses:
         200:
-          description: "Solr response object"
-  /{collection}:
+          description: "Suggest response"
+          schema:
+            $ref: "#/definitions/SolrSuggestResponse"
+  /genes:
     x-swagger-router-controller: mongo
     get: 
       summary: "MongoDB"
-      operationId: get
+      operationId: genes
       description: "Fetch documents from a collection"
-      parameters: 
-        - 
-          name: "collection"
-          in: "path"
-          description: "name of collection"
-          enum: 
-            - "genes"
-            - "genetrees"
-            - "maps"
-            - "domains"
-            - "taxonomy"
-            - "GO"
-            - "PO"
-          type: "string"
-          required: true
-        - 
-          name: "q"
-          in: "query"
-          description: "string for free text search"
-          type: "string"
-          required: false
-        - 
-          name: "rows"
-          in: "query"
-          description: "number of rows to return (default: 20)"
-          type: "integer"
-          required: false
-        - 
-          name: "start"
-          in: "query"
-          description: "offset into results list"
-          type: "integer"
-          required: false
-        - 
-          name: "fl"
-          in: "query"
-          description: "list of fields to return"
-          type: "array"
-          items:
-            type: "string"
-          required: false
-        - 
-          name: "wt"
-          in: "query"
-          description: "response format, if `fl` is specified, this value may be either 'tab' or 'json'. If `fl` is not specified, this parameter is ignored and JSON documents are always returned."
-          enum:
-            - "json"
-            - "tab"
-            - ""
-          type: "string"
-          required: false
-        - 
-          name: "idList"
-          in: "query"
-          description: "a comma separated list of document ids"
-          type: "array"
-          items:
-            type: "string"
-          required: false
-      tags: 
+      parameters:
+        - $ref: "#/parameters/q"
+        - $ref: "#/parameters/rows"
+        - $ref: "#/parameters/start"
+        - $ref: "#/parameters/fl"
+        - $ref: "#/parameters/wt"
+        - $ref: "#/parameters/idList"
+      tags:
         - "Data access"
       responses: 
+        200:
+          description: "MongoDB response object"
+          schema:
+            $ref: "#/definitions/MongoGenesResponse"
+  /genetrees:
+    x-swagger-router-controller: mongo
+    get:
+      summary: "MongoDB"
+      operationId: genetrees
+      description: "Fetch documents from a collection"
+      parameters:
+        - $ref: "#/parameters/q"
+        - $ref: "#/parameters/rows"
+        - $ref: "#/parameters/start"
+        - $ref: "#/parameters/fl"
+        - $ref: "#/parameters/wt"
+        - $ref: "#/parameters/idList"
+      tags:
+        - "Data access"
+      responses:
+        200:
+          description: "MongoDB response object"
+          schema:
+            $ref: "#/definitions/MongoGenetreesResponse"
+  /maps:
+    x-swagger-router-controller: mongo
+    get:
+      summary: "MongoDB"
+      operationId: maps
+      description: "Fetch documents from a collection"
+      parameters:
+        - $ref: "#/parameters/q"
+        - $ref: "#/parameters/rows"
+        - $ref: "#/parameters/start"
+        - $ref: "#/parameters/fl"
+        - $ref: "#/parameters/wt"
+        - $ref: "#/parameters/idList"
+      tags:
+        - "Data access"
+      responses:
+        200:
+          description: "MongoDB response object"
+          schema:
+            $ref: "#/definitions/MongoMapsResponse"
+  /domains:
+    x-swagger-router-controller: mongo
+    get:
+      summary: "MongoDB"
+      operationId: domains
+      description: "Fetch documents from a collection"
+      parameters:
+        - $ref: "#/parameters/q"
+        - $ref: "#/parameters/rows"
+        - $ref: "#/parameters/start"
+        - $ref: "#/parameters/fl"
+        - $ref: "#/parameters/wt"
+        - $ref: "#/parameters/idList"
+      tags:
+        - "Data access"
+      responses:
+        200:
+          description: "MongoDB response object"
+          schema:
+            $ref: "#/definitions/InterProResponse"
+  /taxonomy:
+    x-swagger-router-controller: mongo
+    get:
+      summary: "MongoDB"
+      operationId: taxonomy
+      description: "Fetch documents from a collection"
+      parameters:
+        - $ref: "#/parameters/q"
+        - $ref: "#/parameters/rows"
+        - $ref: "#/parameters/start"
+        - $ref: "#/parameters/fl"
+        - $ref: "#/parameters/wt"
+        - $ref: "#/parameters/idList"
+      tags:
+        - "Data access"
+      responses:
+        200:
+          description: "MongoDB response object"
+          schema:
+            $ref: "#/definitions/TaxonomyResponse"
+  /GO:
+    x-swagger-router-controller: mongo
+    get:
+      summary: "MongoDB"
+      operationId: GO
+      description: "Fetch documents from a collection"
+      parameters:
+        - $ref: "#/parameters/q"
+        - $ref: "#/parameters/rows"
+        - $ref: "#/parameters/start"
+        - $ref: "#/parameters/fl"
+        - $ref: "#/parameters/wt"
+        - $ref: "#/parameters/idList"
+      tags:
+        - "Data access"
+      responses:
+        200:
+          description: "MongoDB response object"
+          schema:
+            $ref: "#/definitions/OntologyResponse"
+  /PO:
+    x-swagger-router-controller: mongo
+    get:
+      summary: "MongoDB"
+      operationId: PO
+      description: "Fetch documents from a collection"
+      parameters:
+        - $ref: "#/parameters/q"
+        - $ref: "#/parameters/rows"
+        - $ref: "#/parameters/start"
+        - $ref: "#/parameters/fl"
+        - $ref: "#/parameters/wt"
+        - $ref: "#/parameters/idList"
+      tags:
+        - "Data access"
+      responses:
+        200:
+          description: "MongoDB response object"
+          schema:
+            $ref: "#/definitions/OntologyResponse"
+  /pathways:
+    x-swagger-router-controller: mongo
+    get:
+      summary: "MongoDB"
+      operationId: pathways
+      description: "Fetch documents from a collection"
+      parameters:
+        - $ref: "#/parameters/q"
+        - $ref: "#/parameters/rows"
+        - $ref: "#/parameters/start"
+        - $ref: "#/parameters/fl"
+        - $ref: "#/parameters/wt"
+        - $ref: "#/parameters/idList"
+      tags:
+        - "Data access"
+      responses:
+        200:
+          description: "MongoDB response object"
+          schema:
+            $ref: "#/definitions/ReactomeEntityResponse"
+
+  /{collection}:
+    x-swagger-router-controller: mongo
+    get:
+      summary: "MongoDB"
+      operationId: get
+      description: "Legacy method for backward-compatibility. No schema specified for response document."
+      parameters:
+        - $ref: "#/parameters/collection"
+        - $ref: "#/parameters/q"
+        - $ref: "#/parameters/rows"
+        - $ref: "#/parameters/start"
+        - $ref: "#/parameters/fl"
+        - $ref: "#/parameters/wt"
+        - $ref: "#/parameters/idList"
+      tags:
+        - "Data access"
+      responses:
         200:
           description: "MongoDB response object"
   /swagger:
     x-swagger-pipe: swagger_raw
 # complex objects have schema definitions
 definitions:
-  SolrGeneResponse:
-    required:
-     - responseHeader
-     - response
-    properties:
-      responseHeader:
-        type: object
-        $ref: '#/definitions/SolrResponseHeader'
-      response:
-        type: object
-        $ref: '#/definitions/SolrGeneResponseBody'
-      facet_counts:
-        type: object
-        $ref: '#/definitions/SolrFacetDocument'
-  SolrResponseHeader:
+  ResponseHeader:
     required:
      - status
      - QTime
+     - params
     properties:
       status:
         type: integer
       QTime:
         type: integer
-  SolrGeneResponseBody:
+      params:
+        type: object
+  Suggestion:
+    required:
+     - category
+     - id
+     - fq_field
+     - fq_value
+     - display_name
+     - num_genes
+     - score
+    properties:
+      category:
+        type: string
+      fq_field:
+        type: string
+      fq_value:
+        type: string
+      id:
+        type: string
+      display_name:
+        type: string
+      num_genes:
+        type: integer
+        minimum: 0
+      score:
+        type: number
+        minimum: 0
+  Suggestions:
+    required:
+      - docs
+      - maxScore
+      - numFound
+      - start
+    properties:
+      docs:
+        type: array
+        items:
+          $ref: "#/definitions/Suggestion"
+      maxScore:
+        type: number
+        minimum: 0.0
+      numFound:
+        type: integer
+        minimum: 0
+      start:
+        type: integer
+        minimum: 0
+  SuggestionType:
+    required:
+     - groupValue
+     - doclist
+    properties:
+      groupValue:
+        type: string
+      doclist:
+        $ref: "#/definitions/Suggestions"
+  Category:
+    type: object
+    required:
+     - matches
+     - groups
+    properties:
+      matches:
+        type: integer
+      groups:
+        type: array
+        items:
+          $ref: "#/definitions/SuggestionType"
+  GroupedBy:
+    required:
+     - category
+    properties:
+      category:
+        $ref: "#/definitions/Category"
+  SolrSuggestResponse:
+    required:
+     - responseHeader
+     - grouped
+    properties:
+      responseHeader:
+        $ref: "#/definitions/ResponseHeader"
+      grouped:
+        $ref: "#/definitions/GroupedBy"
+  Result:
+    required:
+      - id
+      - name
+      - description
+      - taxon_id
+      - biotype
+      - score
+      - capabilities
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+      description:
+        type: string
+      taxon_id:
+        type: integer
+        minimum: 0
+      score:
+        type: number
+      closest_rep_id:
+        type: string
+      closest_rep_name:
+        type: string
+      closest_rep_taxon_id:
+        type: integer
+      closest_rep_description:
+        type: string
+      model_rep_id:
+        type: string
+      model_rep_name:
+        type: string
+      model_rep_taxon_id:
+        type: integer
+      model_rep_description:
+        type: string
+      capabilities:
+        $ref: "#/definitions/capabilities"
+      biotype:
+        $ref: "#/definitions/biotype"
+  SolrFacetDocument:
+    required:
+      - facet_fields
+    properties:
+      facet_fields:
+        type: object
+  Results:
     required:
       - start
       - maxScore
@@ -281,39 +512,273 @@ definitions:
       docs:
         type: array
         items:
-          type: object
-          $ref: '#/definitions/SolrGeneDocument'
-  SolrFacetDocument:
+          $ref: "#/definitions/Result"
+  SearchResponse:
     required:
-      - facet_queries
-      - facet_fields
-      - facet_dates
-      - facet_ranges
-      - facet_intervals
-      - facet_heatmaps
+     - responseHeader
+     - response
     properties:
-      facet_queries:
-        type: object
-      facet_fields:
-        type: object
-      facet_dates:
-        type: object
-      facet_ranges:
-        type: object
-      facet_intervals:
-        type: object
-      facet_heatmaps:
-        type: object
-  SolrGeneDocument:
+      responseHeader:
+        $ref: "#/definitions/ResponseHeader"
+      response:
+        $ref: "#/definitions/Results"
+      facet_counts:
+        $ref: "#/definitions/SolrFacetDocument"
+
+  GeneDocument:
     required:
-      - id
+      - _id
       - name
       - description
       - taxon_id
+      - system_name
       - biotype
-      - score
+      - db_type
+      - location
+
     properties:
-      id:
+      _id:
+        type: string
+      name:
+        type: string
+      description:
+        type: string
+      db_type:
+        type: string
+      synonyms:
+        type: array
+        items:
+          type: string
+      taxon_id:
+        type: integer
+        minimum: 0
+      system_name:
+        type: string
+      biotype:
+        $ref: "#/definitions/biotype"
+      epl_gene_tree:
+        type: string
+      grm_gene_tree:
+        type: string
+      grm_gene_tree_root_taxon_id:
+        type: integer
+        minimum: 0
+      ancestors:
+        $ref: "#/definitions/GeneAncestors"
+      bins:
+        $ref: "#/definitions/GeneBins"
+      canonical_transcript:
+        $ref: "#/definitions/GeneTranscript"
+      canonical_translation:
+        $ref: "#/definitions/GeneTranslation"
+      homology:
+        $ref: "#/definitions/GeneHomology"
+      location:
+        $ref: "#/definitions/GeneLocation"
+      representative:
+        $ref: "#/definitions/GeneRepresentatives"
+      xrefs:
+        $ref: "#/definitions/GeneXrefs"
+  GeneAncestors:
+    properties:
+      GO:
+        $ref: "#/definitions/int_id_list"
+      PO:
+        $ref: "#/definitions/int_id_list"
+      domains:
+        $ref: "#/definitions/int_id_list"
+      gene_family:
+        $ref: "#/definitions/int_id_list"
+      taxonomy:
+        $ref: "#/definitions/int_id_list"
+
+  GeneBins:
+    required:
+      - fixed_100
+      - fixed_200
+      - fixed_500
+      - fixed_1000
+      - uniform_1Mb
+      - uniform_2Mb
+      - uniform_5Mb
+      - uniform_10Mb
+    properties:
+      fixed_100:
+        type: integer
+        minimum: 0
+      fixed_200:
+        type: integer
+        minimum: 0
+      fixed_500:
+        type: integer
+        minimum: 0
+      fixed_1000:
+        type: integer
+        minimum: 0
+      uniform_1Mb:
+        type: integer
+        minimum: 0
+      uniform_2Mb:
+        type: integer
+        minimum: 0
+      uniform_5Mb:
+        type: integer
+        minimum: 0
+      uniform_10Mb:
+        type: integer
+        minimum: 0
+
+  GeneTranscript:
+    required:
+      - CDS
+      - exons
+      - exon_junctions
+      - length
+      - name
+    properties:
+      CDS:
+        $ref: "#/definitions/int_range"
+      exons:
+        type: array
+        items:
+          $ref: "#/definitions/int_range"
+      exon_junctions:
+        type: array
+        items:
+          type: integer
+          minimum: 0
+      length:
+        type: integer
+        minimum: 0
+      name:
+        type: string
+
+  GeneTranslation:
+    required:
+      - name
+      - avg_res_weight
+      - charge
+      - iso_point
+      - length
+      - molecular_weight
+      - domain_roots
+      - features
+    properties:
+      name:
+        type: string
+      avg_res_weight:
+        type: number
+      charge:
+        type: integer
+      iso_point:
+        type: number
+        minimum: 0.0
+        maximum: 14.0
+      length:
+        type: integer
+        minimum: 1
+      molecular_weight:
+        type: number
+        minimum: 0.0
+      domain_roots:
+        type: string
+      features:
+        $ref: "#/definitions/TranslationFeatures"
+
+  TranslationFeatures:
+    properties:
+      domain_architecture:
+        type: array
+        items:
+          $ref: "#/definitions/InterProInstance"
+
+  InterProInstance:
+    allOf:
+      - $ref: "#/definitions/DomainInstance"
+      - required:
+          - members
+          - root
+        properties:
+          members:
+            type: array
+            items:
+              $ref: "#/definitions/DomainInstance"
+          root:
+            type: string
+
+  DomainInstance:
+    allOf:
+      - $ref: "#/definitions/int_range"
+      - required:
+          - name
+          - description
+          - interpro
+        properties:
+          name:
+            type: string
+          description:
+            type: string
+          interpro:
+            type: string
+
+  GeneHomology:
+    properties:
+      ortholog_one2one:
+        $ref: '#/definitions/string_list'
+      ortholog_one2many:
+        $ref: '#/definitions/string_list'
+      ortholog_many2many:
+        $ref: '#/definitions/string_list'
+      within_species_paralog:
+        $ref: '#/definitions/string_list'
+      other_paralog:
+        $ref: '#/definitions/string_list'
+      gene_split:
+        $ref: '#/definitions/string_list'
+      between_species_paralog:
+        $ref: '#/definitions/string_list'
+      alt_allele:
+        $ref: '#/definitions/string_list'
+      homoeolog_one2one:
+        $ref: '#/definitions/string_list'
+      homoeolog_one2many:
+        $ref: '#/definitions/string_list'
+      homoeolog_many2many:
+        $ref: '#/definitions/string_list'
+
+  GeneLocation:
+    allOf:
+      - $ref: '#/definitions/int_range'
+      -
+        required:
+         - map
+         - region
+         - strand
+        properties:
+          map:
+            type: string
+          region:
+            type: string
+          strand:
+            type: integer
+            enum:
+              - 1
+              - -1
+
+  GeneRepresentatives:
+    properties:
+      closest:
+        $ref: '#/definitions/GeneRepresentative'
+      model:
+        $ref: '#/definitions/GeneRepresentative'
+  
+  GeneRepresentative:
+    required:
+      - id
+      - description
+      - taxon_id
+    properties:
+      id: 
         type: string
       name:
         type: string
@@ -321,33 +786,502 @@ definitions:
         type: string
       taxon_id:
         type: integer
+
+  GeneXrefs:
+    properties:
+      # taken from gramene-dbxrefs project v3.0.1
+      TAIR_LOCUS:
+        $ref: '#/definitions/string_list'
+      ARAPORT_GENE:
+        $ref: '#/definitions/string_list'
+      UniGene:
+        $ref: '#/definitions/string_list'
+      UniParc:
+        $ref: '#/definitions/string_list'
+      protein_id:
+        $ref: '#/definitions/string_list'
+      EMBL:
+        $ref: '#/definitions/string_list'
+      KEGG_Enzyme:
+        $ref: '#/definitions/string_list'
+      UniPathway:
+        $ref: '#/definitions/string_list'
+      MetaCyc:
+        $ref: '#/definitions/string_list'
+      MEROPS:
+        $ref: '#/definitions/string_list'
+      PDB:
+        $ref: '#/definitions/string_list'
+      GOA:
+        $ref: '#/definitions/string_list'
+      IntEnz:
+        $ref: '#/definitions/string_list'
+
+
+  MongoGenesResponse:
+    type: array
+    items:
+      $ref: '#/definitions/GeneDocument'
+
+  biotype:
+    type: string
+    enum:
+      - "protein_coding"
+      - "miRNA"
+      - "ncRNA"
+      - "low_confidence"
+      - "transposable_element"
+      - "snoRNA"
+      - "tRNA"
+      - "misc_RNA"
+      - "undefined"
+      - "pseudogene"
+      - "tRNA_pseudogene"
+      - "nontranslating_CDS"
+      - "snRNA"
+      - "rRNA"
+      - "antisense"
+      - "SRP_RNA"
+      - "tmRNA"
+      - "ribozyme"
+      - "RNase_MRP_RNA"
+      - "telomerase_RNA"
+      - "P_RNA"
+      - "RNase_P_RNA"
+      - "vault_RNA"
+
+  capabilities:
+    type: array
+    items:
+      type: string
+      enum:
+       - "homology"
+       - "xrefs"
+       - "GO"
+       - "domains"
+       - "taxonomy"
+       - "PO"
+       - "pathways"
+       - "location"
+
+  int_range:
+    required:
+      - start
+      - end
+    properties:
+      start:
+        type: integer
+      end:
+        type: integer
+
+  string_list:
+    type: array
+    items:
+      type: string
+
+  int_id_list:
+    type: array
+    items:
+      type: integer
+      minimum: 0
+
+  MongoGenetreesResponse:
+    type: 'array'
+    items:
+      $ref: '#/definitions/GenetreeRootNode'
+
+  GenetreeRootNode:
+    allOf:
+      - $ref: '#/definitions/GenetreeNode'
+      -
+        required:
+          - root_id
+          - tree_id
+          - tree_stable_id
+          - tree_type
+        properties:
+          root_id:
+            type: integer
+            minimum: 0
+          tree_id:
+            type: string
+          tree_stable_id:
+            type: string
+          tree_type:
+            type: string
+            enum:
+              - 'tree'
+              - 'supertree'
+  GenetreeNode:
+    allOf:
+      - $ref: '#/definitions/GenetreeInternalNode'
+      - $ref: '#/definitions/GenetreeLeafNode'
+      -
+        required:
+          - node_id
+          - distance_to_parent
+          - left_index
+          - right_index
+        properties:
+          node_id:
+            type: integer
+            minimum: 0
+          distance_to_parent:
+            type: number
+            minimum: 0.0
+          left_index:
+            type: integer
+            minimum: 0
+          right_index:
+            type: integer
+            minimum: 0
+
+  GenetreeInternalNode:
+    properties:
+      node_taxon_id:
+        type: integer
         minimum: 0
-      score:
-        type: number
-      biotype:
+      node_taxon:
+        type: string
+      node_type:
         type: string
         enum:
-          - "protein_coding"
-          - "miRNA"
-          - "ncRNA"
-          - "low_confidence"
-          - "transposable_element"
-          - "snoRNA"
-          - "tRNA"
-          - "misc_RNA"
-          - "undefined"
-          - "pseudogene"
-          - "tRNA_pseudogene"
-          - "nontranslating_CDS"
-          - "snRNA"
-          - "rRNA"
-          - "antisense"
-          - "SRP_RNA"
-          - "tmRNA"
-          - "ribozyme"
-          - "RNase_MRP_RNA"
-          - "telomerase_RNA"
-          - "P_RNA"
-          - "RNase_P_RNA"
-          - "vault_RNA"
-#  SolrSuggestionDocument:
+          - "duplication"
+          - "speciation"
+          - "dubious"
+          - "gene_split"
+      bootstrap:
+        type: integer
+        minimum: 0
+        maximum: 100
+      duplication_confidence_score:
+        type: number
+      children:
+        type: array
+        items:
+          $ref: '#/definitions/GenetreeNode'
+
+  GenetreeLeafNode:
+    properties:
+      protein_stable_id:
+        type: string
+      gene_stable_id:
+        type: string
+      gene_description:
+        type: string
+      cigar:
+        type: string
+      sequence:
+        type: string
+      taxon_id:
+        type: integer
+        minimum: 0
+      system_name:
+        type: string
+      assembly:
+        type: string
+      representative:
+        required:
+          - id
+          - score
+        properties:
+          id:
+            type: string
+          score:
+            type: number
+            minimum: 0.0
+
+  MongoMapsResponse:
+    required:
+      - _id
+      - db
+      - taxon_id
+      - system_name
+      - type
+      - length
+      - regions
+      - num_genes
+    properties:
+      _id:
+        type: string
+      db:
+        type: string
+      taxon_id:
+        type: integer
+        minimum: 0
+      system_name:
+        type: string
+      type:
+        type: string
+        enum:
+          - "genome"
+      length:
+        type: integer
+        minimum: 0
+      regions:
+        $ref: '#/definitions/Region'
+      num_genes:
+        type: integer
+        minimum: 0
+
+  Region:
+    required:
+      - names
+      - lengths
+    properties:
+      names:
+        type: array
+        items:
+          type: string
+      lengths:
+        type: array
+        items:
+          type: integer
+          minimum: 0
+
+  Term:
+    required:
+      - _id
+      - id
+      - name
+      - ancestors
+    properties:
+      _id:
+        type: integer
+      id:
+        type: string
+      name:
+        type: string
+      ancestors:
+        type: array
+        items:
+          type: integer
+
+  InterProResponse:
+    type: array
+    items:
+      $ref: '#/definitions/InterProDomain'
+
+  TaxonomyResponse:
+    type: array
+    items:
+      $ref: '#/definitions/Taxon'
+
+  OntologyResponse:
+    type: array
+    items:
+      $ref: '#/definitions/OntologyTerm'
+
+  ReactomeEntityResponse:
+    type: array
+    items:
+      $ref: '#/definitions/ReactomeEntity'
+
+  InterProDomain:
+    allOf:
+      - $ref: '#/definitions/Term'
+      -
+        required:
+          - parents
+          - type
+          - description
+          - abstract
+          - PFAM
+          - PROFILE
+          - SMART
+          - PANDIT
+          - MSDsite
+          - BLOCKS
+          - PROSITEDOC
+          - PDB
+          - CATH
+          - SCOP
+        properties:
+          parents:
+            type: array
+            items:
+              type: integer
+          type:
+            type: string
+          description:
+            type: string
+          abstract:
+            type: string
+          PFAM:
+            type: string
+          PROFILE:
+            type: string
+          SMART:
+            type: string
+          PANDIT:
+            type: string
+          MSDsite:
+            type: string
+          BLOCKS:
+            type: string
+          PROSITEDOC:
+            type: string
+          PDB:
+            type: array
+            items:
+              type: string
+          CATH:
+            type: array
+            items:
+              type: string
+          SCOP:
+            type: array
+            items:
+              type: string
+
+  Taxon:
+    allOf:
+      - $ref: '#/definitions/Term'
+      -
+        required:
+          - xref
+          - synonym
+          - namespace
+        properties:
+           namespace:
+             type: string
+           synonym:
+             type: array
+             items:
+               type: string
+           xref:
+             type: array
+             items:
+               type: string
+  OntologyTerm:
+    allOf:
+      - $ref: '#/definitions/Term'
+      -
+        required:
+          - synonym
+          - is_a
+          - namespace
+          - def
+          - comment
+        properties:
+          synonym:
+            type: array
+            items:
+              type: string
+          is_a:
+            type: array
+            items:
+              type: integer
+          namespace:
+            type: string
+          def:
+            type: string
+          relationship:
+            type: array
+            items:
+              type: string
+          subset:
+            type: array
+            items:
+              type: string
+          is_obsolete:
+            type: string
+            enum:
+              - "1"
+          consider:
+            type: array
+            items:
+              type: integer
+          comment:
+            type: array
+            items:
+              type: string
+
+  ReactomeEntity:
+    allOf:
+      - $ref: '#/definitions/Term'
+      -
+        required:
+          - lineage
+          - type
+          - parents
+          - synonyms
+        properties:
+          lineage:
+            type: array
+            items:
+              type: array
+              items:
+                type: integer
+          type:
+            type: string
+          parents:
+            type: array
+            items:
+              type: integer
+          synonyms:
+            type: array
+            items:
+              type: string
+
+
+
+parameters:
+  q:
+    name: "q"
+    in: "query"
+    description: "string for free text search"
+    type: "string"
+    required: false
+  rows:
+    name: "rows"
+    in: "query"
+    description: "number of rows to return (default: 20)"
+    type: "integer"
+    required: false
+  start:
+    name: "start"
+    in: "query"
+    description: "offset into results list"
+    type: "integer"
+    required: false
+  fl:
+    name: "fl"
+    in: "query"
+    description: "list of fields to return"
+    type: "array"
+    items:
+      type: "string"
+    required: false
+  wt:
+    name: "wt"
+    in: "query"
+    description: "response format, if `fl` is specified, this value may be either tab or json. If `fl` is not specified, this parameter is ignored and JSON documents are always returned."
+    enum:
+      - "json"
+      - "tab"
+      - ""
+    type: "string"
+    required: false
+  idList:
+    name: "idList"
+    in: "query"
+    description: "a comma separated list of document ids"
+    type: "array"
+    items:
+      type: "string"
+    required: false
+  collection:
+    name: "collection"
+    in: "path"
+    description: "name of collection"
+    enum:
+      - "genes"
+      - "genetrees"
+      - "maps"
+      - "domains"
+      - "taxonomy"
+      - "GO"
+      - "PO"
+    type: "string"
+    required: true

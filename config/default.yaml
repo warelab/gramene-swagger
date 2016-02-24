@@ -19,7 +19,7 @@ swagger:
 
     _swagger_validate:
       name: swagger_validator
-      validateResponse: true
+      validateResponse: false # can't validate because data is streamed directly from SOLR/Mongo
 
     # pipe for all swagger-node controllers
     swagger_controllers:
