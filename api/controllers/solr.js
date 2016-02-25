@@ -17,8 +17,7 @@ function suggestions(req, res) {
 }
 
 function solrRequest(req, res, streamMethod, additionalParams) {
-  var params = _.mapValues(req.swagger.params, changeVerticalBarToComma);
-
+  var params = _.mapValues(req.swagger.params, 'value');
   if(additionalParams) {
     _.assign(params, additionalParams);
   }
@@ -26,25 +25,4 @@ function solrRequest(req, res, streamMethod, additionalParams) {
 
   solrStream.pipe(res);
 }
-
-function changeVerticalBarToComma(param) {
-  var result;
-
-  function _changeVerticalBarToComma(_param) {
-    if(_.isString(_param)) {
-      return _param.replace(/\|/g, ',');
-    }
-  }
-
-  if(_.isArray(param.value)) {
-    result = param.value.map(_changeVerticalBarToComma);
-  }
-  else {
-    result = _changeVerticalBarToComma(param.value);
-  }
-
-  return result;
-}
-
-
 
