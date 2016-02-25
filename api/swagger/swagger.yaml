@@ -65,6 +65,9 @@ paths:
 #          description: "Full species name that should be encoded for URL (e.g. oryza+sativa, or zea+mays)"
 #          type: "string"
 #          required: true
+  /swagger:
+    x-swagger-pipe: swagger_raw
+
   /search:
     x-swagger-router-controller: solr
     get:
@@ -352,8 +355,6 @@ paths:
       responses:
         200:
           description: "MongoDB response object"
-  /swagger:
-    x-swagger-pipe: swagger_raw
 # complex objects have schema definitions
 definitions:
   ResponseHeader:
