@@ -4,6 +4,7 @@ var request = require('request');
 var version = require('gramene-mongodb-config').getMongoConfig().version;
 var through2 = require('through2');
 var csv2 = require('csv2');
+var JSONStream = require('JSONStream');
 
 var urlBase = 'http://brie.cshl.edu:8983/solr/';
 
@@ -12,12 +13,36 @@ module.exports = {
   streamSuggestions: streamSuggestions
 };
 
+var bedFields = {
+  region   : 1,
+  start    : 1,
+  end      : 1,
+  id       : 1,
+  gene_idx : 1,
+  strand   : 1
+};
+
 function streamGenes(params) {
   if (params.wt === 'bed') {
-    params.fl = ['region,start,end,strand,id,taxon_id'];
-    params.wt = 'csv';
+    if (params.fl) {
+      var addFields = [];
+      params.fl.forEach(function(field) {
+        if (!bedFields[field]) {
+          addFields.push(field);
+        }
+      });
+      params.fl = 'region,start,end,id,gene_idx,strand';
+      if (addFields.length > 0) {
+        params.fl += ',' + addFields.join(',');
+      }
+    }
+    else {
+      params.fl = 'region,start,end,id,gene_idx,strand';
+    }
     params.sort = 'gene_idx asc';
     params.isBed = true;
+    params.omitHeader=true;
+    return solrStream(urlBase + 'genes' + version + '/export', params);
   }
   return solrStream(urlBase + 'genes' + version + '/query', params);
 }
@@ -56,19 +81,16 @@ function solrStream(uri, params) {
   });
   
   if (params.isBed) {
-    return stream.pipe(csv2()).pipe(through2.obj(function (values, enc, done) {
-      if (values[0] !== 'region') {
-        var strand = (values[3] === '1') ? '+' : '-';
-        var start = values[1] - 1;
-        this.push(values[0] // chromosome (region)
-          +'\t'+start      // start
-          +'\t'+values[2]   // end
-          +'\t'+values[4]   // name
-          +'\t'+values[5]   // score (taxon_id)
-          +'\t'+strand     // strand
-          +'\n');
+    return stream.pipe(JSONStream.parse('response.docs.*',function(doc) {
+      doc.start--;
+      doc.strand = (doc.strand === 1) ? '+' : '-';
+      var bedCols = [doc.region, doc.start, doc.end, doc.gene_idx, doc.id, doc.strand];
+      for (var field in doc) {
+        if (!bedFields[field]) {
+          bedCols.push(doc[field]);
+        }
       }
-      done();
+      return bedCols.join('\t')+'\n';
     }));
   }
   return stream;
