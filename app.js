@@ -16,30 +16,23 @@ var config = {
   appRoot: __dirname // required config
 };
 
-// load the YAML-encoded schema. We will stream this out as JSON for swagger-ui
-//var schema = yaml.load(fs.readFileSync(__dirname + '/api/swagger/swagger.yaml', 'utf8'));
-
 SwaggerExpress.create(config, function (err, swaggerExpress) {
   if (err) { throw err; }
 
-  // install middleware
-  swaggerExpress.register(app);
-
-  var port = process.env.PORT || 10011;
-  app.listen(port);
-
-  console.log('Listening on', port);
-
-  // define routes
+  // define routes for documentation
   app.get('/', function (req, res, next) { // redirect to /docs with the correct schema
     res.redirect('/docs?url=/swagger');
   });
 
   app.use('/docs', express.static('node_modules/swagger-ui/dist'));
 
-  //app.get('/gramene.json', function (req, res, next) { // return top level info
-  //  res.json(schema);
-  //});
+  // install swagger server middleware
+  swaggerExpress.register(app);
 
+  // start it up
+  var port = process.env.PORT || 10011;
+  app.listen(port);
+
+  console.log('Listening on', port);
 });
 

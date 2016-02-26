@@ -6,7 +6,7 @@ var through2 = require('through2');
 var csv2 = require('csv2');
 var JSONStream = require('JSONStream');
 
-var urlBase = 'http://brie:8983/solr/';
+var urlBase = 'http://brie.cshl.edu:8983/solr/';
 
 module.exports = {
   streamGenes: streamGenes,
