@@ -1,7 +1,7 @@
 swagger: "2.0"
 info:
-  version: "0.49.4"
-  title: Gramene API for release 49
+  version: "0.50.0"
+  title: Gramene API for release 50
 # basePath prefixes all resource paths
 basePath: /
 # during dev, should point to your local machine
@@ -535,7 +535,11 @@ definitions:
       - system_name
       - biotype
       - db_type
+      - gene_idx
       - location
+      - gene_structure
+      - annotations
+      - bins
 
     properties:
       _id:
@@ -553,45 +557,99 @@ definitions:
       taxon_id:
         type: integer
         minimum: 0
+      gene_idx:
+        type: integer
+        minimum: 0
       system_name:
         type: string
       biotype:
         $ref: "#/definitions/biotype"
-      epl_gene_tree:
-        type: string
-      grm_gene_tree:
-        type: string
-      grm_gene_tree_root_taxon_id:
-        type: integer
-        minimum: 0
-      ancestors:
-        $ref: "#/definitions/GeneAncestors"
+      gene_structure:
+        $ref: "#/definitions/GeneStructure"
+      annotations:
+        $ref: "#/definitions/GeneAnnotations"
       bins:
         $ref: "#/definitions/GeneBins"
-      canonical_transcript:
-        $ref: "#/definitions/GeneTranscript"
-      canonical_translation:
-        $ref: "#/definitions/GeneTranslation"
       homology:
         $ref: "#/definitions/GeneHomology"
       location:
         $ref: "#/definitions/GeneLocation"
-      representative:
-        $ref: "#/definitions/GeneRepresentatives"
       xrefs:
         $ref: "#/definitions/GeneXrefs"
-  GeneAncestors:
+  GeneAnnotations:
     properties:
       GO:
-        $ref: "#/definitions/int_id_list"
+        properties:
+          entries:
+            type: array
+            items:
+              $ref: "#/definitions/OntologyAnnotations"
+          ancestors:
+            $ref: "#/definitions/int_id_list"
       PO:
-        $ref: "#/definitions/int_id_list"
+        properties:
+          entries:
+            type: array
+            items:
+              $ref: "#/definitions/OntologyAnnotations"
+          ancestors:
+            $ref: "#/definitions/int_id_list"
       domains:
-        $ref: "#/definitions/int_id_list"
-      gene_family:
-        $ref: "#/definitions/int_id_list"
+        properties:
+          entries:
+            type: array
+            items:
+              $ref: "#/definitions/DomainAnnotations"
+          ancestors:
+            $ref: "#/definitions/int_id_list"
       taxonomy:
-        $ref: "#/definitions/int_id_list"
+        properties:
+          entries:
+            type: array
+            items:
+              $ref: "#/definitions/TaxonomyAnnotations"
+          ancestors:
+            $ref: "#/definitions/int_id_list"
+      pathways:
+        properties:
+          entries:
+            type: array
+            items:
+              $ref: "#/definitions/PathwayAnnotations"
+          ancestors:
+            $ref: "#/definitions/int_id_list"
+  OntologyAnnotations:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+      namespace:
+        type: string
+      def:
+        type: string
+      subset:
+        $ref: "#/definitions/string_list"
+  DomainAnnotations:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+      description:
+        type: string
+  TaxonomyAnnotations:
+    properties:
+      _id:
+        type: integer
+      name:
+        type: string
+  PathwayAnnotations:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
 
   GeneBins:
     required:
@@ -629,20 +687,36 @@ definitions:
         type: integer
         minimum: 0
 
+  GeneStructure:
+    required:
+      - exons
+      - transcripts
+      - canonical_transcript
+    properties:
+      exons:
+        type: object
+        additionalProperties:
+          $ref: "#/definitions/int_range"
+      transcripts:
+        type: object
+        additionalProperties:
+          $ref: "#/definitions/GeneTranscript"
+      canonical_transcript:
+        type: string
+
   GeneTranscript:
     required:
-      - CDS
       - exons
       - exon_junctions
       - length
-      - name
+
     properties:
-      CDS:
+      cds:
         $ref: "#/definitions/int_range"
       exons:
         type: array
         items:
-          $ref: "#/definitions/int_range"
+          type: string
       exon_junctions:
         type: array
         items:
@@ -651,61 +725,57 @@ definitions:
       length:
         type: integer
         minimum: 0
-      name:
-        type: string
+      translation:
+        $ref: "#/definitions/GeneTranslation"
 
   GeneTranslation:
     required:
-      - name
-      - avg_res_weight
-      - charge
-      - iso_point
+      - id
       - length
-      - molecular_weight
-      - domain_roots
-      - features
+
     properties:
-      name:
+      id:
         type: string
-      avg_res_weight:
-        type: number
-      charge:
-        type: integer
-      iso_point:
-        type: number
-        minimum: 0.0
-        maximum: 14.0
       length:
         type: integer
         minimum: 1
-      molecular_weight:
-        type: number
-        minimum: 0.0
-      domain_roots:
-        type: string
       features:
         $ref: "#/definitions/TranslationFeatures"
 
   TranslationFeatures:
     properties:
-      domain_architecture:
+      active_site:
+        $ref: "#/definitions/InterProType"
+      binding_site:
+        $ref: "#/definitions/InterProType"
+      conserved_site:
+        $ref: "#/definitions/InterProType"
+      domain:
+        $ref: "#/definitions/InterProDomain"
+      repeat:
+        $ref: "#/definitions/InterProType"
+      family:
+        $ref: "#/definitions/InterProType"
+      ptm:
+        $ref: "#/definitions/InterProType"
+
+  InterProType:
+    properties:
+      entries:
         type: array
         items:
-          $ref: "#/definitions/InterProInstance"
+          $ref: "#/definitions/DomainInstance"
 
-  InterProInstance:
+  InterProDomain:
     allOf:
-      - $ref: "#/definitions/DomainInstance"
-      - required:
-          - members
-          - root
+      - $ref: "#/definitions/InterProType"
         properties:
-          members:
+          roots:
+            type: string
+          architecture:
             type: array
             items:
               $ref: "#/definitions/DomainInstance"
-          root:
-            type: string
 
   DomainInstance:
     allOf:
@@ -713,17 +783,26 @@ definitions:
       - required:
           - name
           - description
+          - db
           - interpro
         properties:
           name:
             type: string
           description:
             type: string
+          db:
+            type: string
           interpro:
+            type: string
+          root:
             type: string
 
   GeneHomology:
     properties:
+      gene_tree:
+        $ref: '#/definitions/GeneTree'
+      pan_tree:
+        $ref: '#/definitions/GeneTree'
       ortholog_one2one:
         $ref: '#/definitions/string_list'
       ortholog_one2many:
@@ -746,6 +825,49 @@ definitions:
         $ref: '#/definitions/string_list'
       homoeolog_many2many:
         $ref: '#/definitions/string_list'
+      syntenic_ortholog_one2one:
+        $ref: '#/definitions/string_list'
+      syntenic_ortholog_one2many:
+        $ref: '#/definitions/string_list'
+      syntenic_ortholog_many2many:
+        $ref: '#/definitions/string_list'
+      syntenic_between_species_paralog:
+        $ref: '#/definitions/string_list'
+
+  GeneTree:
+    required:
+      - id
+      - root_taxon_id
+      - root_taxon_name
+    properties:
+      id:
+        type: string
+      root_taxon_id:
+        type: integer
+      root_taxon_name:
+        type: string
+      representative:
+        properties:
+          closest:
+            $ref: '#/definitions/GeneTreeRepresentative'
+          model:
+            $ref: '#/definitions/GeneTreeRepresentative'
+
+  GeneTreeRepresentative:
+    required:
+      - id
+      - taxon_id
+      - name
+      - description
+    properties:
+      id:
+        type: string
+      taxon_id:
+        type: integer
+      name:
+        type: string
+      description:
+        type: string
 
   GeneLocation:
     allOf:
@@ -765,28 +887,6 @@ definitions:
             enum:
               - 1
               - -1
-
-  GeneRepresentatives:
-    properties:
-      closest:
-        $ref: '#/definitions/GeneRepresentative'
-      model:
-        $ref: '#/definitions/GeneRepresentative'
-  
-  GeneRepresentative:
-    required:
-      - id
-      - description
-      - taxon_id
-    properties:
-      id: 
-        type: string
-      name:
-        type: string
-      description:
-        type: string
-      taxon_id:
-        type: integer
 
   GeneXrefs:
     properties:
@@ -923,6 +1023,8 @@ definitions:
           - distance_to_parent
           - left_index
           - right_index
+          - taxon_id
+          - taxon_name
         properties:
           node_id:
             type: integer
@@ -935,15 +1037,15 @@ definitions:
             minimum: 0
           right_index:
             type: integer
+          taxon_id:
+            type: integer
+            minimum: 0
+          taxon_name:
+            type: string
             minimum: 0
 
   GenetreeInternalNode:
     properties:
-      node_taxon_id:
-        type: integer
-        minimum: 0
-      node_taxon:
-        type: string
       node_type:
         type: string
         enum:
@@ -973,11 +1075,6 @@ definitions:
       cigar:
         type: string
       sequence:
-        type: string
-      taxon_id:
-        type: integer
-        minimum: 0
-      system_name:
         type: string
       assembly:
         type: string
@@ -1060,7 +1157,7 @@ definitions:
   InterProResponse:
     type: array
     items:
-      $ref: '#/definitions/InterProDomain'
+      $ref: '#/definitions/InterProDoc'
 
   TaxonomyResponse:
     type: array
@@ -1077,7 +1174,7 @@ definitions:
     items:
       $ref: '#/definitions/ReactomeEntity'
 
-  InterProDomain:
+  InterProDoc:
     allOf:
       - $ref: '#/definitions/Term'
       -
