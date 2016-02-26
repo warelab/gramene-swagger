@@ -536,6 +536,7 @@ definitions:
       - biotype
       - db_type
       - gene_idx
+      - species_idx
       - location
       - gene_structure
       - annotations
@@ -558,6 +559,9 @@ definitions:
         type: integer
         minimum: 0
       gene_idx:
+        type: integer
+        minimum: 0
+      species_idx:
         type: integer
         minimum: 0
       system_name:
