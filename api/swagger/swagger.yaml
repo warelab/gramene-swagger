@@ -188,6 +188,8 @@ paths:
         - $ref: "#/parameters/fl"
         - $ref: "#/parameters/wt"
         - $ref: "#/parameters/idList"
+        - $ref: "#/parameters/bedFeature"
+        - $ref: "#/parameters/bedCombiner"
       tags:
         - "Data access"
       responses: 
@@ -1357,13 +1359,38 @@ parameters:
   wt:
     name: "wt"
     in: "query"
-    description: "response format, if `fl` is specified, this value may be either tab or json. If `fl` is not specified, this parameter is ignored and JSON documents are always returned."
+    description: "response format, if `tab` is specified `fl` must also be, otherwise JSON documents returned."
     enum:
       - "json"
       - "tab"
-      - ""
+      - "bed"
     type: "string"
     required: false
+  bedFeature:
+    name: "bedFeature"
+    in: "query"
+    description: "type of feature to export"
+    type: "string"
+    required: false
+    default: "gene"
+    enum:
+      - "gene"
+      - "transcript"
+      - "exon"
+      - "intron"
+      - "CDS"
+      - "utr5"
+      - "utr3"
+  bedCombiner:
+    name: "bedCombiner"
+    in: "query"
+    description: "method for extracting features from multiple transcripts"
+    type: "string"
+    required: false
+    default: "canonical"
+    enum:
+      - "canonical"
+      - "all"
   idList:
     name: "idList"
     in: "query"
