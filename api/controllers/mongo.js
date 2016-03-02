@@ -52,7 +52,7 @@ function getFactory(collectionPromise) {
       }
       params.wt='json';
       transformer = through2.obj(function(gene, enc, done) {
-        this.push(bedify(gene,params) + "\n");
+        this.push(bedify(gene,params));
         done();
       });
       mimetype = 'text/tab-separated-values';
