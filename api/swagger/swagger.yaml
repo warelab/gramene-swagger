@@ -823,7 +823,7 @@ definitions:
   InterProDomain:
     allOf:
       - $ref: "#/definitions/InterProType"
-        properties:
+      - properties:
           roots:
             type: string
           architecture:
