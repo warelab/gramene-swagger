@@ -19,18 +19,20 @@ var config = {
 SwaggerExpress.create(config, function (err, swaggerExpress) {
   if (err) { throw err; }
 
+  var basePath = swaggerExpress.runner.swagger.basePath;
   // define routes for documentation
-  app.get('/', function (req, res, next) { // redirect to /docs with the correct schema
-    res.redirect('/docs?url=/swagger');
+  app.get(basePath, function (req, res, next) { // redirect to /docs with the correct schema
+    res.redirect(basePath+'/docs?url='+basePath+'/swagger');
   });
 
-  app.use('/docs', express.static('node_modules/swagger-ui/dist'));
+  app.use(basePath+'/docs', express.static('node_modules/swagger-ui/dist'));
 
   // install swagger server middleware
   swaggerExpress.register(app);
 
   // start it up
-  var port = process.env.PORT || 10011;
+  var version = +basePath.match(/\d+/);
+  var port = process.env.PORT || 10000 + version;
   app.listen(port);
 
   console.log('Listening on', port);
