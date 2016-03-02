@@ -20,6 +20,11 @@ SwaggerExpress.create(config, function (err, swaggerExpress) {
   if (err) { throw err; }
 
   var basePath = swaggerExpress.runner.swagger.basePath;
+
+  app.get('/', function(req, res) {
+    res.redirect(basePath);
+  });
+
   // define routes for documentation
   app.get(basePath, function (req, res, next) { // redirect to /docs with the correct schema
     res.redirect(basePath+'/docs?url='+basePath+'/swagger');
