@@ -1,16 +1,15 @@
 swagger: "2.0"
 info:
-  version: "0.49.4"
+  version: "0.49.5"
   title: Gramene API for release 49
 # basePath prefixes all resource paths
-basePath: /v50
+basePath: /v49
 # during dev, should point to your local machine
 #host: localhost:10010/{basePath}
 # 
 schemes:
   # tip: remove http to make production-grade
   - http
-  - https
 # format of bodies a client can send (Content-Type)
 consumes:
   - application/json
