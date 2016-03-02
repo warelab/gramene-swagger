@@ -5,6 +5,8 @@ var mongoHelper = require('../helpers/mongo');
 var mongoCollections = require('gramene-mongodb-config');
 var JSONStream = require('JSONStream');
 var csvStringify = require('csv-stringify');
+var bedify = require('gramene-bedify');
+var through2 = require('through2');
 
 (function init() {
   var toExport = {};
@@ -29,16 +31,30 @@ var csvStringify = require('csv-stringify');
 
 function getFactory(collectionPromise) {
   return function _get(req, res) {
-    var params, nonSchemaParams, returnCsv,
+    var params, nonSchemaParams, returnTsv,
       cursorPromise, transformer, mimetype;
 
     params = _.mapValues(req.swagger.params, 'value');
     nonSchemaParams = _.omit(req.query, _.keys(params));
-    returnCsv = params.fl && params.wt == 'tab';
 
-    cursorPromise = mongoHelper.cursorPromise(collectionPromise, params, nonSchemaParams);
-    if(returnCsv) {
+    returnTsv = params.fl && params.wt == 'tab';
+
+    if(returnTsv) {
       transformer = csvStringify({header:true, delimiter: '\t', columns: params.fl});
+      mimetype = 'text/tab-separated-values';
+    }
+    else if (params.wt == 'bed') {
+      if (params.bedFeature == 'gene') {
+        params.fl = ['location','_id'];
+      }
+      else {
+        params.fl = ['location','_id','gene_structure'];
+      }
+      params.wt='json';
+      transformer = through2.obj(function(gene, enc, done) {
+        this.push(bedify(gene,params));
+        done();
+      });
       mimetype = 'text/tab-separated-values';
     }
     else {
@@ -46,6 +62,7 @@ function getFactory(collectionPromise) {
       mimetype = 'application/json';
     }
 
+    cursorPromise = mongoHelper.cursorPromise(collectionPromise, params, nonSchemaParams);
     cursorPromise.then(function(cursor) {
       res.contentType(mimetype);
       cursor.stream().pipe(transformer).pipe(res);

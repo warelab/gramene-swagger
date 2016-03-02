@@ -53,9 +53,15 @@ function buildQuery(params, nonSchemaParams) {
   }
 
   if (params.idList) {
+    var idSet={};
+    params.idList.forEach(function(x) {
+      idSet[x] = 1;
+    });
     var list = params.idList.map(function (x) {
+      if (idSet[x]++ === 1) {
         return isNumber(x) ? +x : x;
-      });
+      }
+    });
     qExprs.push({'_id': {'$in': list}});
   }
 
