@@ -4,20 +4,45 @@ var request = require('request');
 var version = require('gramene-mongodb-config').getMongoConfig().version;
 var through2 = require('through2');
 var csv2 = require('csv2');
+var JSONStream = require('JSONStream');
 
-var urlBase = 'http://brie:8983/solr/';
+var urlBase = 'http://brie.cshl.edu:8983/solr/';
 
 module.exports = {
   streamGenes: streamGenes,
   streamSuggestions: streamSuggestions
 };
 
+var bedFields = {
+  region   : 1,
+  start    : 1,
+  end      : 1,
+  id       : 1,
+  gene_idx : 1,
+  strand   : 1
+};
+
 function streamGenes(params) {
   if (params.wt === 'bed') {
-    params.fl = ['region,start,end,strand,id,taxon_id'];
-    params.wt = 'csv';
+    if (params.fl) {
+      var addFields = [];
+      params.fl.forEach(function(field) {
+        if (!bedFields[field]) {
+          addFields.push(field);
+        }
+      });
+      params.fl = 'region,start,end,id,gene_idx,strand';
+      if (addFields.length > 0) {
+        params.fl += ',' + addFields.join(',');
+      }
+    }
+    else {
+      params.fl = 'region,start,end,id,gene_idx,strand';
+    }
     params.sort = 'gene_idx asc';
     params.isBed = true;
+    params.omitHeader=true;
+    return solrStream(urlBase + 'genes' + version + '/export', params);
   }
   return solrStream(urlBase + 'genes' + version + '/query', params);
 }
@@ -33,18 +58,22 @@ function solrStream(uri, params) {
   // A call to res.contentType() in the controller
   // is overwritten by response stream from SOLR
   stream.on('response', function stripHeaders(r) {
-    if (params.wt === 'xml') {
-      r.headers['content-type'] = 'application/xml';
+    var type;
+    switch(params.wt) {
+      case 'xml':
+        type = 'application/xml';
+        break;
+      case 'json':
+        type = 'application/json';
+        break;
+      case 'bed':
+        type = 'text/tab-separated-values';
+        break;
+      default:
+        type = 'text/plain';
     }
-    else if (params.wt === 'json') {
-      r.headers['content-type'] = 'application/json';
-    }
-    else if (params.isBed) {
-      r.headers['content-type'] = 'text/tab-separated-values';
-    }
-    else {
-      r.headers['content-type'] = 'text/plain';
-    }
+
+    r.headers['content-type'] = type;
   });
 
   stream.on('error', function error(err) {
@@ -52,19 +81,16 @@ function solrStream(uri, params) {
   });
   
   if (params.isBed) {
-    return stream.pipe(csv2()).pipe(through2.obj(function (chunk, enc, callback) {
-      if (chunk[0] !== 'region') {
-        var strand = (chunk[3] === '1') ? '+' : '-';
-        var start = chunk[1] - 1;
-        this.push(chunk[0] // chromosome (region)
-          +'\t'+start      // start
-          +'\t'+chunk[2]   // end
-          +'\t'+chunk[4]   // name
-          +'\t'+chunk[5]   // score (taxon_id)
-          +'\t'+strand     // strand
-          +'\n');
+    return stream.pipe(JSONStream.parse('response.docs.*',function(doc) {
+      doc.start--;
+      doc.strand = (doc.strand === 1) ? '+' : '-';
+      var bedCols = [doc.region, doc.start, doc.end, doc.gene_idx, doc.id, doc.strand];
+      for (var field in doc) {
+        if (!bedFields[field]) {
+          bedCols.push(doc[field]);
+        }
       }
-      callback();
+      return bedCols.join('\t')+'\n';
     }));
   }
   return stream;

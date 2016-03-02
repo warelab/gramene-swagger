@@ -2,17 +2,16 @@
 
 var sanitize = require('mongo-sanitize')
   , isNumber = require("isnumber")
-  , collections = require('gramene-mongodb-config')
   , _ = require('lodash');
 
 module.exports = {
   cursorPromise: cursorPromise
 };
 
-function cursorPromise(params, nonSchemaParams) {
-  var mongoCollectionPromise = collections[params.collection].mongoCollection();
-  var query = buildQuery(params, nonSchemaParams);
-  var options = {};
+function cursorPromise(mongoCollectionPromise, params, nonSchemaParams) {
+  var query, options;
+  query = buildQuery(params, nonSchemaParams);
+  options = {};
 
   if (params.rows) {
     if (params.rows !== -1) options.limit = params.rows;
@@ -54,9 +53,15 @@ function buildQuery(params, nonSchemaParams) {
   }
 
   if (params.idList) {
+    var idSet={};
+    params.idList.forEach(function(x) {
+      idSet[x] = 1;
+    });
     var list = params.idList.map(function (x) {
+      if (idSet[x]++ === 1) {
         return isNumber(x) ? +x : x;
-      });
+      }
+    });
     qExprs.push({'_id': {'$in': list}});
   }
 
