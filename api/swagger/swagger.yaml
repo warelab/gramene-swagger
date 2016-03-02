@@ -493,7 +493,31 @@ definitions:
       capabilities:
         $ref: "#/definitions/capabilities"
       biotype:
-        $ref: "#/definitions/biotype"
+        type: string
+        enum:
+          - "protein_coding"
+          - "miRNA"
+          - "ncRNA"
+          - "low_confidence"
+          - "transposable_element"
+          - "snoRNA"
+          - "tRNA"
+          - "misc_RNA"
+          - "undefined"
+          - "pseudogene"
+          - "tRNA_pseudogene"
+          - "nontranslating_CDS"
+          - "snRNA"
+          - "rRNA"
+          - "antisense"
+          - "SRP_RNA"
+          - "tmRNA"
+          - "ribozyme"
+          - "RNase_MRP_RNA"
+          - "telomerase_RNA"
+          - "P_RNA"
+          - "RNase_P_RNA"
+          - "vault_RNA"
   SolrFacetDocument:
     required:
       - facet_fields
@@ -569,7 +593,31 @@ definitions:
       system_name:
         type: string
       biotype:
-        $ref: "#/definitions/biotype"
+        type: string
+        enum:
+          - "protein_coding"
+          - "miRNA"
+          - "ncRNA"
+          - "low_confidence"
+          - "transposable_element"
+          - "snoRNA"
+          - "tRNA"
+          - "misc_RNA"
+          - "undefined"
+          - "pseudogene"
+          - "tRNA_pseudogene"
+          - "nontranslating_CDS"
+          - "snRNA"
+          - "rRNA"
+          - "antisense"
+          - "SRP_RNA"
+          - "tmRNA"
+          - "ribozyme"
+          - "RNase_MRP_RNA"
+          - "telomerase_RNA"
+          - "P_RNA"
+          - "RNase_P_RNA"
+          - "vault_RNA"
       gene_structure:
         $ref: "#/definitions/GeneStructure"
       annotations:
@@ -929,33 +977,6 @@ definitions:
     type: array
     items:
       $ref: '#/definitions/GeneDocument'
-
-  biotype:
-    type: string
-    enum:
-      - "protein_coding"
-      - "miRNA"
-      - "ncRNA"
-      - "low_confidence"
-      - "transposable_element"
-      - "snoRNA"
-      - "tRNA"
-      - "misc_RNA"
-      - "undefined"
-      - "pseudogene"
-      - "tRNA_pseudogene"
-      - "nontranslating_CDS"
-      - "snRNA"
-      - "rRNA"
-      - "antisense"
-      - "SRP_RNA"
-      - "tmRNA"
-      - "ribozyme"
-      - "RNase_MRP_RNA"
-      - "telomerase_RNA"
-      - "P_RNA"
-      - "RNase_P_RNA"
-      - "vault_RNA"
 
   capabilities:
     type: array
