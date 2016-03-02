@@ -5,7 +5,7 @@ info:
 # basePath prefixes all resource paths
 basePath: /v50
 # during dev, should point to your local machine
-#host: localhost:10010/{basePath}
+#host: localhost:{10000 + db release version}/{basePath}
 # 
 schemes:
   # tip: remove http to make production-grade
@@ -31,7 +31,7 @@ paths:
           description: "HTML documentation for this web service, powered by swagger."
 #  /ensembl:
 #    get:
-#      summary: "Proxy to Gramenes Ensembl REST installation"
+#      summary: "Proxy to Gramene's Ensembl REST installation"
 #      description: "Please refer to rest.ensembl.org for documentation\n"
 #      tags:
 #        - "Ensembl REST"
@@ -40,8 +40,8 @@ paths:
 #          description: "Ensembl REST response"
 #  /reactome:
 #    get:
-#      summary: "Proxy to Gramenes Plant Reactome REST API"
-#      description: "Reactome RESTful API <a href=http://reactomews.oicr.on.ca:8080/ReactomeRESTfulAPI/ReactomeRESTFulAPI.html>documentation</a>"
+#      summary: "Proxy to Gramene's Plant Reactome REST API"
+#      description: "Reactome RESTful API <a href='http://reactomews.oicr.on.ca:8080/ReactomeRESTfulAPI/ReactomeRESTFulAPI.html'>documentation</a>"
 #      tags:
 #        - "Plant Reactome REST"
 #      responses:
@@ -92,7 +92,7 @@ paths:
         -
           name: "wt"
           in: "query"
-          description: "response format defaults to json."
+          description: "response format defaults to 'json'."
           enum:
             - "json"
             - "xml"
@@ -177,7 +177,7 @@ paths:
             $ref: "#/definitions/SolrSuggestResponse"
   /genes:
     x-swagger-router-controller: mongo
-    get: 
+    get:
       summary: "MongoDB"
       operationId: genes
       description: "Fetch documents from a collection"
@@ -192,7 +192,7 @@ paths:
         - $ref: "#/parameters/bedCombiner"
       tags:
         - "Data access"
-      responses: 
+      responses:
         200:
           description: "MongoDB response object"
           schema:
