@@ -190,6 +190,8 @@ paths:
         - $ref: "#/parameters/idList"
         - $ref: "#/parameters/bedFeature"
         - $ref: "#/parameters/bedCombiner"
+        - $ref: "#/parameters/taxon_id"
+        - $ref: "#/parameters/db_type"
       tags:
         - "Data access"
       responses:
@@ -1412,6 +1414,21 @@ parameters:
     enum:
       - "canonical"
       - "all"
+  taxon_id:
+    name: "taxon_id"
+    in: "query"
+    description: "NCBI taxonomy id"
+    type: "integer"
+    required: false
+  db_type:
+    name: "db_type"
+    in: "query"
+    description: "set to core if you don't care about otherfeatures"
+    type: "string"
+    required: false
+    enum:
+      - "core"
+      - "otherfeatures"
   idList:
     name: "idList"
     in: "query"
