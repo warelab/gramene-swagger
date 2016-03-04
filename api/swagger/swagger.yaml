@@ -631,7 +631,9 @@ definitions:
       location:
         $ref: "#/definitions/GeneLocation"
       xrefs:
-        $ref: "#/definitions/GeneXrefs"
+        type: array
+        items:
+          $ref: "#/definitions/GeneXrefs"
   GeneAnnotations:
     properties:
       GO:
@@ -750,23 +752,35 @@ definitions:
       - canonical_transcript
     properties:
       exons:
-        type: object
-        additionalProperties:
-          $ref: "#/definitions/int_range"
+        type: array
+        items:
+          $ref: "#/definitions/GeneExon"
       transcripts:
-        type: object
-        additionalProperties:
+        type: array
+        items:
           $ref: "#/definitions/GeneTranscript"
       canonical_transcript:
         type: string
 
+  GeneExon:
+    allOf:
+      - $ref: "#/definitions/int_range"
+      - required:
+          - id
+        properties:
+          id:
+            type: string
+
   GeneTranscript:
     required:
+      - id
       - exons
       - exon_junctions
       - length
 
     properties:
+      id:
+        type: string
       cds:
         $ref: "#/definitions/int_range"
       exons:
@@ -945,35 +959,14 @@ definitions:
               - -1
 
   GeneXrefs:
+    required:
+      - db
+      - ids
     properties:
-      # taken from gramene-dbxrefs project v3.0.1
-      TAIR_LOCUS:
+      db:
+        type: string
+      ids:
         $ref: '#/definitions/string_list'
-      ARAPORT_GENE:
-        $ref: '#/definitions/string_list'
-      UniGene:
-        $ref: '#/definitions/string_list'
-      UniParc:
-        $ref: '#/definitions/string_list'
-      protein_id:
-        $ref: '#/definitions/string_list'
-      EMBL:
-        $ref: '#/definitions/string_list'
-      KEGG_Enzyme:
-        $ref: '#/definitions/string_list'
-      UniPathway:
-        $ref: '#/definitions/string_list'
-      MetaCyc:
-        $ref: '#/definitions/string_list'
-      MEROPS:
-        $ref: '#/definitions/string_list'
-      PDB:
-        $ref: '#/definitions/string_list'
-      GOA:
-        $ref: '#/definitions/string_list'
-      IntEnz:
-        $ref: '#/definitions/string_list'
-
 
   MongoGenesResponse:
     type: array
