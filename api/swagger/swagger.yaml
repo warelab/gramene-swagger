@@ -633,7 +633,7 @@ definitions:
       xrefs:
         type: array
         items:
-          $ref: "#/definitions/GeneXrefs"
+          $ref: "#/definitions/GeneXref"
   GeneAnnotations:
     properties:
       GO:
@@ -958,7 +958,7 @@ definitions:
               - 1
               - -1
 
-  GeneXrefs:
+  GeneXref:
     required:
       - db
       - ids
