@@ -1,6 +1,6 @@
 swagger: "2.0"
 info:
-  version: "0.50.6"
+  version: "0.50.8"
   title: Gramene API for release 50
 # basePath prefixes all resource paths
 basePath: /v50
@@ -873,6 +873,11 @@ definitions:
         $ref: '#/definitions/GeneTree'
       pan_tree:
         $ref: '#/definitions/GeneTree'
+      homologous_genes:
+        $ref: '#/definitions/HomologyTypes'
+
+  HomologyTypes:
+    properties:
       ortholog_one2one:
         $ref: '#/definitions/string_list'
       ortholog_one2many:
