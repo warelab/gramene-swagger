@@ -1,6 +1,6 @@
 {
   "name": "gramene-swagger",
-  "version": "0.50.8",
+  "version": "0.50.8-zm4.0",
   "description": "Gramene API - Made using swagger",
   "keywords": [],
   "author": "mycrobe",
@@ -12,7 +12,7 @@
     "csv-stringify": "0.0.8",
     "csv2": "^0.1.1",
     "express": "^4.12.3",
-    "gramene-mongodb-config": "1.50.0",
+    "gramene-mongodb-config": "warelab/gramene-mongodb-config#zm4",
     "gramene-bedify": "1.0.5",
     "isnumber": "^1.0.0",
     "kerberos": "0.0.18",
