@@ -1,6 +1,6 @@
 swagger: "2.0"
 info:
-  version: "0.50.8-zm4.1"
+  version: "0.50.8-zm4.2"
   title: Gramene API for maizev4
 # basePath prefixes all resource paths
 basePath: /zm4/v50
@@ -219,6 +219,26 @@ paths:
           description: "MongoDB response object"
           schema:
             $ref: "#/definitions/MongoGenetreesResponse"
+  /speciestrees:
+    x-swagger-router-controller: mongo
+    get:
+      summary: "MongoDB"
+      operationId: speciestrees
+      description: "Fetch documents from a collection"
+      parameters:
+        - $ref: "#/parameters/q"
+        - $ref: "#/parameters/rows"
+        - $ref: "#/parameters/start"
+        - $ref: "#/parameters/fl"
+        - $ref: "#/parameters/wt"
+        - $ref: "#/parameters/idList"
+      tags:
+        - "Data access"
+      responses:
+        200:
+          description: "MongoDB response object"
+          schema:
+            $ref: "#/definitions/MongoSpeciestreesResponse"
   /maps:
     x-swagger-router-controller: mongo
     get:
@@ -1013,6 +1033,72 @@ definitions:
       type: integer
       minimum: 0
 
+  MongoSpeciestreesResponse:
+    type: 'array'
+    items:
+      $ref: '#/definitions/SpeciestreeRootNode'
+
+  SpeciestreeRootNode:
+    allOf:
+      - $ref: '#/definitions/SpeciestreeNode'
+      -
+        required:
+          - root_id
+          - compara_db
+        properties:
+          root_id:
+            type: integer
+            minimum: 0
+          compara_db:
+            type: string
+
+  SpeciestreeNode:
+    allOf:
+      - $ref: '#/definitions/SpeciestreeInternalNode'
+      - $ref: '#/definitions/SpeciestreeLeafNode'
+      -
+        required:
+          - node_id
+          - distance_to_parent
+          - left_index
+          - right_index
+          - taxon_id
+          - taxon_name
+          - num_genes
+        properties:
+          node_id:
+            type: integer
+            minimum: 0
+          distance_to_parent:
+            type: number
+            minimum: 0.0
+          left_index:
+            type: integer
+            minimum: 0
+          right_index:
+            type: integer
+          taxon_id:
+            type: integer
+            minimum: 0
+          taxon_name:
+            type: string
+            minimum: 0
+          num_genes:
+            type: integer
+            minimum: 0
+
+  SpeciestreeInternalNode:
+    properties:
+      children:
+        type: array
+        items:
+          $ref: '#/definitions/SpeciestreeNode'
+
+  SpeciestreeLeafNode:
+    properties:
+      system_name:
+        type: string
+
   MongoGenetreesResponse:
     type: 'array'
     items:
@@ -1027,6 +1113,7 @@ definitions:
           - tree_id
           - tree_stable_id
           - tree_type
+          - compara_db
         properties:
           root_id:
             type: integer
@@ -1040,6 +1127,9 @@ definitions:
             enum:
               - 'tree'
               - 'supertree'
+          compara_db:
+            type: string
+
   GenetreeNode:
     allOf:
       - $ref: '#/definitions/GenetreeInternalNode'

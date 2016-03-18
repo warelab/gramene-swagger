@@ -23,9 +23,9 @@
       "resolved": "https://registry.npmjs.org/append-field/-/append-field-0.1.0.tgz"
     },
     "argparse": {
-      "version": "1.0.6",
+      "version": "1.0.7",
       "from": "argparse@>=1.0.2 <2.0.0",
-      "resolved": "https://registry.npmjs.org/argparse/-/argparse-1.0.6.tgz"
+      "resolved": "https://registry.npmjs.org/argparse/-/argparse-1.0.7.tgz"
     },
     "array-flatten": {
       "version": "1.1.1",
@@ -445,8 +445,8 @@
     },
     "gramene-mongodb-config": {
       "version": "1.49.0",
-      "from": "warelab/gramene-mongodb-config#zm4",
-      "resolved": "git://github.com/warelab/gramene-mongodb-config.git#532abb1e455381e1ad28b8f1880575c76c601e04"
+      "from": "git://github.com/warelab/gramene-mongodb-config.git#zm4",
+      "resolved": "git://github.com/warelab/gramene-mongodb-config.git#8c8b6a7f530d13455746dd015c9860d53c60be69"
     },
     "har-validator": {
       "version": "2.0.6",
@@ -539,9 +539,9 @@
       "resolved": "https://registry.npmjs.org/js-base64/-/js-base64-2.1.9.tgz"
     },
     "js-yaml": {
-      "version": "3.5.4",
+      "version": "3.5.5",
       "from": "js-yaml@>=3.3.0 <4.0.0",
-      "resolved": "https://registry.npmjs.org/js-yaml/-/js-yaml-3.5.4.tgz"
+      "resolved": "https://registry.npmjs.org/js-yaml/-/js-yaml-3.5.5.tgz"
     },
     "jsbn": {
       "version": "0.1.0",
