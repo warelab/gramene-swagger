@@ -693,6 +693,8 @@ definitions:
         type: string
       subset:
         $ref: "#/definitions/string_list"
+      evidence_code:
+        type: string
   DomainAnnotations:
     properties:
       id:
