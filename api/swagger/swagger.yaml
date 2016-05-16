@@ -111,7 +111,7 @@ paths:
         -
           name: "fq"
           in: "query"
-          description: "Field query parameters"
+          description: "Filter query parameters"
           required: false
           type: "array"
           items:
@@ -156,6 +156,14 @@ paths:
           description: "query string."
           required: true
           type: "string"
+        -
+          name: "fq"
+          in: "query"
+          description: "Filter query parameters"
+          required: false
+          type: "array"
+          items:
+            type: "string"
         -
           name: "rows"
           in: "query"
@@ -382,6 +390,8 @@ definitions:
      - display_name
      - num_genes
      - score
+     - taxon_id
+     - taxon_freq
     properties:
       category:
         type: string
@@ -399,6 +409,10 @@ definitions:
       score:
         type: number
         minimum: 0
+      taxon_id:
+        $ref: "#/definitions/int_id_list"
+      taxon_freq:
+        $ref: "#/definitions/int_id_list"        
   Suggestions:
     required:
       - docs
