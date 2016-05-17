@@ -1,6 +1,6 @@
 {
   "name": "gramene-swagger",
-  "version": "0.50.12",
+  "version": "0.50.13",
   "dependencies": {
     "accepts": {
       "version": "1.2.13",
