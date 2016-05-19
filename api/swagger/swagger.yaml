@@ -1,9 +1,9 @@
 swagger: "2.0"
 info:
-  version: "0.51.SNAPSHOT"
-  title: Gramene API 51 DEVELOPMENT VERSION
+  version: "0.50.11"
+  title: Gramene API for release 50
 # basePath prefixes all resource paths
-basePath: /v51
+basePath: /v50
 # during dev, should point to your local machine
 #host: localhost:{10000 + db release version}/{basePath}
 # 
@@ -280,6 +280,7 @@ paths:
         - $ref: "#/parameters/fl"
         - $ref: "#/parameters/wt"
         - $ref: "#/parameters/idList"
+        - $ref: "#/parameters/subset"
       tags:
         - "Data access"
       responses:
@@ -485,6 +486,8 @@ definitions:
         type: string
       description:
         type: string
+      summary:
+        type: string
       taxon_id:
         type: integer
         minimum: 0
@@ -590,6 +593,8 @@ definitions:
       name:
         type: string
       description:
+        type: string
+      summary:
         type: string
       db_type:
         type: string
@@ -702,6 +707,8 @@ definitions:
         type: string
       subset:
         $ref: "#/definitions/string_list"
+      evidence_code:
+        type: string
   DomainAnnotations:
     properties:
       id:
@@ -887,6 +894,11 @@ definitions:
         $ref: '#/definitions/GeneTree'
       pan_tree:
         $ref: '#/definitions/GeneTree'
+      homologous_genes:
+        $ref: '#/definitions/HomologyTypes'
+
+  HomologyTypes:
+    properties:
       ortholog_one2one:
         $ref: '#/definitions/string_list'
       ortholog_one2many:
@@ -1444,6 +1456,16 @@ parameters:
     items:
       type: "string"
     required: false
+  subset:
+    name: "subset"
+    in: "query"
+    description: "subset of NCBI taxonomy"
+    required: false
+    type: string
+    enum:
+      - "gramene"
+      - "compara"
+      - "pan_compara"
   collection:
     name: "collection"
     in: "path"

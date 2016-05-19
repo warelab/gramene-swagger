@@ -69,7 +69,7 @@ function buildQuery(params, nonSchemaParams) {
     return isNumber(x) ? +x : x;
   }
 
-  _.merge(nonSchemaParams,_.pick(params,['taxon_id','db_type']));
+  _.merge(nonSchemaParams,_.pick(params,['taxon_id','db_type', 'subset']));
 
   _.forEach(nonSchemaParams, function(value, key) {
     var expr = {};
