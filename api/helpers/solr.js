@@ -48,7 +48,7 @@ function streamGenes(params) {
 }
 
 function streamSuggestions(params) {
-  return solrStream(urlBase + 'suggestions' + version + '/try', params);
+  return solrStream(urlBase + 'suggestions' + version + '/query', params);
 }
 
 function solrStream(uri, params) {
