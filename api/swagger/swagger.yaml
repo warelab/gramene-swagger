@@ -1,9 +1,9 @@
 swagger: "2.0"
 info:
-  version: "0.50.11"
-  title: Gramene API for release 50
+  version: "0.51.0"
+  title: Gramene API for release 51
 # basePath prefixes all resource paths
-basePath: /v50
+basePath: /v51
 # during dev, should point to your local machine
 #host: localhost:{10000 + db release version}/{basePath}
 # 
