@@ -121,9 +121,7 @@ paths:
           in: "query"
           description: "Supply all facets as a structured document."
           required: false
-          type: "array"
-          items:
-            type: "string"
+          type: "string"
         -
           name: "rows"
           in: "query"
