@@ -1,6 +1,6 @@
 swagger: "2.0"
 info:
-  version: "0.52.0"
+  version: "0.52.1"
   title: Gramene API for release 52
 # basePath prefixes all resource paths
 basePath: /v52
@@ -116,6 +116,7 @@ paths:
           type: "array"
           items:
             type: "string"
+          collectionFormat: "multi"
         -
           name: "json.facet"
           in: "query"
