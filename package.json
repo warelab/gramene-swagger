@@ -14,7 +14,7 @@
     "csv2": "^0.1.1",
     "express": "^4.12.3",
     "gramene-mongodb-config": "1.52.1",
-    "gramene-bedify": "1.0.7",
+    "gramene-bedify": "1.0.8",
     "isnumber": "^1.0.0",
     "kerberos": "0.0.18",
     "lodash": "^3.10.1",
