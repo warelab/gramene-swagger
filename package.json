@@ -1,6 +1,6 @@
 {
   "name": "gramene-swagger",
-  "version": "0.52.2",
+  "version": "1.0.0",
   "private": true,
   "description": "Gramene API - Made using swagger",
   "keywords": [],
