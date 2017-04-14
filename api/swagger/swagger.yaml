@@ -347,6 +347,42 @@ paths:
           description: "MongoDB response object"
           schema:
             $ref: "#/definitions/ReactomeEntityResponse"
+  /atlas:
+    x-swagger-router-controller: mongo
+    get:
+      summary: "MongoDB"
+      operationId: atlas
+      description: "Fetch documents from a collection"
+      parameters:
+        - $ref: "#/parameters/q"
+        - $ref: "#/parameters/rows"
+        - $ref: "#/parameters/start"
+        - $ref: "#/parameters/fl"
+        - $ref: "#/parameters/wt"
+        - $ref: "#/parameters/idList"
+      tags:
+        - "Data access"
+      responses:
+        200:
+          description: "MongoDB response object"
+  /expression:
+    x-swagger-router-controller: mongo
+    get:
+      summary: "MongoDB"
+      operationId: expression
+      description: "Fetch documents from a collection"
+      parameters:
+        - $ref: "#/parameters/q"
+        - $ref: "#/parameters/rows"
+        - $ref: "#/parameters/start"
+        - $ref: "#/parameters/fl"
+        - $ref: "#/parameters/wt"
+        - $ref: "#/parameters/idList"
+      tags:
+        - "Data access"
+      responses:
+        200:
+          description: "MongoDB response object"
 
   /{collection}:
     x-swagger-router-controller: mongo
@@ -1011,6 +1047,7 @@ definitions:
        - "PO"
        - "pathways"
        - "location"
+       - "expression"
 
   int_range:
     required:
@@ -1477,5 +1514,7 @@ parameters:
       - "taxonomy"
       - "GO"
       - "PO"
+      - "expression"
+      - "atlas"
     type: "string"
     required: true
