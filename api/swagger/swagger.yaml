@@ -373,6 +373,7 @@ paths:
       description: "Fetch documents from a collection"
       parameters:
         - $ref: "#/parameters/q"
+        - $ref: "#/parameters/taxon_id"
         - $ref: "#/parameters/rows"
         - $ref: "#/parameters/start"
         - $ref: "#/parameters/fl"
