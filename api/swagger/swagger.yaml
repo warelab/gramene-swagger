@@ -347,12 +347,12 @@ paths:
           description: "MongoDB response object"
           schema:
             $ref: "#/definitions/ReactomeEntityResponse"
-  /atlas:
+  /expression:
     x-swagger-router-controller: mongo
     get:
       summary: "MongoDB"
-      operationId: atlas
-      description: "Fetch documents from a collection"
+      operationId: expression
+      description: "Fetch expression data"
       parameters:
         - $ref: "#/parameters/q"
         - $ref: "#/parameters/rows"
@@ -365,11 +365,30 @@ paths:
       responses:
         200:
           description: "MongoDB response object"
-  /expression:
+  /assays:
     x-swagger-router-controller: mongo
     get:
       summary: "MongoDB"
-      operationId: expression
+      operationId: assays
+      description: "Fetch documents from a collection"
+      parameters:
+        - $ref: "#/parameters/q"
+        - $ref: "#/parameters/taxon_id"
+        - $ref: "#/parameters/rows"
+        - $ref: "#/parameters/start"
+        - $ref: "#/parameters/fl"
+        - $ref: "#/parameters/wt"
+        - $ref: "#/parameters/idList"
+      tags:
+        - "Data access"
+      responses:
+        200:
+          description: "MongoDB response object"
+  /experiments:
+    x-swagger-router-controller: mongo
+    get:
+      summary: "MongoDB"
+      operationId: experiments
       description: "Fetch documents from a collection"
       parameters:
         - $ref: "#/parameters/q"
@@ -1519,6 +1538,7 @@ parameters:
       - "GO"
       - "PO"
       - "expression"
-      - "atlas"
+      - "experiments"
+      - "assays"
     type: "string"
     required: true
