@@ -5,7 +5,7 @@ var version = require('gramene-mongodb-config').getMongoConfig().version;
 var through2 = require('through2');
 var csv2 = require('csv2');
 var JSONStream = require('JSONStream');
-
+version += 'b';
 var urlBase = 'http://brie.cshl.edu:8984/solr/';
 
 module.exports = {
