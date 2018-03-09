@@ -1,9 +1,9 @@
 swagger: "2.0"
 info:
-  version: "0.55.0"
-  title: Gramene API for release 56
+  version: "0.56.0"
+  title: Gramene API for panmaize release 56
 # basePath prefixes all resource paths
-basePath: /v56
+basePath: /panmaize56
 # during dev, should point to your local machine
 #host: localhost:{10000 + db release version}/{basePath}
 # 
