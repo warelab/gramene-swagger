@@ -6,7 +6,7 @@ var through2 = require('through2');
 var csv2 = require('csv2');
 var JSONStream = require('JSONStream');
 
-var urlBase = 'http://brie.cshl.edu:8983/solr/';
+var urlBase = 'http://brie.cshl.edu:8984/solr/';
 
 module.exports = {
   streamGenes: streamGenes,
@@ -48,7 +48,7 @@ function streamGenes(params) {
 }
 
 function streamSuggestions(params) {
-  return solrStream(urlBase + 'suggestions' + version + '/try', params);
+  return solrStream(urlBase + 'suggestions' + version + '/query', params);
 }
 
 function solrStream(uri, params) {

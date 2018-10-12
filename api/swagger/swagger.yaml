@@ -1,9 +1,9 @@
 swagger: "2.0"
 info:
-  version: "0.50.0"
-  title: Gramene API for release 50
+  version: "0.58.0"
+  title: Gramene API for release 58
 # basePath prefixes all resource paths
-basePath: /v50
+basePath: /v58
 # during dev, should point to your local machine
 #host: localhost:{10000 + db release version}/{basePath}
 # 
@@ -111,19 +111,18 @@ paths:
         -
           name: "fq"
           in: "query"
-          description: "Field query parameters"
+          description: "Filter query parameters"
           required: false
           type: "array"
           items:
             type: "string"
+          collectionFormat: "multi"
         -
           name: "json.facet"
           in: "query"
           description: "Supply all facets as a structured document."
           required: false
-          type: "array"
-          items:
-            type: "string"
+          type: "string"
         -
           name: "rows"
           in: "query"
@@ -156,6 +155,14 @@ paths:
           description: "query string."
           required: true
           type: "string"
+        -
+          name: "fq"
+          in: "query"
+          description: "Filter query parameters"
+          required: false
+          type: "array"
+          items:
+            type: "string"
         -
           name: "rows"
           in: "query"
@@ -190,6 +197,8 @@ paths:
         - $ref: "#/parameters/idList"
         - $ref: "#/parameters/bedFeature"
         - $ref: "#/parameters/bedCombiner"
+        - $ref: "#/parameters/taxon_id"
+        - $ref: "#/parameters/db_type"
       tags:
         - "Data access"
       responses:
@@ -270,6 +279,7 @@ paths:
         - $ref: "#/parameters/fl"
         - $ref: "#/parameters/wt"
         - $ref: "#/parameters/idList"
+        - $ref: "#/parameters/subset"
       tags:
         - "Data access"
       responses:
@@ -337,6 +347,62 @@ paths:
           description: "MongoDB response object"
           schema:
             $ref: "#/definitions/ReactomeEntityResponse"
+  /expression:
+    x-swagger-router-controller: mongo
+    get:
+      summary: "MongoDB"
+      operationId: expression
+      description: "Fetch expression data"
+      parameters:
+        - $ref: "#/parameters/q"
+        - $ref: "#/parameters/rows"
+        - $ref: "#/parameters/start"
+        - $ref: "#/parameters/fl"
+        - $ref: "#/parameters/wt"
+        - $ref: "#/parameters/idList"
+      tags:
+        - "Data access"
+      responses:
+        200:
+          description: "MongoDB response object"
+  /assays:
+    x-swagger-router-controller: mongo
+    get:
+      summary: "MongoDB"
+      operationId: assays
+      description: "Fetch documents from a collection"
+      parameters:
+        - $ref: "#/parameters/q"
+        - $ref: "#/parameters/taxon_id"
+        - $ref: "#/parameters/rows"
+        - $ref: "#/parameters/start"
+        - $ref: "#/parameters/fl"
+        - $ref: "#/parameters/wt"
+        - $ref: "#/parameters/idList"
+      tags:
+        - "Data access"
+      responses:
+        200:
+          description: "MongoDB response object"
+  /experiments:
+    x-swagger-router-controller: mongo
+    get:
+      summary: "MongoDB"
+      operationId: experiments
+      description: "Fetch documents from a collection"
+      parameters:
+        - $ref: "#/parameters/q"
+        - $ref: "#/parameters/taxon_id"
+        - $ref: "#/parameters/rows"
+        - $ref: "#/parameters/start"
+        - $ref: "#/parameters/fl"
+        - $ref: "#/parameters/wt"
+        - $ref: "#/parameters/idList"
+      tags:
+        - "Data access"
+      responses:
+        200:
+          description: "MongoDB response object"
 
   /{collection}:
     x-swagger-router-controller: mongo
@@ -380,6 +446,8 @@ definitions:
      - display_name
      - num_genes
      - score
+     - taxon_id
+     - taxon_freq
     properties:
       category:
         type: string
@@ -397,6 +465,10 @@ definitions:
       score:
         type: number
         minimum: 0
+      taxon_id:
+        $ref: "#/definitions/int_id_list"
+      taxon_freq:
+        $ref: "#/definitions/int_id_list"        
   Suggestions:
     required:
       - docs
@@ -468,6 +540,8 @@ definitions:
       name:
         type: string
       description:
+        type: string
+      summary:
         type: string
       taxon_id:
         type: integer
@@ -575,6 +649,8 @@ definitions:
         type: string
       description:
         type: string
+      summary:
+        type: string
       db_type:
         type: string
       synonyms:
@@ -629,7 +705,9 @@ definitions:
       location:
         $ref: "#/definitions/GeneLocation"
       xrefs:
-        $ref: "#/definitions/GeneXrefs"
+        type: array
+        items:
+          $ref: "#/definitions/GeneXref"
   GeneAnnotations:
     properties:
       GO:
@@ -684,6 +762,8 @@ definitions:
         type: string
       subset:
         $ref: "#/definitions/string_list"
+      evidence_code:
+        type: string
   DomainAnnotations:
     properties:
       id:
@@ -748,23 +828,35 @@ definitions:
       - canonical_transcript
     properties:
       exons:
-        type: object
-        additionalProperties:
-          $ref: "#/definitions/int_range"
+        type: array
+        items:
+          $ref: "#/definitions/GeneExon"
       transcripts:
-        type: object
-        additionalProperties:
+        type: array
+        items:
           $ref: "#/definitions/GeneTranscript"
       canonical_transcript:
         type: string
 
+  GeneExon:
+    allOf:
+      - $ref: "#/definitions/int_range"
+      - required:
+          - id
+        properties:
+          id:
+            type: string
+
   GeneTranscript:
     required:
+      - id
       - exons
       - exon_junctions
       - length
 
     properties:
+      id:
+        type: string
       cds:
         $ref: "#/definitions/int_range"
       exons:
@@ -823,7 +915,7 @@ definitions:
   InterProDomain:
     allOf:
       - $ref: "#/definitions/InterProType"
-        properties:
+      - properties:
           roots:
             type: string
           architecture:
@@ -857,6 +949,11 @@ definitions:
         $ref: '#/definitions/GeneTree'
       pan_tree:
         $ref: '#/definitions/GeneTree'
+      homologous_genes:
+        $ref: '#/definitions/HomologyTypes'
+
+  HomologyTypes:
+    properties:
       ortholog_one2one:
         $ref: '#/definitions/string_list'
       ortholog_one2many:
@@ -942,36 +1039,15 @@ definitions:
               - 1
               - -1
 
-  GeneXrefs:
+  GeneXref:
+    required:
+      - db
+      - ids
     properties:
-      # taken from gramene-dbxrefs project v3.0.1
-      TAIR_LOCUS:
+      db:
+        type: string
+      ids:
         $ref: '#/definitions/string_list'
-      ARAPORT_GENE:
-        $ref: '#/definitions/string_list'
-      UniGene:
-        $ref: '#/definitions/string_list'
-      UniParc:
-        $ref: '#/definitions/string_list'
-      protein_id:
-        $ref: '#/definitions/string_list'
-      EMBL:
-        $ref: '#/definitions/string_list'
-      KEGG_Enzyme:
-        $ref: '#/definitions/string_list'
-      UniPathway:
-        $ref: '#/definitions/string_list'
-      MetaCyc:
-        $ref: '#/definitions/string_list'
-      MEROPS:
-        $ref: '#/definitions/string_list'
-      PDB:
-        $ref: '#/definitions/string_list'
-      GOA:
-        $ref: '#/definitions/string_list'
-      IntEnz:
-        $ref: '#/definitions/string_list'
-
 
   MongoGenesResponse:
     type: array
@@ -991,6 +1067,7 @@ definitions:
        - "PO"
        - "pathways"
        - "location"
+       - "expression"
 
   int_range:
     required:
@@ -1121,6 +1198,7 @@ definitions:
       - db
       - taxon_id
       - system_name
+      - display_name
       - type
       - length
       - regions
@@ -1134,6 +1212,8 @@ definitions:
         type: integer
         minimum: 0
       system_name:
+        type: string
+      display_name:
         type: string
       type:
         type: string
@@ -1412,6 +1492,21 @@ parameters:
     enum:
       - "canonical"
       - "all"
+  taxon_id:
+    name: "taxon_id"
+    in: "query"
+    description: "NCBI taxonomy id"
+    type: "integer"
+    required: false
+  db_type:
+    name: "db_type"
+    in: "query"
+    description: "set to core if you don't care about otherfeatures"
+    type: "string"
+    required: false
+    enum:
+      - "core"
+      - "otherfeatures"
   idList:
     name: "idList"
     in: "query"
@@ -1420,6 +1515,16 @@ parameters:
     items:
       type: "string"
     required: false
+  subset:
+    name: "subset"
+    in: "query"
+    description: "subset of NCBI taxonomy"
+    required: false
+    type: string
+    enum:
+      - "gramene"
+      - "compara"
+      - "pan_compara"
   collection:
     name: "collection"
     in: "path"
@@ -1432,5 +1537,8 @@ parameters:
       - "taxonomy"
       - "GO"
       - "PO"
+      - "expression"
+      - "experiments"
+      - "assays"
     type: "string"
     required: true

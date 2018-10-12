@@ -46,7 +46,7 @@ function buildQuery(params, nonSchemaParams) {
     var a = params.l.split(':');
     var t = a[0], r = a[1], s = a[2], e = a[3];
     qExprs.push(
-      {'location.taxon_id': t},
+      {'taxon_id': t},
       {'location.region': r},
       {'location.start': {'$lte': +e}},
       {'location.end': {'$gte': +s}});
@@ -68,6 +68,8 @@ function buildQuery(params, nonSchemaParams) {
   function maybeCastToNumber(x) {
     return isNumber(x) ? +x : x;
   }
+
+  _.merge(nonSchemaParams,_.pick(params,['taxon_id','db_type', 'subset']));
 
   _.forEach(nonSchemaParams, function(value, key) {
     var expr = {};
