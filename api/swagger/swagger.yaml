@@ -1,9 +1,9 @@
 swagger: "2.0"
 info:
   version: "0.59.0"
-  title: Gramene API for oryza pangenome release 3.1
+  title: Gramene API for yeast pangenome release 1
 # basePath prefixes all resource paths
-basePath: /oryza_v3
+basePath: /yeast_v1
 # during dev, should point to your local machine
 #host: localhost:{10000 + db release version}/{basePath}
 # 

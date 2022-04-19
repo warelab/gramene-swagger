@@ -37,7 +37,7 @@ SwaggerExpress.create(config, function (err, swaggerExpress) {
 
   // start it up
   var version = +basePath.match(/\d+/);
-  var port = 20003; // process.env.PORT || 10000 + version;
+  var port = 60001; // process.env.PORT || 10000 + version;
   app.listen(port);
 
   console.log('Listening on', port);
