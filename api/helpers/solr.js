@@ -6,7 +6,7 @@ var through2 = require('through2');
 var csv2 = require('csv2');
 var JSONStream = require('JSONStream');
 
-var urlBase = 'http://squam:8983/solr/yeast_';
+var urlBase = 'http://squam:8983/solr/grapevine_';
 
 module.exports = {
   streamGenes: streamGenes,
