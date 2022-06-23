@@ -1,9 +1,9 @@
 swagger: "2.0"
 info:
   version: "0.59.0"
-  title: Gramene API for grapevine pangenome release 3
+  title: API for sorghumbasee release 4
 # basePath prefixes all resource paths
-basePath: /grapevine_v3
+basePath: /sorghum_v4
 # during dev, should point to your local machine
 #host: localhost:{10000 + db release version}/{basePath}
 # 
