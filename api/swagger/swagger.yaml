@@ -3,7 +3,7 @@ info:
   version: "0.59.0"
   title: API for sorghumbasee release 4
 # basePath prefixes all resource paths
-basePath: /sorghum_v4
+basePath: /sorghum_v5
 # during dev, should point to your local machine
 #host: localhost:{10000 + db release version}/{basePath}
 # 
