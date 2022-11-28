@@ -2,6 +2,7 @@
 
 ## Install
 First, clone the repository or download a release. Then:
+Update package.json, swagger yaml and paths as needed
 ```bash
 npm i 
 node app.js
