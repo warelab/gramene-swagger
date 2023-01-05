@@ -1,9 +1,9 @@
 swagger: "2.0"
 info:
   version: "0.59.0"
-  title: API for sorghumbasee release 4
+  title: API for gramene release 66
 # basePath prefixes all resource paths
-basePath: /sorghum_v5
+basePath: /v66
 # during dev, should point to your local machine
 #host: localhost:{10000 + db release version}/{basePath}
 # 
@@ -312,6 +312,26 @@ paths:
     get:
       summary: "MongoDB"
       operationId: PO
+      description: "Fetch documents from a collection"
+      parameters:
+        - $ref: "#/parameters/q"
+        - $ref: "#/parameters/rows"
+        - $ref: "#/parameters/start"
+        - $ref: "#/parameters/fl"
+        - $ref: "#/parameters/wt"
+        - $ref: "#/parameters/idList"
+      tags:
+        - "Data access"
+      responses:
+        200:
+          description: "MongoDB response object"
+          schema:
+            $ref: "#/definitions/OntologyResponse"
+  /TO:
+    x-swagger-router-controller: mongo
+    get:
+      summary: "MongoDB"
+      operationId: TO
       description: "Fetch documents from a collection"
       parameters:
         - $ref: "#/parameters/q"
