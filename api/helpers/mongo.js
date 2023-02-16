@@ -45,8 +45,13 @@ function buildQuery(params, nonSchemaParams) {
   if (params.l) {
     var a = params.l.split(':');
     var t = a[0], r = a[1], s = a[2], e = a[3];
+    const taxon_re = /^[0-9]+$/;
+    let map_or_tax = {'location.map': t};
+    if (taxon_re.test(a[0])) {
+      map_or_tax = {'taxon_id': t};
+    }
     qExprs.push(
-      {'taxon_id': t},
+      map_or_tax,
       {'location.region': r},
       {'location.start': {'$lte': +e}},
       {'location.end': {'$gte': +s}});

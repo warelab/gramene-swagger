@@ -1,9 +1,9 @@
 swagger: "2.0"
 info:
   version: "0.59.0"
-  title: API for gramene release 66
+  title: API for gramene oryza release 5
 # basePath prefixes all resource paths
-basePath: /v66
+basePath: /oryza_v5
 # during dev, should point to your local machine
 #host: localhost:{10000 + db release version}/{basePath}
 # 
@@ -340,6 +340,27 @@ paths:
         - $ref: "#/parameters/fl"
         - $ref: "#/parameters/wt"
         - $ref: "#/parameters/idList"
+      tags:
+        - "Data access"
+      responses:
+        200:
+          description: "MongoDB response object"
+          schema:
+            $ref: "#/definitions/OntologyResponse"
+  /qtls:
+    x-swagger-router-controller: mongo
+    get:
+      summary: "MongoDB"
+      operationId: qtls
+      description: "Fetch documents from a collection"
+      parameters:
+        - $ref: "#/parameters/q"
+        - $ref: "#/parameters/rows"
+        - $ref: "#/parameters/start"
+        - $ref: "#/parameters/fl"
+        - $ref: "#/parameters/wt"
+        - $ref: "#/parameters/idList"
+        - $ref: "#/parameters/l"
       tags:
         - "Data access"
       responses:
