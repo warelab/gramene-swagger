@@ -360,7 +360,6 @@ paths:
         - $ref: "#/parameters/fl"
         - $ref: "#/parameters/wt"
         - $ref: "#/parameters/idList"
-        - $ref: "#/parameters/l"
       tags:
         - "Data access"
       responses:
