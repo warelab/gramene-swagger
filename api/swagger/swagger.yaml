@@ -1,9 +1,9 @@
 swagger: "2.0"
 info:
   version: "0.59.0"
-  title: API for gramene oryza release 5
+  title: API for gramene release 68
 # basePath prefixes all resource paths
-basePath: /oryza_v5
+basePath: /v68
 # during dev, should point to your local machine
 #host: localhost:{10000 + db release version}/{basePath}
 # 
@@ -590,6 +590,8 @@ definitions:
         type: number
       closest_rep_id:
         type: string
+      closest_rep_identity:
+        type: number
       closest_rep_name:
         type: string
       closest_rep_taxon_id:
@@ -598,6 +600,8 @@ definitions:
         type: string
       model_rep_id:
         type: string
+      model_rep_identity:
+        type: number
       model_rep_name:
         type: string
       model_rep_taxon_id:
