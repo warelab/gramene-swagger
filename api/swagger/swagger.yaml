@@ -124,6 +124,15 @@ paths:
           required: false
           type: "string"
         -
+          name: "stats.field"
+          in: "query"
+          description: "Get stats on a given field."
+          required: false
+          type: "array"
+          items:
+            type: "string"
+          collectionFormat: "multi"
+        -
           name: "rows"
           in: "query"
           description: "number of rows to return (default: 20)"

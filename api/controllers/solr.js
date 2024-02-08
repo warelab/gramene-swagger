@@ -9,7 +9,7 @@ module.exports = {
 };
 
 function genes(req, res) {
-  solrRequest(req, res, solrHelper.streamGenes, {facet: true});
+  solrRequest(req, res, solrHelper.streamGenes, {facet: true, stats: true});
 }
 
 function suggestions(req, res) {
