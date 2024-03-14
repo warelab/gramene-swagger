@@ -13,7 +13,7 @@
     "csv-stringify": "0.0.8",
     "csv2": "^0.1.1",
     "express": "^4.12.3",
-    "gramene-mongodb-config": "git+ssh://git@github.com:warelab/gramene-mongodb-config.git#oryza_v5.1",
+    "gramene-mongodb-config": "git+ssh://git@github.com:warelab/gramene-mongodb-config.git#sorghum_v7",
     "gramene-bedify": "1.0.8",
     "isnumber": "^1.0.0",
     "kerberos": "0.0.18",
