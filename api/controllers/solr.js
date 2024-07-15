@@ -9,6 +9,7 @@ module.exports = {
 };
 
 function genes(req, res) {
+  console.error("genes",req.swagger.params);
   solrRequest(req, res, solrHelper.streamGenes, {facet: true, stats: true});
 }
 

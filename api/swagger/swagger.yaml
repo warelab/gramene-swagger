@@ -1,15 +1,15 @@
 swagger: "2.0"
 info:
   version: "0.59.0"
-  title: API for sorghumbase release 7
+  title: API for flapjack demo
 # basePath prefixes all resource paths
-basePath: /sorghum_v7
+basePath: /flapjack
 # during dev, should point to your local machine
 #host: localhost:{10000 + db release version}/{basePath}
-# 
+#
 schemes:
   # tip: remove http to make production-grade
-  # - http
+  - http
   - https
 # format of bodies a client can send (Content-Type)
 consumes:
@@ -29,45 +29,116 @@ paths:
       responses:
         200:
           description: "HTML documentation for this web service, powered by swagger."
-#  /ensembl:
-#    get:
-#      summary: "Proxy to Gramene's Ensembl REST installation"
-#      description: "Please refer to rest.ensembl.org for documentation\n"
-#      tags:
-#        - "Ensembl REST"
-#      responses:
-#        200:
-#          description: "Ensembl REST response"
-#  /reactome:
-#    get:
-#      summary: "Proxy to Gramene's Plant Reactome REST API"
-#      description: "Reactome RESTful API <a href='http://reactomews.oicr.on.ca:8080/ReactomeRESTfulAPI/ReactomeRESTFulAPI.html'>documentation</a>"
-#      tags:
-#        - "Plant Reactome REST"
-#      responses:
-#        200:
-#          description: "plant reactome response"
-#  /reactome/pathwayHierarchy/{species}:
-#    get:
-#      summary: "pathway hierarchy"
-#      description: "Get the pathway hierarchy for a specified species as displayed in Reactome pathway browser."
-#      tags:
-#        - "Plant Reactome REST"
-#      produces:
-#        - "application/xml"
-#      responses:
-#        200:
-#          description: "String - XML text containing pathways and reactions"
-#      parameters:
-#        -
-#          name: "species"
-#          in: "path"
-#          description: "Full species name that should be encoded for URL (e.g. oryza+sativa, or zea+mays)"
-#          type: "string"
-#          required: true
   /swagger:
     x-swagger-pipe: swagger_raw
-
+  /fj-map:
+    x-swagger-router-controller: flapjack
+    get:
+      summary: "FlapJack Map"
+      operationId: map
+      description: "Fetches marker coordinates"
+      parameters:
+        -
+          name: "region"
+          in: "query"
+          description: "chromosome or sequence region name"
+          required: true
+          type: "string"
+        -
+          name: "start"
+          in: "query"
+          description: "start coordinate"
+          required: true
+          type: "integer"
+        -
+          name: "end"
+          in: "query"
+          description: "end coordinate"
+          required: true
+          type: "integer"
+        -
+          name: "genome"
+          in: "query"
+          description: "genomic map id"
+          required: true
+          type: "string"
+      tags:
+        - "flapjack"
+      responses:
+        200:
+          description: "sample map file format"
+  /fj-genotypes:
+    x-swagger-router-controller: flapjack
+    get:
+      summary: "FlapJack genotypes"
+      operationId: genotypes
+      description: "Fetches genotypes"
+      parameters:
+        -
+          name: "region"
+          in: "query"
+          description: "chromosome or sequence region name"
+          required: true
+          type: "string"
+        -
+          name: "start"
+          in: "query"
+          description: "start coordinate"
+          required: true
+          type: "integer"
+        -
+          name: "end"
+          in: "query"
+          description: "end coordinate"
+          required: true
+          type: "integer"
+        -
+          name: "genome"
+          in: "query"
+          description: "genomic map id"
+          required: true
+          type: "string"
+      tags:
+        - "flapjack"
+      responses:
+        200:
+          description: "sample genotype file format"
+  /fj-features:
+    x-swagger-router-controller: flapjack
+    get:
+      summary: "FlapJack feature track"
+      operationId: features
+      description: "Fetches feature coordinates"
+      parameters:
+        -
+          name: "region"
+          in: "query"
+          description: "chromosome or sequence region name"
+          required: true
+          type: "string"
+        -
+          name: "start"
+          in: "query"
+          description: "start coordinate"
+          required: true
+          type: "integer"
+        -
+          name: "end"
+          in: "query"
+          description: "end coordinate"
+          required: true
+          type: "integer"
+        -
+          name: "genome"
+          in: "query"
+          description: "genomic map id"
+          required: true
+          type: "string"
+      tags:
+        - "flapjack"
+      responses:
+        200:
+          description: "sample feature file format"
   /search:
     x-swagger-router-controller: solr
     get:
@@ -100,7 +171,7 @@ paths:
             - "bed"
           type: "string"
           required: false
-        - 
+        -
           name: "facet.field"
           in: "query"
           description: "Facet field parameters"
@@ -517,7 +588,7 @@ definitions:
       taxon_id:
         $ref: "#/definitions/int_id_list"
       taxon_freq:
-        $ref: "#/definitions/int_id_list"        
+        $ref: "#/definitions/int_id_list"
   Suggestions:
     required:
       - docs
