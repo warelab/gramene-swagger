@@ -27,7 +27,6 @@ function cursorPromise(mongoCollectionPromise, params, nonSchemaParams) {
       options.fields[f] = 1;
     });
   }
-
   return mongoCollectionPromise.then(function(collection) {
     return collection.find(query, options);
   });
