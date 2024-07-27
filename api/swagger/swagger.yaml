@@ -452,6 +452,24 @@ paths:
       responses:
         200:
           description: "MongoDB response object"
+  /germplasm:
+    x-swagger-router-controller: mongo
+    get:
+      summary: "MongoDB"
+      operationId: germplasm
+      description: "Fetch documents from a collection"
+      parameters:
+        - $ref: "#/parameters/q"
+        - $ref: "#/parameters/rows"
+        - $ref: "#/parameters/start"
+        - $ref: "#/parameters/fl"
+        - $ref: "#/parameters/wt"
+        - $ref: "#/parameters/idList"
+      tags:
+        - "Data access"
+      responses:
+        200:
+          description: "MongoDB response object"
 
   /{collection}:
     x-swagger-router-controller: mongo
