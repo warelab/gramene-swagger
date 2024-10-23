@@ -1,9 +1,9 @@
 swagger: "2.0"
 info:
   version: "0.59.0"
-  title: API for sorghumbase release 7
+  title: API for sorghumbase release 8
 # basePath prefixes all resource paths
-basePath: /sorghum_v7
+basePath: /sorghum_v8
 # during dev, should point to your local machine
 #host: localhost:{10000 + db release version}/{basePath}
 # 
@@ -67,6 +67,32 @@ paths:
 #          required: true
   /swagger:
     x-swagger-pipe: swagger_raw
+
+  /validate:
+    x-swagger-router-controller: solr
+    post:
+      summary: "Validate a list of IDs"
+      description: "Accepts a list of IDs and returns validation results"
+      operationId: validate
+      consumes:
+        - application/json
+      parameters:
+        - in: body
+          name: ids
+          description: list of gene ids
+          schema:
+            type: object
+            properties:
+              ids:
+                type: array
+                items:
+                  type: string
+            required:
+              - ids
+      responses:
+        200:
+          description: Successful validation response
+
 
   /search:
     x-swagger-router-controller: solr

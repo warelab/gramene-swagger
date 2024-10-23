@@ -7,10 +7,14 @@ var csv2 = require('csv2');
 var JSONStream = require('JSONStream');
 
 var urlBase = 'http://squam:8983/solr/sorghum_';
+const genesURL = `${urlBase}genes${version}`;
+const suggestionsURL = `${urlBase}suggestions${version}`;
 
 module.exports = {
   streamGenes: streamGenes,
-  streamSuggestions: streamSuggestions
+  streamSuggestions: streamSuggestions,
+  genesURL: genesURL,
+  suggestionsURL: suggestionsURL
 };
 
 var bedFields = {
@@ -42,13 +46,13 @@ function streamGenes(params) {
     params.sort = 'gene_idx asc';
     params.isBed = true;
     params.omitHeader=true;
-    return solrStream(urlBase + 'genes' + version + '/export', params);
+    return solrStream(genesURL + '/export', params);
   }
-  return solrStream(urlBase + 'genes' + version + '/query', params);
+  return solrStream(genesURL + '/query', params);
 }
 
 function streamSuggestions(params) {
-  return solrStream(urlBase + 'suggestions' + version + '/query', params);
+  return solrStream(suggestionsURL + '/query', params);
 }
 
 function solrStream(uri, params) {
