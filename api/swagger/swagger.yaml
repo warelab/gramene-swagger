@@ -3,7 +3,7 @@ info:
   version: "0.59.0"
   title: API for sorghumbase release 8
 # basePath prefixes all resource paths
-basePath: /sorghum_v8
+basePath: /auth_testing
 # during dev, should point to your local machine
 #host: localhost:{10000 + db release version}/{basePath}
 # 
@@ -68,6 +68,41 @@ paths:
   /swagger:
     x-swagger-pipe: swagger_raw
 
+  /save_list:
+    x-swagger-router-controller: mongo
+    post:
+      summary: "Save a validated list of IDs"
+      description: "Accepts list metadata and upserts to mongo"
+      operationId: saveList
+      consumes:
+        - application/json
+      parameters:
+        -
+          in: query
+          name: hash
+          description: hash key
+          type: integer
+        -
+          in: query
+          name: label
+          description: label
+          type: string
+        -
+          in: query
+          name: site
+          description: site identifier
+          type: string
+        -
+          in: query
+          name: isPublic
+          description: list should be public
+          type: boolean
+      responses:
+        200:
+          description: Successful validation response
+        401:
+          description: Authorization failed
+
   /validate:
     x-swagger-router-controller: solr
     post:
@@ -92,7 +127,6 @@ paths:
       responses:
         200:
           description: Successful validation response
-
 
   /search:
     x-swagger-router-controller: solr
@@ -483,6 +517,24 @@ paths:
     get:
       summary: "MongoDB"
       operationId: germplasm
+      description: "Fetch documents from a collection"
+      parameters:
+        - $ref: "#/parameters/q"
+        - $ref: "#/parameters/rows"
+        - $ref: "#/parameters/start"
+        - $ref: "#/parameters/fl"
+        - $ref: "#/parameters/wt"
+        - $ref: "#/parameters/idList"
+      tags:
+        - "Data access"
+      responses:
+        200:
+          description: "MongoDB response object"
+  /gene_lists:
+    x-swagger-router-controller: mongo
+    get:
+      summary: "MongoDB"
+      operationId: geneLists
       description: "Fetch documents from a collection"
       parameters:
         - $ref: "#/parameters/q"
