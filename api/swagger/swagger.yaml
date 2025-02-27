@@ -1,9 +1,9 @@
 swagger: "2.0"
 info:
   version: "0.59.0"
-  title: API for sorghumbase release 8
+  title: API for gramene maize release 5
 # basePath prefixes all resource paths
-basePath: /sorghum_v8
+basePath: /maize_v5
 # during dev, should point to your local machine
 #host: localhost:{10000 + db release version}/{basePath}
 # 
