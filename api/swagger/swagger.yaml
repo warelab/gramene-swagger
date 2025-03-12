@@ -7,6 +7,17 @@ basePath: /auth_testing
 # during dev, should point to your local machine
 #host: localhost:{10000 + db release version}/{basePath}
 # 
+tags:
+  -
+     name: "Search"
+     description: "Find and apply search filters"
+  -
+     name: "Data access"
+     description: "Fetch structured documents"
+  -
+     name: "User Data"
+     description: "Operations for user data"
+    
 schemes:
   # tip: remove http to make production-grade
   # - http
@@ -68,11 +79,41 @@ paths:
   /swagger:
     x-swagger-pipe: swagger_raw
 
-  /save_list:
+  /gene_lists:
     x-swagger-router-controller: mongo
+    get:
+      summary: "Fetch saved lists"
+      description: "Fetchs saved lists for a validated user or public lists"
+      tags:
+        - "User Data"
+      operationId: getList
+      parameters:
+        - in: query
+          name: public
+          description: Return public gene lists
+          type: boolean
+          required: true
+        - in: query
+          name: site
+          description: site identifier
+          type: string
+          required: true
+        -
+          name: "rows"
+          in: "query"
+          description: "number of lists to return (default: 20)"
+          required: false
+          type: "integer"
+      responses:
+        200:
+          description: Metadata for all personal or public gene lists
+        401:
+          description: Authorization failed
     post:
       summary: "Save a validated list of IDs"
       description: "Accepts list metadata and upserts to mongo"
+      tags:
+        - "User Data"
       operationId: saveList
       consumes:
         - application/json
@@ -81,6 +122,11 @@ paths:
           in: query
           name: hash
           description: hash key
+          type: integer
+        -
+          in: query
+          name: n_genes
+          description: number of genes in the list
           type: integer
         -
           in: query
@@ -103,11 +149,13 @@ paths:
         401:
           description: Authorization failed
 
-  /validate:
+  /gene_lists/validate:
     x-swagger-router-controller: solr
     post:
       summary: "Validate a list of IDs"
       description: "Accepts a list of IDs and returns validation results"
+      tags:
+        - "User Data"
       operationId: validate
       consumes:
         - application/json
@@ -115,15 +163,11 @@ paths:
         - in: body
           name: ids
           description: list of gene ids
+          required: true
           schema:
-            type: object
-            properties:
-              ids:
-                type: array
-                items:
-                  type: string
-            required:
-              - ids
+            type: array
+            items:
+              type: string
       responses:
         200:
           description: Successful validation response
@@ -131,7 +175,7 @@ paths:
   /search:
     x-swagger-router-controller: solr
     get:
-      summary: "Gramene Data"
+      summary: "Solr"
       operationId: genes
       description: "This is the entry point for searching our solr genes core.\n"
       parameters:
@@ -214,7 +258,7 @@ paths:
   /suggest:
     x-swagger-router-controller: solr
     get:
-      summary: "Genes"
+      summary: "Solr"
       operationId: suggestions
       description: "This is the entry point for searching our solr genes core.\n"
       parameters:
@@ -517,24 +561,6 @@ paths:
     get:
       summary: "MongoDB"
       operationId: germplasm
-      description: "Fetch documents from a collection"
-      parameters:
-        - $ref: "#/parameters/q"
-        - $ref: "#/parameters/rows"
-        - $ref: "#/parameters/start"
-        - $ref: "#/parameters/fl"
-        - $ref: "#/parameters/wt"
-        - $ref: "#/parameters/idList"
-      tags:
-        - "Data access"
-      responses:
-        200:
-          description: "MongoDB response object"
-  /gene_lists:
-    x-swagger-router-controller: mongo
-    get:
-      summary: "MongoDB"
-      operationId: geneLists
       description: "Fetch documents from a collection"
       parameters:
         - $ref: "#/parameters/q"

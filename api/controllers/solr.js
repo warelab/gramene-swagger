@@ -39,8 +39,7 @@ async function validate(req, res) {
   // validate the ids
   // create a hash key for the validated ids
   const solrURL = solrHelper.genesURL + '/select';
-
-  var ids = req.body.ids;
+  var ids = req.body;
   let uniqueIdentifiers = [...new Set(ids)].sort();
 
   // check if this set of ids has been validated already
