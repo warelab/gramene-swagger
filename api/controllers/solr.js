@@ -4,7 +4,6 @@ var _ = require('lodash');
 var solrHelper = require('../helpers/solr');
 const murmur = require('murmurhash3js');
 const hash32 = murmur.x86.hash32('example');
-// console.log(hash32); // Compact 32-bit hash
 const axios = require('axios');
 
 module.exports = {
@@ -54,7 +53,7 @@ async function validate(req, res) {
       console.error('error querying solr for saved_search:', error);
     }
   }
-  
+
   const hashed_input = murmur.x86.hash32(uniqueIdentifiers.join(''));
   const isSaved = await checkHash(hashed_input);
 

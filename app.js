@@ -2,13 +2,35 @@
 
 var SwaggerExpress = require('swagger-express-mw');
 var express = require('express');
+const passport = require('passport');
 var cors = require('cors');
 
 var app = express();
 app.use(cors());
+app.use(require('express-session')({secret: process.env.SESSION_SECRET, resave: true, saveUninitialized: true }));
+app.use(passport.initialize());
+app.use(passport.session());
 
-//var fs = require('fs');
-//var yaml = require('js-yaml');
+app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+app.get('/auth/google/callback', passport.authenticate('google', { failureRedirect: '/' }),
+  (req, res) => {
+    res.redirect('/');
+  });
+app.get('/logout', (req, res) => {
+  req.logout();
+  res.redirect('/');
+});
+
+function isAuthenticated(req, res, next) {
+  if (req.isAuthenticated()) {
+    return next();
+  }
+  res.status(401).send('Unauthorized');
+}
+
+app.get('/protected-api', isAuthenticated, (req, res) => {
+  res.send('This is protected data');
+});
 
 module.exports = app;
 

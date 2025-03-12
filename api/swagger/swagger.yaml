@@ -6,7 +6,7 @@ info:
 basePath: /sorghum_v8
 # during dev, should point to your local machine
 #host: localhost:{10000 + db release version}/{basePath}
-# 
+#
 schemes:
   # tip: remove http to make production-grade
   # - http
@@ -68,6 +68,56 @@ paths:
   /swagger:
     x-swagger-pipe: swagger_raw
 
+  /gxa/json/baseline_refexperiment:
+    x-swagger-router-controller: gxa
+    post:
+      summary: "Fetch reference study expression profiles"
+      description: "Accepts a list of gene ids and returns gxa response"
+      operationId: baseline_refexperiment
+      consumes:
+        - application/json
+      parameters:
+        - in: body
+          name: geneQuery
+          description: list of gene ids
+          schema:
+            type: object
+            properties:
+              geneQuery:
+                type: array
+                items:
+                  type: string
+            required
+            - geneQuery
+      responses:
+        200:
+          description: Successful expression response
+
+  /gxa/json/baseline_experiments:
+    x-swagger-router-controller: gxa
+    post:
+      summary: "Fetch baseline expression profiles"
+      description: "Accepts a list of gene ids and returns gxa response"
+      operationId: baseline_experiments
+      consumes:
+        - application/json
+      parameters:
+        - in: body
+          name: geneQuery
+          description: list of gene ids
+          schema:
+            type: object
+            properties:
+              geneQuery:
+                type: array
+                items:
+                  type: string
+            required
+             - geneQuery
+      responses:
+        200:
+          description: Successful expression response
+
   /validate:
     x-swagger-router-controller: solr
     post:
@@ -126,7 +176,7 @@ paths:
             - "bed"
           type: "string"
           required: false
-        - 
+        -
           name: "facet.field"
           in: "query"
           description: "Facet field parameters"
@@ -561,7 +611,7 @@ definitions:
       taxon_id:
         $ref: "#/definitions/int_id_list"
       taxon_freq:
-        $ref: "#/definitions/int_id_list"        
+        $ref: "#/definitions/int_id_list"
   Suggestions:
     required:
       - docs
