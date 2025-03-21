@@ -70,12 +70,32 @@ function getFactory(collectionPromise) {
       transformer = JSONStream.stringify();
       mimetype = 'application/json';
     }
-
-    cursorPromise = mongoHelper.cursorPromise(collectionPromise, params, nonSchemaParams);
-    cursorPromise.then(function(cursor) {
-      res.contentType(mimetype);
-      cursor.stream().pipe(transformer).pipe(res);
-    });
+    if (req.swagger.operation.operationId === "genelists") {
+      nonSchemaParams.uid=0;
+    }
+    const authHeader = req.headers['authorization'];
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.split(' ')[1];
+      getAuth()
+      .verifyIdToken(token)
+      .then((decodedToken) => {
+        nonSchemaParams.uid = decodedToken.uid;
+        cursorPromise = mongoHelper.cursorPromise(collectionPromise, params, nonSchemaParams);
+        cursorPromise.then(function(cursor) {
+          res.contentType(mimetype);
+          cursor.stream().pipe(transformer).pipe(res);
+        });
+      })
+      .catch((error) => {
+        res.status(401).send('Authorization failed');
+      });
+    } else {
+      cursorPromise = mongoHelper.cursorPromise(collectionPromise, params, nonSchemaParams);
+      cursorPromise.then(function(cursor) {
+        res.contentType(mimetype);
+        cursor.stream().pipe(transformer).pipe(res);
+      });
+    }
   }
 }
 

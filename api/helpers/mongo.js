@@ -28,6 +28,8 @@ function cursorPromise(mongoCollectionPromise, params, nonSchemaParams) {
     });
   }
 
+  console.error("query",JSON.stringify(query));
+
   return mongoCollectionPromise.then(function(collection) {
     return collection.find(query, options);
   });
@@ -75,6 +77,12 @@ function buildQuery(params, nonSchemaParams) {
   }
 
   _.merge(nonSchemaParams,_.pick(params,['taxon_id','db_type', 'subset']));
+
+  if (params.site) {
+    qExprs.push({'site':params.site});
+    qExprs.push({'$or':[{'isPublic':params.isPublic},{'uid':nonSchemaParams.uid}]})
+    delete nonSchemaParams.uid;
+  }
 
   _.forEach(nonSchemaParams, function(value, key) {
     var expr = {};
