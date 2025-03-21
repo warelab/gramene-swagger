@@ -32,6 +32,7 @@ produces:
   - application/xml
   - text/plain
   - text/tab-separated-values
+
 paths:
   /docs:
     get:
@@ -92,15 +93,11 @@ paths:
         - in: body
           name: geneQuery
           description: list of gene ids
+          required: true
           schema:
-            type: object
-            properties:
-              geneQuery:
-                type: array
-                items:
-                  type: string
-            required
-            - geneQuery
+            type: array
+            items:
+              type: string
       responses:
         200:
           description: Successful expression response
@@ -112,20 +109,16 @@ paths:
       description: "Accepts a list of gene ids and returns gxa response"
       operationId: baseline_experiments
       consumes:
-        - application/json
+        - application/x-www-form-urlencoded
       parameters:
         - in: body
           name: geneQuery
           description: list of gene ids
+          required: true
           schema:
-            type: object
-            properties:
-              geneQuery:
-                type: array
-                items:
-                  type: string
-            required
-             - geneQuery
+            type: array
+            items:
+              type: string
       responses:
         200:
           description: Successful expression response
@@ -137,10 +130,10 @@ paths:
       description: "Fetchs saved lists for a validated user or public lists"
       tags:
         - "User Data"
-      operationId: getList
+      operationId: genelists
       parameters:
         - in: query
-          name: public
+          name: isPublic
           description: Return public gene lists
           type: boolean
           required: true
