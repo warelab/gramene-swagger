@@ -29,11 +29,11 @@ async function baseline_experiments(req, res) {
       Object.keys(g).forEach(exp => {
         if (exp !== "_id") {
           g[exp].forEach(a => {
-            if (a.hasOwnProperty('value') && a.value > 0) {
+            if (a.hasOwnProperty('value') && a.value >= 0) {
               if (!tpm.hasOwnProperty(exp)) {
                 tpm[exp] = {};
               }
-              tpm[exp][a.group] = a.value;
+              tpm[exp][a.group] = a.value < 0.5 ? 0 : a.value;
             }
           })
         }
@@ -43,7 +43,10 @@ async function baseline_experiments(req, res) {
 
     // Fetch experiments from MongoDB
     let experiments = await fetchBy(mongo.experiments.mongoCollection(), experimentIdentifiers, '_id');
-
+    let exp_lut = {};
+    experiments.forEach(e => {
+      exp_lut[e._id] = e
+    })
     // Fetch assays from MongoDB
     let assays = await fetchBy(mongo.assays.mongoCollection(), experimentIdentifiers, 'experiment');
 
@@ -62,7 +65,7 @@ async function baseline_experiments(req, res) {
       }
       assay.factor.forEach(factor => {
         if (factor.type === "organism part") {
-          if (tpm[assay.experiment] && tpm[assay.experiment][assay.group]) {
+          if (tpm[assay.experiment] && tpm[assay.experiment].hasOwnProperty(assay.group)) {
             if (! groups[assay.experiment]) {
               groups[assay.experiment] = {};
             }
@@ -93,6 +96,9 @@ async function baseline_experiments(req, res) {
             groups[eid][opart].forEach(assay => {
               let flabels = assay.factor.filter(factor => factor.type !== "organism part").map(factor => factor.label);
               let ef = `${eid} - ${flabels.join(' - ')}`;
+              if (exp_lut[eid].name) {
+                ef = `${exp_lut[eid].name} - ${flabels.join(' - ')}`;
+              }
               if (! rows.hasOwnProperty(ef)) {
                 rows[ef] = {
                   id: ef,
@@ -102,6 +108,8 @@ async function baseline_experiments(req, res) {
                   expressions: Array.from({ length: colNames.length }, () => ({})),
                   uri: `experiments/${eid}?geneQuery=%5B%7B%22value%22%3A%22${uniqueIdentifiers[0]}%22%7D%5D`
                 }
+                // prepend source of experiment (EBI, JGI, etc.)
+                rows[ef].name = `${exp_lut[eid].source} - ${rows[ef].name}`;
               }
               rows[ef]['expressions'][index] = {value: tpm[assay.experiment][assay.group]}
             })
@@ -111,12 +119,14 @@ async function baseline_experiments(req, res) {
             if (! rows.hasOwnProperty(eid)) {
               rows[eid] = {
                 id: eid,
-                name: eid,
+                name: exp_lut[eid].name || eid,
                 experimentType: "RNASEQ_MRNA_BASELINE",
                 expressionUnit: "TPM",
                 expressions: Array.from({ length: colNames.length }, () => ({})),
                 uri: `experiments/${eid}?geneQuery=%5B%7B%22value%22%3A%22${uniqueIdentifiers[0]}%22%7D%5D`
               }
+                // prepend source of experiment (EBI, JGI, etc.)
+              rows[eid].name = `${exp_lut[eid].source} - ${rows[eid].name}`;
             }
             rows[eid]['expressions'][index] = {value: tpm[assay.experiment][assay.group]}
           }
@@ -163,42 +173,6 @@ async function baseline_experiments(req, res) {
   }
 }
 
-async function basdeline_experiments(req, res) {
-  // get list of ids from request body
-  const ids = req.body.replace("geneQuery=", "").split(" ");
-  // uniqify ids
-  let uniqueIdentifiers = [...new Set(ids)];
-  let genes = await fetchByID(mongo.expression.mongoCollection(), uniqueIdentifiers);
-  console.error("genes",genes);
-  // // fetch expression data from mongodb
-  // mongo.expression.mongoCollection().then(function(expr) {
-  //   var options = {rows:-1};
-  //   var query = {'_id': {'$in': uniqueIdentifiers}};
-  //   expr.find(query,{},options).toArray(function(err,genes) {
-  //     var baselineExperiments = new Set();
-  //     genes.forEach(g => {
-  //       Object.keys(g).forEach(exp => {
-  //         if (exp !== "_id") {
-  //           if (g[exp][0].hasOwnProperty('value')) {
-  //             // this is a baseline experiment
-  //             baselineExperiments.add(exp);
-  //           }
-  //         }
-  //       })
-  //     })
-  //     let experimentIdentifiers = [...baselineExperiments];
-  //     console.error("baseline experiments",experimentIdentifiers);
-  //     mongo.experiments.mongoCollection().then(function(experColl) {
-  //       var options = {rows: -1};
-  //       var query = {'_id': {'$in': experimentIdentifiers}};
-  //       experColl.find(query,{},options).toArray(function(err, experiments) {
-  //         console.error(experiments);
-  //       })
-  //     })
-  //     res.json({message:'list saved'});
-  //   })
-  // });
-}
 async function baseline_refexperiment(req, res) {
   // get list of ids from request body
   var ids = req.body.geneQuery;
