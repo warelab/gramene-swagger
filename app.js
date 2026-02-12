@@ -57,6 +57,15 @@ SwaggerExpress.create(config, function (err, swaggerExpress) {
   // install swagger server middleware
   swaggerExpress.register(app);
 
+  // redirect unimplemented routes to ebi atlas
+  app.all(`${basePath}/*`, (req, res) => {
+    // Construct the external URL, preserving the original path and query
+    const ebiBase = 'https://www.ebi.ac.uk';
+    const gxaUrl = ebiBase + req.originalUrl.replace(basePath,'');
+    
+    console.log(`Redirecting unhandled route ${req.originalUrl} to ${gxaUrl}`);
+    res.redirect(301, gxaUrl); // 301 for permanent, 302 for temporary redirect
+  });
   // start it up
   var version = +basePath.match(/\d+/);
   var port = 50003; // process.env.PORT || 10000 + version;
