@@ -206,6 +206,59 @@ paths:
           description: Successful validation response
         401:
           description: Authorization failed
+    delete:
+      summary: "Delete a saved gene list"
+      description: "Deletes a gene list owned by the authenticated user"
+      tags:
+        - "User Data"
+      operationId: deleteList
+      parameters:
+        - in: query
+          name: listId
+          description: id of the gene list to delete
+          type: string
+          required: true
+      responses:
+        200:
+          description: List deleted
+        401:
+          description: Authorization failed
+        404:
+          description: List not found or not owned by user
+    patch:
+      summary: "Update a saved gene list"
+      description: "Updates label and/or isPublic on a gene list owned by the authenticated user"
+      tags:
+        - "User Data"
+      operationId: updateList
+      consumes:
+        - application/json
+      parameters:
+        - in: query
+          name: listId
+          description: id of the gene list to update
+          type: string
+          required: true
+        - in: body
+          name: updates
+          description: fields to update
+          required: true
+          schema:
+            type: object
+            properties:
+              label:
+                type: string
+              isPublic:
+                type: boolean
+      responses:
+        200:
+          description: List updated
+        400:
+          description: No valid fields to update
+        401:
+          description: Authorization failed
+        404:
+          description: List not found or not owned by user
 
   /gene_lists/validate:
     x-swagger-router-controller: solr

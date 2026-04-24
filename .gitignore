@@ -33,6 +33,9 @@ node_modules
 # Runtime configuration for swagger app
 config/runtime.yaml
 
+# Firebase service account credentials
+gramene-auth-firebase-adminsdk-*.json
+
 .idea
 
 

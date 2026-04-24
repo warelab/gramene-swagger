@@ -394,7 +394,6 @@ async function baseline_experiment(req, res) {
     });
     // sort the columns
     const columnHeaders = columns.sort((a,b) => a.factorValue.localeCompare(b.factorValue));
-    console.log("uids",uniqueIdentifiers);
     let rows = uniqueIdentifiers.map(gene => {
       return {
         id: gene,
