@@ -67,17 +67,26 @@ function solrStream(uri, params) {
       case 'xml':
         type = 'application/xml';
         break;
-      case 'json':
-        type = 'application/json';
-        break;
       case 'bed':
         type = 'text/tab-separated-values';
         break;
+      case 'json':
       default:
-        type = 'text/plain';
+        // Solr's default response format is JSON, so an unspecified `wt`
+        // returns a JSON body. text/plain misleads browsers and CDNs.
+        type = 'application/json';
     }
 
     r.headers['content-type'] = type;
+
+    // Solr emits headers aimed at protecting its admin UI in a browser
+    // context. They're irrelevant for a JSON API and — in the case of
+    // Vary: User-Agent — would fragment any upstream cache by browser.
+    delete r.headers['vary'];
+    delete r.headers['content-security-policy'];
+    delete r.headers['x-frame-options'];
+    delete r.headers['x-xss-protection'];
+    delete r.headers['x-content-type-options'];
   });
 
   stream.on('error', function error(err) {
