@@ -1,5 +1,39 @@
 'use strict';
 
+// Node 23 removed the whole `util.isX` family of deprecated type-checks
+// (isArray, isBoolean, isBuffer, isDate, isError, isFunction, isNull,
+// isNullOrUndefined, isNumber, isObject, isPrimitive, isRegExp, isString,
+// isSymbol, isUndefined). The unmaintained `config@1.x` — pulled in
+// transitively by swagger-node-runner — calls several of them inside
+// cloneDeep. Restore them before anything else loads; the require cache
+// hands the same `util` module to every later require('util'). Each
+// shim is a no-op on Node <= 22 where the original still exists.
+{
+  const util = require('util');
+  const shims = {
+    isArray: (x) => Array.isArray(x),
+    isBoolean: (x) => typeof x === 'boolean',
+    isBuffer: (x) => Buffer.isBuffer(x),
+    isDate: (x) => x instanceof Date,
+    isError: (x) => x instanceof Error,
+    isFunction: (x) => typeof x === 'function',
+    isNull: (x) => x === null,
+    isNullOrUndefined: (x) => x == null,
+    isNumber: (x) => typeof x === 'number',
+    isObject: (x) => typeof x === 'object' && x !== null,
+    isPrimitive: (x) =>
+      x === null ||
+      (typeof x !== 'object' && typeof x !== 'function'),
+    isRegExp: (x) => x instanceof RegExp,
+    isString: (x) => typeof x === 'string',
+    isSymbol: (x) => typeof x === 'symbol',
+    isUndefined: (x) => x === undefined,
+  };
+  for (const [name, fn] of Object.entries(shims)) {
+    if (typeof util[name] !== 'function') util[name] = fn;
+  }
+}
+
 // Loaded before anything that reads process.env so a local .env (gitignored)
 // can populate SESSION_SECRET, FIREBASE_CREDENTIALS_PATH, GOOGLE_CLIENT_ID
 // etc. without requiring an inline `KEY=val node app.js` invocation.
