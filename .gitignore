@@ -36,6 +36,11 @@ config/runtime.yaml
 # Firebase service account credentials
 gramene-auth-firebase-adminsdk-*.json
 
+# Local env (SESSION_SECRET, FIREBASE_CREDENTIALS_PATH, etc.)
+.env
+.env.*
+!.env.example
+
 .idea
 
 

@@ -1,5 +1,12 @@
 'use strict';
 
+// Loaded before anything that reads process.env so a local .env (gitignored)
+// can populate SESSION_SECRET, FIREBASE_CREDENTIALS_PATH, GOOGLE_CLIENT_ID
+// etc. without requiring an inline `KEY=val node app.js` invocation.
+// Production deploys that already inject these via systemd / docker-compose
+// are unaffected — dotenv only fills in keys that aren't already set.
+require('dotenv').config();
+
 var SwaggerExpress = require('swagger-express-mw');
 var express = require('express');
 const passport = require('passport');
@@ -107,12 +114,18 @@ SwaggerExpress.create(config, function (err, swaggerExpress) {
   // install swagger server middleware
   swaggerExpress.register(app);
 
-  // redirect unimplemented routes to ebi atlas
+  // Redirect unimplemented routes to EBI Atlas. The swagger middleware above
+  // doesn't call next() after handling its routes in the happy path, but
+  // res.headersSent === true is the only reliable signal — Express still
+  // runs this catch-all on some swagger paths (e.g. /swagger, which goes
+  // through the x-swagger-pipe), and re-redirecting after headers are out
+  // throws ERR_HTTP_HEADERS_SENT.
   app.all(`${basePath}/*`, (req, res) => {
+    if (res.headersSent) return;
     // Construct the external URL, preserving the original path and query
     const ebiBase = 'https://www.ebi.ac.uk';
     const gxaUrl = ebiBase + req.originalUrl.replace(basePath,'');
-    
+
     console.log(`Redirecting unhandled route ${req.originalUrl} to ${gxaUrl}`);
     res.redirect(301, gxaUrl); // 301 for permanent, 302 for temporary redirect
   });

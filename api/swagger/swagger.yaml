@@ -3,7 +3,7 @@ info:
   version: "0.59.0"
   title: API for sorghumbase release 8
 # basePath prefixes all resource paths
-basePath: /auth_testing
+basePath: /sorghum_v10
 # during dev, should point to your local machine
 #host: localhost:{10000 + db release version}/{basePath}
 #
@@ -19,10 +19,9 @@ tags:
      description: "Operations for user data"
 
 #
-schemes:
-  # tip: remove http to make production-grade
-  # - http
-  - https
+# `schemes` omitted on purpose — swagger-ui's "Try it out" then uses the
+# same scheme the docs were served over (http in local dev, https behind
+# the production reverse proxy), instead of forcing one that may not match.
 # format of bodies a client can send (Content-Type)
 consumes:
   - application/json
@@ -259,6 +258,145 @@ paths:
           description: Authorization failed
         404:
           description: List not found or not owned by user
+
+  /saved_views:
+    x-swagger-router-controller: mongo
+    get:
+      summary: "Fetch saved view snapshots"
+      description: |
+        Two modes:
+          1. ?hash=H — single-doc lookup by share token. Returns the row if
+             it's public; if not public, requires the Bearer token of the
+             owner.
+          2. ?site=S&isPublic=B — listing. Public listings are anonymous-OK;
+             private listings require an authenticated Bearer token and are
+             scoped to that user's own rows.
+      tags:
+        - "User Data"
+      operationId: savedviews
+      parameters:
+        - in: query
+          name: hash
+          description: share-token lookup for a single saved view
+          type: string
+          required: false
+        - in: query
+          name: site
+          description: site identifier (listing mode)
+          type: string
+          required: false
+        - in: query
+          name: isPublic
+          description: return public saved views (listing mode)
+          type: boolean
+          required: false
+        - in: query
+          name: rows
+          description: "number of rows to return in listing mode (default: 20)"
+          type: integer
+          required: false
+      responses:
+        200:
+          description: Single saved view (hash mode) or array of metadata (listing mode)
+        401:
+          description: Authorization failed
+        404:
+          description: Saved view not found
+    post:
+      summary: "Save a view snapshot"
+      description: "Upserts the snapshot keyed by hash+uid. Existing createdAt is preserved on re-save."
+      tags:
+        - "User Data"
+      operationId: saveView
+      consumes:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          description: snapshot metadata + state
+          required: true
+          schema:
+            type: object
+            required:
+              - hash
+              - label
+              - site
+              - isPublic
+              - state
+            properties:
+              hash:
+                type: string
+                description: short content-addressable share token
+              label:
+                type: string
+              description:
+                type: string
+              site:
+                type: string
+              isPublic:
+                type: boolean
+              state:
+                type: object
+                description: the snapshot JSON blob (schema versioned client-side)
+                additionalProperties: true
+      responses:
+        200:
+          description: View saved
+        401:
+          description: Authorization failed
+    patch:
+      summary: "Update a saved view's label/visibility"
+      description: "label and/or isPublic only — the snapshot itself is immutable; a re-save with new state produces a new hash."
+      tags:
+        - "User Data"
+      operationId: updateView
+      consumes:
+        - application/json
+      parameters:
+        - in: query
+          name: viewId
+          description: internal id of the saved view to update
+          type: string
+          required: true
+        - in: body
+          name: updates
+          description: fields to update
+          required: true
+          schema:
+            type: object
+            properties:
+              label:
+                type: string
+              isPublic:
+                type: boolean
+      responses:
+        200:
+          description: View updated
+        400:
+          description: No valid fields to update
+        401:
+          description: Authorization failed
+        404:
+          description: View not found or not owned by user
+    delete:
+      summary: "Delete a saved view"
+      description: "Owner-only."
+      tags:
+        - "User Data"
+      operationId: deleteView
+      parameters:
+        - in: query
+          name: viewId
+          description: internal id of the saved view to delete
+          type: string
+          required: true
+      responses:
+        200:
+          description: View deleted
+        401:
+          description: Authorization failed
+        404:
+          description: View not found or not owned by user
 
   /gene_lists/validate:
     x-swagger-router-controller: solr
