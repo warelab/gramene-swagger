@@ -1,12 +1,13 @@
 swagger: "2.0"
 info:
   version: "0.59.0"
-  title: API for sorghumbase release 8
+  title: API for sorghumbase release 11
 # basePath prefixes all resource paths
-basePath: /sorghum_v8
-# during dev, should point to your local machine
-#host: localhost:{10000 + db release version}/{basePath}
-# 
+basePath: /sorghum_v11
+# public host clients build request URLs against (TLS terminated by apache,
+# proxied to the swagger server on squam:50011). For local-only testing,
+# override with host: localhost:50011 and add http to schemes below.
+host: data.sorghumbase.org
 schemes:
   # tip: remove http to make production-grade
   # - http
@@ -430,6 +431,25 @@ paths:
       description: "Fetch expression data"
       parameters:
         - $ref: "#/parameters/q"
+        - $ref: "#/parameters/rows"
+        - $ref: "#/parameters/start"
+        - $ref: "#/parameters/fl"
+        - $ref: "#/parameters/wt"
+        - $ref: "#/parameters/idList"
+      tags:
+        - "Data access"
+      responses:
+        200:
+          description: "MongoDB response object"
+  /expression_attributes:
+    x-swagger-router-controller: mongo
+    get:
+      summary: "MongoDB"
+      operationId: expression_attributes
+      description: "Fetch per-gene expression summary attributes"
+      parameters:
+        - $ref: "#/parameters/q"
+        - $ref: "#/parameters/taxon_id"
         - $ref: "#/parameters/rows"
         - $ref: "#/parameters/start"
         - $ref: "#/parameters/fl"

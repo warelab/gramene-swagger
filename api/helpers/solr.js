@@ -6,7 +6,7 @@ var through2 = require('through2');
 var csv2 = require('csv2');
 var JSONStream = require('JSONStream');
 
-var urlBase = 'http://squam:8983/solr/sorghum_';
+var urlBase = 'http://localhost:8983/solr/sorghum_';
 const genesURL = `${urlBase}genes${version}`;
 const suggestionsURL = `${urlBase}suggestions${version}`;
 
