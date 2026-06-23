@@ -7,6 +7,18 @@ var JSONStream = require('JSONStream');
 var csvStringify = require('csv-stringify');
 var bedify = require('gramene-bedify');
 var through2 = require('through2');
+const admin = require("firebase-admin");
+const { getAuth } = require("firebase-admin/auth")
+
+var path = require('path');
+var firebaseCredentialsPath = process.env.FIREBASE_CREDENTIALS_PATH
+  ? path.resolve(process.cwd(), process.env.FIREBASE_CREDENTIALS_PATH)
+  : "/usr/local/gramene/gramene-auth-firebase-adminsdk-c1sc0-263ff4cc4f.json";
+var serviceAccount = require(firebaseCredentialsPath);
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
 
 (function init() {
   var toExport = {};
@@ -25,7 +37,27 @@ var through2 = require('through2');
     }
     return toCall(req, res);
   };
+  // add a function to save a list
+  toExport['saveList'] = saveList;
+  toExport['deleteList'] = deleteList;
+  toExport['updateList'] = updateList;
 
+  // /saved_views GET has two modes. Wrap the auto-generated listing handler
+  // so single-hash lookups (auth-after-fetch) get routed to a dedicated
+  // handler. Listing mode falls through to the generic cursor path with
+  // the same site/isPublic/uid scoping as /gene_lists.
+  if (toExport.savedviews) {
+    var savedviewsList = toExport.savedviews;
+    toExport.savedviews = function (req, res) {
+      if (req.swagger.params.hash && req.swagger.params.hash.value) {
+        return getSavedViewByHash(req, res);
+      }
+      return savedviewsList(req, res);
+    };
+  }
+  toExport['saveView'] = saveView;
+  toExport['updateView'] = updateView;
+  toExport['deleteView'] = deleteView;
   module.exports = toExport;
 }());
 
@@ -61,11 +93,289 @@ function getFactory(collectionPromise) {
       transformer = JSONStream.stringify();
       mimetype = 'application/json';
     }
+    if (req.swagger.operation.operationId === "genelists" ||
+        req.swagger.operation.operationId === "savedviews") {
+      nonSchemaParams.uid=0;
+    }
+    const authHeader = req.headers['authorization'];
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.split(' ')[1];
+      getAuth()
+      .verifyIdToken(token)
+      .then((decodedToken) => {
+        nonSchemaParams.uid = decodedToken.uid;
+        cursorPromise = mongoHelper.cursorPromise(collectionPromise, params, nonSchemaParams);
+        cursorPromise.then(function(cursor) {
+          res.contentType(mimetype);
+          cursor.stream().pipe(transformer).pipe(res);
+        });
+      })
+      .catch((error) => {
+        res.status(401).send('Authorization failed');
+      });
+    } else {
+      cursorPromise = mongoHelper.cursorPromise(collectionPromise, params, nonSchemaParams);
+      cursorPromise.then(function(cursor) {
+        res.contentType(mimetype);
+        cursor.stream().pipe(transformer).pipe(res);
+      });
+    }
+  }
+}
 
-    cursorPromise = mongoHelper.cursorPromise(collectionPromise, params, nonSchemaParams);
-    cursorPromise.then(function(cursor) {
-      res.contentType(mimetype);
-      cursor.stream().pipe(transformer).pipe(res);
+async function deleteList(req, res) {
+  const authHeader = req.headers['authorization'];
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).send('Authorization header missing or malformed');
+  }
+  const token = authHeader.split(' ')[1];
+  let uid;
+  try {
+    const decoded = await getAuth().verifyIdToken(token);
+    uid = decoded.uid;
+  } catch (err) {
+    return res.status(401).send('Authorization failed');
+  }
+
+  const listId = req.swagger.params.listId.value;
+  if (!listId) {
+    return res.status(400).send('listId query parameter is required');
+  }
+  try {
+    const collection = await mongoCollections.genelists.mongoCollection();
+    const result = await collection.deleteOne({ _id: listId, uid: uid });
+    if (result.deletedCount === 0) {
+      return res.status(404).send('Gene list not found or not owned by user');
+    }
+    res.json({ message: 'list deleted' });
+  } catch (err) {
+    console.error('deleteList error:', err);
+    res.status(500).send('Failed to delete gene list');
+  }
+}
+
+async function updateList(req, res) {
+  const authHeader = req.headers['authorization'];
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).send('Authorization header missing or malformed');
+  }
+  const token = authHeader.split(' ')[1];
+  let uid;
+  try {
+    const decoded = await getAuth().verifyIdToken(token);
+    uid = decoded.uid;
+  } catch (err) {
+    return res.status(401).send('Authorization failed');
+  }
+
+  const listId = req.swagger.params.listId.value;
+  const body = req.swagger.params.updates.value || {};
+  const updates = {};
+  if (typeof body.label === 'string' && body.label.trim().length > 0) {
+    updates.label = body.label.trim();
+  }
+  if (typeof body.isPublic === 'boolean') {
+    updates.isPublic = body.isPublic;
+  }
+  if (Object.keys(updates).length === 0) {
+    return res.status(400).send('No valid fields to update (allowed: label, isPublic)');
+  }
+
+  try {
+    const collection = await mongoCollections.genelists.mongoCollection();
+    const result = await collection.updateOne({ _id: listId, uid: uid }, { $set: updates });
+    if (result.matchedCount === 0) {
+      return res.status(404).send('Gene list not found or not owned by user');
+    }
+    res.json({ message: 'list updated', updated: updates });
+  } catch (err) {
+    console.error('updateList error:', err);
+    res.status(500).send('Failed to update gene list');
+  }
+}
+
+async function saveList(req, res) {
+  let params = _.mapValues(req.swagger.params, 'value');
+
+  const authHeader = req.headers['authorization'];
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    getAuth()
+    .verifyIdToken(token)
+    .then((decodedToken) => {
+      params.uid = decodedToken.uid;
+      params.owner = decodedToken.name || decodedToken.email || decodedToken.uid;
+      // upsert to mongo collection if we have all the params
+      mongoCollections.genelists.mongoCollection().then(function(mongo) {
+        const id = `${params.hash} ${params.uid}`;
+        mongo.updateOne(
+          { _id: id },
+          { $set: params, $setOnInsert: { createdAt: new Date() } },
+          { upsert: true }
+        ).then(function(result) {
+          res.json({message:'list saved'});
+        })
+      })
+    })
+    .catch((error) => {
+      res.status(401).send('Authorization failed');
     });
+  } else {
+    res.status(401).send('Authorization header missing or malformed');
+  }
+}
+
+// ── saved_views handlers ────────────────────────────────────────────────
+//
+// Mirror the gene_lists pattern (auth via Firebase Bearer ID token, owner
+// scoping via `{_id: viewId, uid}`), but POST takes a JSON body because the
+// snapshot blob doesn't fit in query params. The composite _id is
+// `${hash} ${uid}` — matching genelists — so re-saving the same content by
+// the same user upserts in place.
+
+async function getSavedViewByHash(req, res) {
+  var hash = req.swagger.params.hash.value;
+  if (!hash) return res.status(400).send('hash query parameter is required');
+
+  // Optional Bearer: anonymous is fine for public views. If a token is
+  // present we honor it for private-view access; if invalid we still allow
+  // public access (don't 401 a public lookup just because the caller's
+  // token expired).
+  var uid = null;
+  var authHeader = req.headers['authorization'];
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    var token = authHeader.split(' ')[1];
+    try {
+      var decoded = await getAuth().verifyIdToken(token);
+      uid = decoded.uid;
+    } catch (_) { uid = null; }
+  }
+
+  try {
+    var collection = await mongoCollections.savedviews.mongoCollection();
+    var row = await collection.findOne({hash: hash});
+    if (!row) return res.status(404).send('Saved view not found');
+    if (!row.isPublic && row.uid !== uid) {
+      return res.status(401).send('Private saved view — not authorized');
+    }
+    res.json(row);
+  } catch (err) {
+    console.error('getSavedViewByHash error:', err);
+    res.status(500).send('Failed to fetch saved view');
+  }
+}
+
+async function saveView(req, res) {
+  var authHeader = req.headers['authorization'];
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).send('Authorization header missing or malformed');
+  }
+  var token = authHeader.split(' ')[1];
+  var decoded;
+  try {
+    decoded = await getAuth().verifyIdToken(token);
+  } catch (err) {
+    return res.status(401).send('Authorization failed');
+  }
+
+  var body = req.swagger.params.body.value || {};
+  var hash = body.hash;
+  if (!hash || !body.site || !body.label || !body.state) {
+    return res.status(400).send('hash, site, label, and state are required');
+  }
+
+  var uid = decoded.uid;
+  var owner = decoded.name || decoded.email || uid;
+  var doc = {
+    hash: hash,
+    label: body.label,
+    description: body.description || '',
+    site: body.site,
+    isPublic: !!body.isPublic,
+    state: body.state,
+    uid: uid,
+    owner: owner
+  };
+
+  try {
+    var collection = await mongoCollections.savedviews.mongoCollection();
+    var id = hash + ' ' + uid;
+    var result = await collection.updateOne(
+      {_id: id},
+      {$set: doc, $setOnInsert: {createdAt: new Date()}},
+      {upsert: true}
+    );
+    res.json({message: 'view saved', hash: hash, _id: id, upserted: !!result.upsertedCount});
+  } catch (err) {
+    console.error('saveView error:', err);
+    res.status(500).send('Failed to save view');
+  }
+}
+
+async function updateView(req, res) {
+  var authHeader = req.headers['authorization'];
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).send('Authorization header missing or malformed');
+  }
+  var token = authHeader.split(' ')[1];
+  var uid;
+  try {
+    uid = (await getAuth().verifyIdToken(token)).uid;
+  } catch (err) {
+    return res.status(401).send('Authorization failed');
+  }
+
+  var viewId = req.swagger.params.viewId.value;
+  var body = req.swagger.params.updates.value || {};
+  var updates = {};
+  if (typeof body.label === 'string' && body.label.trim().length > 0) {
+    updates.label = body.label.trim();
+  }
+  if (typeof body.isPublic === 'boolean') {
+    updates.isPublic = body.isPublic;
+  }
+  if (Object.keys(updates).length === 0) {
+    return res.status(400).send('No valid fields to update (allowed: label, isPublic)');
+  }
+
+  try {
+    var collection = await mongoCollections.savedviews.mongoCollection();
+    var result = await collection.updateOne({_id: viewId, uid: uid}, {$set: updates});
+    if (result.matchedCount === 0) {
+      return res.status(404).send('Saved view not found or not owned by user');
+    }
+    res.json({message: 'view updated', updated: updates});
+  } catch (err) {
+    console.error('updateView error:', err);
+    res.status(500).send('Failed to update saved view');
+  }
+}
+
+async function deleteView(req, res) {
+  var authHeader = req.headers['authorization'];
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).send('Authorization header missing or malformed');
+  }
+  var token = authHeader.split(' ')[1];
+  var uid;
+  try {
+    uid = (await getAuth().verifyIdToken(token)).uid;
+  } catch (err) {
+    return res.status(401).send('Authorization failed');
+  }
+
+  var viewId = req.swagger.params.viewId.value;
+  if (!viewId) return res.status(400).send('viewId query parameter is required');
+
+  try {
+    var collection = await mongoCollections.savedviews.mongoCollection();
+    var result = await collection.deleteOne({_id: viewId, uid: uid});
+    if (result.deletedCount === 0) {
+      return res.status(404).send('Saved view not found or not owned by user');
+    }
+    res.json({message: 'view deleted'});
+  } catch (err) {
+    console.error('deleteView error:', err);
+    res.status(500).send('Failed to delete saved view');
   }
 }
