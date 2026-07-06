@@ -243,6 +243,14 @@ paths:
           description: "number of lists to return (default: 20)"
           required: false
           type: "integer"
+        - in: query
+          name: includeDeleted
+          description: "which lists to return: 'active' (default) or 'trash' (owner's soft-deleted lists)"
+          required: false
+          type: string
+          enum:
+            - active
+            - trash
       responses:
         200:
           description: Metadata for all personal or public gene lists
@@ -299,9 +307,14 @@ paths:
           description: id of the gene list to delete
           type: string
           required: true
+        - in: query
+          name: force
+          description: "if true, permanently delete now instead of the 30-day soft delete"
+          type: boolean
+          required: false
       responses:
         200:
-          description: List deleted
+          description: List deleted (soft by default; permanent if force=true)
         401:
           description: Authorization failed
         404:
@@ -340,6 +353,27 @@ paths:
           description: Authorization failed
         404:
           description: List not found or not owned by user
+  /gene_lists/restore:
+    x-swagger-router-controller: mongo
+    post:
+      summary: "Restore a soft-deleted gene list"
+      description: "Un-marks a soft-deleted gene list (clears deletedAt) for its owner, within the 30-day window"
+      tags:
+        - "User Data"
+      operationId: restoreList
+      parameters:
+        - in: query
+          name: listId
+          description: id of the gene list to restore
+          type: string
+          required: true
+      responses:
+        200:
+          description: List restored
+        401:
+          description: Authorization failed
+        404:
+          description: No deleted list to restore (already purged or not owned)
   /gene_lists/validate:
     x-swagger-router-controller: solr
     post:

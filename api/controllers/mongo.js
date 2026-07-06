@@ -41,6 +41,10 @@ admin.initializeApp({
   toExport['saveList'] = saveList;
   toExport['deleteList'] = deleteList;
   toExport['updateList'] = updateList;
+  toExport['restoreList'] = restoreList;
+  // dedicated genelists GET: proper site/isPublic/uid filtering + soft-delete (active vs trash) views,
+  // which the generic getFactory/buildQuery can't express ($exists / isPublic scoping).
+  toExport['genelists'] = genelistsHandler;
 
   // /saved_views GET has two modes. Wrap the auto-generated listing handler
   // so single-hash lookups (auth-after-fetch) get routed to a dedicated
@@ -141,16 +145,106 @@ async function deleteList(req, res) {
   if (!listId) {
     return res.status(400).send('listId query parameter is required');
   }
+  const force = !!(req.swagger.params.force && req.swagger.params.force.value === true);
   try {
     const collection = await mongoCollections.genelists.mongoCollection();
-    const result = await collection.deleteOne({ _id: listId, uid: uid });
-    if (result.deletedCount === 0) {
-      return res.status(404).send('Gene list not found or not owned by user');
+    if (force) {
+      // hard delete now (owner-forced). Does NOT touch the genes-core saved_search field —
+      // cross-version saved_search propagation/cleanup is handled separately.
+      const result = await collection.deleteOne({ _id: listId, uid: uid });
+      if (result.deletedCount === 0) {
+        return res.status(404).send('Gene list not found or not owned by user');
+      }
+      return res.json({ message: 'list permanently deleted' });
     }
-    res.json({ message: 'list deleted' });
+    // soft delete: mark for deletion. Stays restorable by the owner for 30 days, then the daily
+    // cleanup cron purges it (mongo only).
+    const result = await collection.updateOne(
+      { _id: listId, uid: uid, deletedAt: { $exists: false } },
+      { $set: { deletedAt: new Date() } }
+    );
+    if (result.matchedCount === 0) {
+      return res.status(404).send('Gene list not found, not owned by user, or already deleted');
+    }
+    res.json({ message: 'list marked for deletion (restorable for 30 days)' });
   } catch (err) {
     console.error('deleteList error:', err);
     res.status(500).send('Failed to delete gene list');
+  }
+}
+
+// restore a soft-deleted list (un-set deletedAt) while it's still within the 30-day window.
+async function restoreList(req, res) {
+  const authHeader = req.headers['authorization'];
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).send('Authorization header missing or malformed');
+  }
+  const token = authHeader.split(' ')[1];
+  let uid;
+  try {
+    uid = (await getAuth().verifyIdToken(token)).uid;
+  } catch (err) {
+    return res.status(401).send('Authorization failed');
+  }
+  const listId = req.swagger.params.listId.value;
+  if (!listId) {
+    return res.status(400).send('listId query parameter is required');
+  }
+  try {
+    const collection = await mongoCollections.genelists.mongoCollection();
+    const result = await collection.updateOne(
+      { _id: listId, uid: uid, deletedAt: { $exists: true } },
+      { $unset: { deletedAt: "" } }
+    );
+    if (result.matchedCount === 0) {
+      return res.status(404).send('No deleted gene list to restore (already purged or not owned by user)');
+    }
+    res.json({ message: 'list restored' });
+  } catch (err) {
+    console.error('restoreList error:', err);
+    res.status(500).send('Failed to restore gene list');
+  }
+}
+
+// dedicated GET handler for /gene_lists. Firebase Bearer auth (optional) -> uid; builds the mongo
+// query explicitly (the generic buildQuery only does equality and ignores site/isPublic):
+//   active view  -> {site, deletedAt:{$exists:false}} + (isPublic:true) OR (uid) scoping
+//   trash view   -> {site, uid, deletedAt:{$exists:true}}   (owner only)
+function genelistsHandler(req, res) {
+  const params = _.mapValues(req.swagger.params, 'value');   // isPublic, site, rows, includeDeleted
+  const trash = params.includeDeleted === 'trash';
+
+  function run(uid) {
+    const query = {};
+    if (params.site) query.site = params.site;
+    if (trash) {
+      query.uid = uid;
+      query.deletedAt = { $exists: true };
+    } else {
+      query.deletedAt = { $exists: false };
+      if (params.isPublic === true) {
+        query.isPublic = true;
+      } else {
+        query.uid = uid;
+      }
+    }
+    const options = { limit: (params.rows && params.rows !== -1) ? params.rows : 20 };
+    mongoCollections.genelists.mongoCollection().then(function (col) {
+      res.contentType('application/json');
+      col.find(query, options).stream().pipe(JSONStream.stringify()).pipe(res);
+    });
+  }
+
+  const authHeader = req.headers['authorization'];
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    getAuth().verifyIdToken(token)
+      .then(function (decoded) { run(decoded.uid); })
+      .catch(function () { res.status(401).send('Authorization failed'); });
+  } else {
+    // anonymous: only public, non-trash lists are meaningful (uid 0 matches nothing private/trash)
+    if (trash) return res.status(401).send('Authorization required for deleted lists');
+    run(0);
   }
 }
 
