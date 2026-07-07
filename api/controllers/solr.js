@@ -119,7 +119,12 @@ async function validate(req, res) {
     const updateData = foundIds.map(id => {
       return {
         id: id,
-        saved_search: { add: murmurhash }
+        // add-distinct (not add): idempotent — never appends a duplicate hash if this gene was
+        // already tagged. The isSaved early-return above only guards the all-present case (its
+        // hashed_input matches the stored murmurhash); when the request contains ids missing from
+        // the core the two hashes differ, so re-validation would re-run this update. There is also
+        // a concurrency window (fire-and-forget update, per-request commit). add-distinct closes both.
+        saved_search: { 'add-distinct': murmurhash }
       }
     });
     // console.log("posting atomic updates", updateData);
