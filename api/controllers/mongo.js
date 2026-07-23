@@ -46,19 +46,16 @@ admin.initializeApp({
   // which the generic getFactory/buildQuery can't express ($exists / isPublic scoping).
   toExport['genelists'] = genelistsHandler;
 
-  // /saved_views GET has two modes. Wrap the auto-generated listing handler
-  // so single-hash lookups (auth-after-fetch) get routed to a dedicated
-  // handler. Listing mode falls through to the generic cursor path with
-  // the same site/isPublic/uid scoping as /gene_lists.
-  if (toExport.savedviews) {
-    var savedviewsList = toExport.savedviews;
-    toExport.savedviews = function (req, res) {
-      if (req.swagger.params.hash && req.swagger.params.hash.value) {
-        return getSavedViewByHash(req, res);
-      }
-      return savedviewsList(req, res);
-    };
-  }
+  // /saved_views GET has two modes: single-hash lookup vs listing. Route hash lookups to
+  // getSavedViewByHash, and listings to the dedicated savedViewsListHandler (proper
+  // site/isPublic/uid scoping, like genelistsHandler — the generic getFactory/buildQuery ANDs
+  // uid=0 for anonymous requests, which hid all public saved views).
+  toExport.savedviews = function (req, res) {
+    if (req.swagger.params.hash && req.swagger.params.hash.value) {
+      return getSavedViewByHash(req, res);
+    }
+    return savedViewsListHandler(req, res);
+  };
   toExport['saveView'] = saveView;
   toExport['updateView'] = updateView;
   toExport['deleteView'] = deleteView;
@@ -245,6 +242,38 @@ function genelistsHandler(req, res) {
     // anonymous: only public, non-trash lists are meaningful (uid 0 matches nothing private/trash)
     if (trash) return res.status(401).send('Authorization required for deleted lists');
     run(0);
+  }
+}
+
+// dedicated GET-listing handler for /saved_views (non-hash mode), parallel to genelistsHandler.
+// Firebase Bearer auth (optional) -> uid; scopes by site + (public OR owner). Saved views have no
+// soft-delete, so there is no trash view. Reads userData1.savedviews (same shared db as genelists).
+// Single-hash lookups are handled by getSavedViewByHash (routed by the wrapper in the IIFE above).
+function savedViewsListHandler(req, res) {
+  const params = _.mapValues(req.swagger.params, 'value');   // site, isPublic, rows
+  function run(uid) {
+    const query = {};
+    if (params.site) query.site = params.site;
+    if (params.isPublic === true) {
+      query.isPublic = true;
+    } else {
+      query.uid = uid;
+    }
+    const options = { limit: (params.rows && params.rows !== -1) ? params.rows : 20 };
+    mongoCollections.savedviews.mongoCollection().then(function (col) {
+      res.contentType('application/json');
+      col.find(query, options).stream().pipe(JSONStream.stringify()).pipe(res);
+    });
+  }
+
+  const authHeader = req.headers['authorization'];
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    getAuth().verifyIdToken(token)
+      .then(function (decoded) { run(decoded.uid); })
+      .catch(function () { res.status(401).send('Authorization failed'); });
+  } else {
+    run(0);   // anonymous: only public views are meaningful (uid 0 matches nothing private)
   }
 }
 
