@@ -3,7 +3,7 @@ info:
   version: "0.59.0"
   title: API for sorghumbase release 11
 # basePath prefixes all resource paths
-basePath: /sorghum_v11
+basePath: /sorghum_v10b
 # public host clients build request URLs against (TLS terminated by apache,
 # proxied to the swagger server on squam:50011). For local-only testing,
 # override with host: localhost:50011 and add http to schemes below.
