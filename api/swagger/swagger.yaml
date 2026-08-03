@@ -22,6 +22,62 @@ produces:
   - text/plain
   - text/tab-separated-values
 paths:
+  /gxa:
+    x-swagger-router-controller: gxa
+    get:
+      summary: Redirect to EBI
+      operationId: redirectToEbi
+      responses:
+        301:
+          description: Redirecting
+
+  /gxa/json/experiments/{experiment_id}:
+    x-swagger-router-controller: gxa
+    post:
+      summary: "Fetch reference study expression profiles"
+      description: "Accepts a list of gene ids and returns gxa response"
+      operationId: one_baseline_experiment
+      consumes:
+        - application/x-www-form-urlencoded
+      parameters:
+        - name: experiment_id
+          in: path
+          required: true
+          type: string
+          description: "The unique ID of an experiment"
+        - in: body
+          name: geneQuery
+          description: list of gene ids
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+      responses:
+        200:
+          description: Successful expression response
+
+  /gxa/json/baseline_experiments:
+    x-swagger-router-controller: gxa
+    post:
+      summary: "Fetch baseline expression profiles"
+      description: "Accepts a list of gene ids and returns gxa response"
+      operationId: baseline_experiments
+      consumes:
+        - application/x-www-form-urlencoded
+      parameters:
+        - in: body
+          name: geneQuery
+          description: list of gene ids
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+      responses:
+        200:
+          description: Successful expression response
+
   /docs:
     get:
       summary: "Web site describing this API"
