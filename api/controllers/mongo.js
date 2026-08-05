@@ -2,7 +2,15 @@
 
 var _ = require('lodash');
 var mongoHelper = require('../helpers/mongo');
+var solrHelper = require('../helpers/solr');
 var mongoCollections = require('gramene-mongodb-config');
+const murmur = require('murmurhash3js');
+const axios = require('axios');
+
+// POST /gene_lists guards. Mirrors the limits enforced by /gene_lists/validate in solr.js, so a
+// list that validates can always be saved.
+const MAX_LIST_IDS = 6000;
+const MAX_ID_LENGTH = 255;
 var JSONStream = require('JSONStream');
 var csvStringify = require('csv-stringify');
 var bedify = require('gramene-bedify');
@@ -317,34 +325,97 @@ async function updateList(req, res) {
   }
 }
 
+// Save a gene list. Takes the resolved identifiers in a JSON body and owns the two side effects
+// that /gene_lists/validate used to perform: computing the hash, and tagging the genes core.
+// Validate is now a pure lookup, so nothing is written until the user actually saves.
 async function saveList(req, res) {
-  let params = _.mapValues(req.swagger.params, 'value');
+  var authHeader = req.headers['authorization'];
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).send('Authorization header missing or malformed');
+  }
+  var token = authHeader.split(' ')[1];
+  var decoded;
+  try {
+    decoded = await getAuth().verifyIdToken(token);
+  } catch (err) {
+    return res.status(401).send('Authorization failed');
+  }
+  var uid = decoded.uid;
+  var owner = decoded.name || decoded.email || uid;
 
-  const authHeader = req.headers['authorization'];
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.split(' ')[1];
-    getAuth()
-    .verifyIdToken(token)
-    .then((decodedToken) => {
-      params.uid = decodedToken.uid;
-      params.owner = decodedToken.name || decodedToken.email || decodedToken.uid;
-      // upsert to mongo collection if we have all the params
-      mongoCollections.genelists.mongoCollection().then(function(mongo) {
-        const id = `${params.hash} ${params.uid}`;
-        mongo.updateOne(
-          { _id: id },
-          { $set: params, $setOnInsert: { createdAt: new Date() } },
-          { upsert: true }
-        ).then(function(result) {
-          res.json({message:'list saved'});
-        })
-      })
-    })
-    .catch((error) => {
-      res.status(401).send('Authorization failed');
+  var body = req.body || {};
+
+  // The hash is derived here now. A client still sending one is on the old contract and would
+  // otherwise have it silently ignored, so fail loudly instead.
+  if (body.hash !== undefined) {
+    return res.status(400).send('hash is computed by the server; remove it and post `ids` instead');
+  }
+  if (typeof body.label !== 'string' || !body.label.trim()) {
+    return res.status(400).send('label is required');
+  }
+  if (typeof body.site !== 'string' || !body.site.trim()) {
+    return res.status(400).send('site is required');
+  }
+  if (!Array.isArray(body.ids) || !body.ids.length) {
+    return res.status(400).send('ids must be a non-empty array of gene identifiers');
+  }
+  if (body.ids.length > MAX_LIST_IDS) {
+    return res.status(400).send('too many ids: ' + body.ids.length + ' (limit ' + MAX_LIST_IDS + ')');
+  }
+  for (var i = 0; i < body.ids.length; i++) {
+    if (typeof body.ids[i] !== 'string' || !body.ids[i].length) {
+      return res.status(400).send('every id must be a non-empty string');
+    }
+    if (body.ids[i].length > MAX_ID_LENGTH) {
+      return res.status(400).send('id longer than ' + MAX_ID_LENGTH + ' characters');
+    }
+  }
+
+  var ids = [...new Set(body.ids)].sort();
+  // Joined with a separator, unlike the old ids.join('') which collided: ["AB","C"] and
+  // ["A","BC"] hashed identically. Existing lists are unaffected — their hashes are stored in
+  // genelists and in the cores, and sync_saved_search.js only ever compares stored values.
+  var hash = murmur.x86.hash32(ids.join(','));
+  var _id = hash + ' ' + uid;
+
+  // Explicit allowlist. The previous version did `$set: params` over every swagger param, so a
+  // missing hash produced `_id: "undefined <uid>"` and any future param silently joined the doc.
+  var doc = {
+    hash: hash,
+    label: body.label.trim(),
+    site: body.site.trim(),
+    isPublic: body.isPublic === true,
+    n_genes: ids.length,           // derived, never taken from the client
+    uid: uid,
+    owner: owner
+  };
+
+  try {
+    var coll = await mongoCollections.genelists.mongoCollection();
+    var result = await coll.updateOne(
+      {_id: _id},
+      {$set: doc, $setOnInsert: {createdAt: new Date()}},
+      {upsert: true}
+    );
+
+    // Tag the member genes. Awaited and surfaced, unlike the old fire-and-forget POST that ran
+    // after the response had already been sent. add-distinct keeps re-saves idempotent.
+    var updates = ids.map(function (id) {
+      return {id: id, saved_search: {'add-distinct': hash}};
     });
-  } else {
-    res.status(401).send('Authorization header missing or malformed');
+    await axios.post(solrHelper.genesURL + '/update?commit=true', updates,
+                     {headers: {'Content-Type': 'application/json'}});
+
+    res.json({
+      message: 'list saved',
+      hash: hash,
+      _id: _id,
+      n_genes: ids.length,
+      upserted: !!(result && result.upsertedCount)
+    });
+  } catch (err) {
+    console.error('saveList failed:', err && err.message || err);
+    res.status(500).send('Failed to save gene list');
   }
 }
 

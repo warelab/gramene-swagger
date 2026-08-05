@@ -125,32 +125,6 @@ paths:
   /swagger:
     x-swagger-pipe: swagger_raw
 
-  /validate:
-    x-swagger-router-controller: solr
-    post:
-      summary: "Validate a list of IDs"
-      description: "Accepts a list of IDs and returns validation results"
-      operationId: validate
-      consumes:
-        - application/json
-      parameters:
-        - in: body
-          name: ids
-          description: list of gene ids
-          schema:
-            type: object
-            properties:
-              ids:
-                type: array
-                items:
-                  type: string
-            required:
-              - ids
-      responses:
-        200:
-          description: Successful validation response
-
-
   /search:
     x-swagger-router-controller: solr
     get:
@@ -321,34 +295,36 @@ paths:
       consumes:
         - application/json
       parameters:
-        -
-          in: query
-          name: hash
-          description: hash key
-          type: integer
-        -
-          in: query
-          name: n_genes
-          description: number of genes in the list
-          type: integer
-        -
-          in: query
-          name: label
-          description: label
-          type: string
-        -
-          in: query
-          name: site
-          description: site identifier
-          type: string
-        -
-          in: query
-          name: isPublic
-          description: list should be public
-          type: boolean
+        - in: body
+          name: list
+          description: "list metadata plus the resolved gene ids. The server derives n_genes and computes the hash."
+          required: true
+          schema:
+            type: object
+            required:
+              - label
+              - site
+              - ids
+            properties:
+              label:
+                type: string
+                maxLength: 255
+              site:
+                type: string
+                maxLength: 64
+              isPublic:
+                type: boolean
+              ids:
+                type: array
+                maxItems: 6000
+                items:
+                  type: string
+                  maxLength: 255
       responses:
         200:
-          description: Successful validation response
+          description: "List saved; returns the server-computed hash"
+        400:
+          description: "Invalid body (missing label/site/ids, too many ids, or a client-supplied hash)"
         401:
           description: Authorization failed
     delete:
@@ -443,12 +419,14 @@ paths:
       parameters:
         - in: body
           name: ids
-          description: list of gene ids
+          description: "list of gene identifiers; stable ids and alternate ids are both accepted"
           required: true
           schema:
             type: array
+            maxItems: 6000
             items:
               type: string
+              maxLength: 255
       responses:
         200:
           description: Successful validation response
