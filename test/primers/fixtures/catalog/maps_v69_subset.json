@@ -1,0 +1,206 @@
+[
+{
+"_id": "GCA_002575655.1",
+"system_name": "aegilops_tauschii",
+"display_name": "Aegilops tauschii",
+"taxon_id": 200361001,
+"type": "genome",
+"regions": {
+"names": [
+"1D",
+"2D",
+"3D",
+"4D",
+"5D",
+"6D",
+"7D",
+"UNANCHORED"
+],
+"lengths": [
+502330251,
+651661114,
+627182665,
+526018785,
+577375663,
+496019527,
+644716137,
+199611252
+]
+}
+},
+{
+"_id": "GCA_904849725.1",
+"system_name": "hordeum_vulgare",
+"display_name": "Hordeum vulgare",
+"taxon_id": 112509001,
+"type": "genome",
+"regions": {
+"names": [
+"1H",
+"2H",
+"3H",
+"4H",
+"5H",
+"6H",
+"7H",
+"UNANCHORED"
+],
+"lengths": [
+516505932,
+665585731,
+621516506,
+610333535,
+588218686,
+561794515,
+632540561,
+29082053
+]
+}
+},
+{
+"_id": "GCA_949783185.1",
+"system_name": "hordeum_vulgare_goldenpromise",
+"display_name": "Hordeum vulgare GoldenPromise",
+"taxon_id": 4513018,
+"type": "genome",
+"regions": {
+"names": [
+"OX460037.1",
+"OX460039.1",
+"OX460033.1",
+"OX460034.1",
+"OX460035.1",
+"OX460036.1",
+"OX460038.1",
+"UNANCHORED"
+],
+"lengths": [
+589489225,
+630762742,
+516520956,
+657436430,
+621715108,
+610707416,
+558356414,
+64022567
+]
+}
+},
+{
+"_id": "GCA_000004655.2",
+"system_name": "oryza_indica",
+"display_name": "Oryza sativa Indica Group",
+"taxon_id": 39946001,
+"type": "genome",
+"regions": {
+"names": [
+"1",
+"2",
+"3",
+"4",
+"5",
+"6",
+"7",
+"8",
+"9",
+"10",
+"11",
+"12",
+"UNANCHORED"
+],
+"lengths": [
+47283185,
+38103930,
+41884883,
+34718618,
+31240961,
+32913967,
+27957088,
+30396518,
+21757032,
+22204031,
+23035369,
+23049917,
+52459391
+]
+}
+},
+{
+"_id": "GCA_009830595.1",
+"system_name": "oryza_sativa_azucena",
+"display_name": "Oryza sativa (Geng/Japonica-trop1 var. Azucena)",
+"taxon_id": 1736656001,
+"type": "genome",
+"regions": {
+"names": [
+"1",
+"2",
+"3",
+"4",
+"5",
+"6",
+"7",
+"8",
+"9",
+"10",
+"11",
+"12",
+"UNANCHORED"
+],
+"lengths": [
+44011168,
+36468344,
+38425022,
+34192892,
+30954872,
+31189045,
+29327599,
+29168739,
+23125300,
+25095745,
+30181525,
+27487302,
+1942574
+]
+}
+},
+{
+"_id": "GCA_001952365.2",
+"system_name": "oryza_sativa_n22",
+"display_name": "Oryza sativa (circum-Aus1 var. N22)",
+"taxon_id": 1736659001,
+"type": "genome",
+"regions": {
+"names": [
+"1",
+"2",
+"3",
+"4",
+"5",
+"6",
+"7",
+"8",
+"9",
+"10",
+"11",
+"12",
+"UNANCHORED"
+],
+"lengths": [
+42787722,
+37316900,
+38991741,
+34943064,
+30810063,
+31706320,
+29491485,
+29456214,
+24344104,
+24739695,
+31893087,
+26473654,
+5221419
+]
+}
+}
+]

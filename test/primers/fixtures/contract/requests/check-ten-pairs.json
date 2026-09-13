@@ -1,0 +1,110 @@
+{
+  "system_name": "sorghum_bicolor",
+  "mode": "gene",
+  "gene_id": "SORBI_3004G087700",
+  "checks": [
+    "specificity"
+  ],
+  "pairs": [
+    {
+      "id": "P1",
+      "left": "ACGTACGTACGTACGTA",
+      "right": "TTGCATTGCATTGCAG",
+      "expected": {
+        "region": "4",
+        "start": 7423537,
+        "end": 7423746
+      }
+    },
+    {
+      "id": "P2",
+      "left": "ACGTACGTACGTACGTACT",
+      "right": "TTGCATTGCATTGCAGG",
+      "expected": {
+        "region": "4",
+        "start": 7423537,
+        "end": 7423746
+      }
+    },
+    {
+      "id": "P3",
+      "left": "ACGTACGTACGTACGTACGTT",
+      "right": "TTGCATTGCATTGCAGGG",
+      "expected": {
+        "region": "4",
+        "start": 7423537,
+        "end": 7423746
+      }
+    },
+    {
+      "id": "P4",
+      "left": "ACGTACGTACGTACGTACGTTTT",
+      "right": "TTGCATTGCATTGCAGGGG",
+      "expected": {
+        "region": "4",
+        "start": 7423537,
+        "end": 7423746
+      }
+    },
+    {
+      "id": "P5",
+      "left": "ACGTACGTACGTACGTATTTT",
+      "right": "TTGCATTGCATTGCAGGGGG",
+      "expected": {
+        "region": "4",
+        "start": 7423537,
+        "end": 7423746
+      }
+    },
+    {
+      "id": "P6",
+      "left": "ACGTACGTACGTACGTACTTTTT",
+      "right": "TTGCATTGCATTGCAGGGGGG",
+      "expected": {
+        "region": "4",
+        "start": 7423537,
+        "end": 7423746
+      }
+    },
+    {
+      "id": "P7",
+      "left": "ACGTACGTACGTACGTACGTTTTTT",
+      "right": "TTGCATTGCATTGCAGGGGGGG",
+      "expected": {
+        "region": "4",
+        "start": 7423537,
+        "end": 7423746
+      }
+    },
+    {
+      "id": "P8",
+      "left": "ACGTACGTACGTACGTACGTTTTTTTT",
+      "right": "TTGCATTGCATTGCAGGGGGGGG",
+      "expected": {
+        "region": "4",
+        "start": 7423537,
+        "end": 7423746
+      }
+    },
+    {
+      "id": "P9",
+      "left": "ACGTACGTACGTACGTATTTTTTTT",
+      "right": "TTGCATTGCATTGCAGGGGGGGGG",
+      "expected": {
+        "region": "4",
+        "start": 7423537,
+        "end": 7423746
+      }
+    },
+    {
+      "id": "P10",
+      "left": "ACGTACGTACGTACGTACTTTTTTTTT",
+      "right": "TTGCATTGCATTGCAGGGGGGGGGG",
+      "expected": {
+        "region": "4",
+        "start": 7423537,
+        "end": 7423746
+      }
+    }
+  ]
+}

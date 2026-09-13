@@ -1,0 +1,20 @@
+{
+  "system_name": "sorghum_bicolor",
+  "mode": "transcript",
+  "gene_id": "SORBI_3004G087700",
+  "transcript_id": "SORBI_3004G087700.3",
+  "checks": [
+    "specificity",
+    "pangenome"
+  ],
+  "genomes": [
+    "sorghum_353"
+  ],
+  "pairs": [
+    {
+      "id": "P1",
+      "left": "CCAACAAAGTCATGGATGCACT",
+      "right": "GTGAACATCATGCTGCCCGATG"
+    }
+  ]
+}

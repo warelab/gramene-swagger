@@ -1,0 +1,9 @@
+Database: Sorghum bicolor ssp. bicolor BTx623 cdna
+	47,110 sequences; 103,922,012 total bases
+
+Date: Sep 12, 2023  11:34 AM	Longest sequence: 29,388 bases
+
+BLASTDB Version: 5
+
+Volumes:
+	/scratch/olson/fasta/sorghum_bicolor/Sorghum_bicolor.Sorghum_bicolor_NCBIv3.cdna.all

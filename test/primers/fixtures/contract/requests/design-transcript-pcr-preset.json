@@ -1,0 +1,20 @@
+{
+  "mode": "transcript",
+  "gene_id": "SORBI_3001G000700",
+  "transcript_id": "SORBI_3001G000700.1",
+  "junction_spanning": true,
+  "params": {
+    "max_size": 25,
+    "min_tm": 57,
+    "max_tm": 63,
+    "min_gc": 30,
+    "max_gc": 70,
+    "max_tm_diff": 3,
+    "product_size_ranges": [
+      [
+        100,
+        1000
+      ]
+    ]
+  }
+}

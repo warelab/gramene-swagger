@@ -1,0 +1,29 @@
+{
+  "system_name": "sorghum_bicolor",
+  "mode": "region",
+  "checks": [
+    "specificity"
+  ],
+  "params": {
+    "max_product_size": 3000,
+    "ignore_mismatches": 5,
+    "max_amplifying_mismatches": 2,
+    "min_total_mismatches": 1,
+    "min_3p_mismatches": 1,
+    "three_prime_window": 4,
+    "include_unlikely": true,
+    "repeat_site_threshold": 10
+  },
+  "pairs": [
+    {
+      "id": "P1",
+      "left": "GATCGACAATCCGACGATAGAAG",
+      "right": "GTGAACATCATGCTGCCCGATG",
+      "expected": {
+        "region": "4",
+        "start": 7422190,
+        "end": 7422843
+      }
+    }
+  ]
+}
