@@ -189,3 +189,32 @@ test('jobs.submit uses exactly that id, and identical bodies share one job', asy
   second.job_id.should.equal(first.job_id);
   second.created.should.be.false();
 });
+
+// Genotyping spec §5.3 and §7.3 (M7): jobs.submit asks the check module for each request's algorithm version. With
+// algorithmVersionFor, a genotyping body hashes with '2+g1' and gets its own id while the same body without genotyping keeps
+// '2' and its id; a check module without algorithmVersionFor (the stub of the test above) still hashes with ALGORITHM_VERSION.
+test('jobs.submit: a genotyping body hashes with algorithm 2+g1; without genotyping, or with a stub check module, algorithm 2', async function () {
+  const geno = require('../fixtures/check_core/genotype/stubs');
+  const body = geno.clone(geno.BODY_2_11);
+  const plain = geno.clone(body);
+  delete plain.genotyping;
+  const newStore = function () { return createMemoryStore({ cfg: CFG, siteKey: 'jobid_genotyping_test', shared: { slots: new Map(), panSlots: new Map() } }); };
+  const d = function (extra) { return deps(Object.assign({ sequence: geno.sequenceStub() }, extra || {})); };
+
+  const norm = await normalize(geno.clone(body), d());
+  check.algorithmVersionFor(norm.request).should.equal('2+g1');
+  const genotyping = await jobs.submit(geno.clone(body), d({ store: newStore(), check: check }));
+  genotyping.job_id.should.equal(jobs.jobId(norm.request, norm.dbs, '2+g1'));
+
+  const plainNorm = await normalize(geno.clone(plain), d());
+  check.algorithmVersionFor(plainNorm.request).should.equal('2');
+  const plainId = jobs.jobId(plainNorm.request, plainNorm.dbs, '2');
+  plainId.should.equal(await idOf(geno.clone(plain), d()));
+  (await jobs.submit(geno.clone(plain), d({ store: newStore(), check: check }))).job_id.should.equal(plainId);
+  genotyping.job_id.should.not.equal(plainId);
+  genotyping.job_id.should.not.equal(jobs.jobId(norm.request, norm.dbs, '2'));
+
+  const stub = { ALGORITHM_VERSION: check.ALGORITHM_VERSION, normalize: normalize };
+  (await jobs.submit(geno.clone(plain), d({ store: newStore(), check: stub }))).job_id.should.equal(plainId);
+  (await jobs.submit(geno.clone(body), d({ store: newStore(), check: stub }))).job_id.should.equal(jobs.jobId(norm.request, norm.dbs, '2'));
+});

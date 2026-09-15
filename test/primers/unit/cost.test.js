@@ -203,3 +203,60 @@ test('C4 compat: without genotyping every estimate above is unchanged and breakd
     }, row[0]);
   });
 });
+
+// Genotyping spec §5.4 (M7): a genotyping check adds genome_tasks × check.genotype_cpu_s_per_genome (0.2) and
+// breakdown.genotyping, only when requested. The spec's table uses the real genome sizes, sorghum_bicolor 708,735,318 bases and
+// 119 other assemblies summing to 83,774,241,795; only that sum enters the estimate, so the panel is 119 parts of it.
+function realPanel() {
+  const total = 83774241795;
+  const each = Math.floor(total / 119);
+  return Array.from({ length: 119 }, function (_, i) {
+    return { system_name: 'genome_' + i, total_bases: each + (i === 0 ? total - each * 119 : 0) };
+  });
+}
+
+test('genotyping term (§5.4): 120 genome tasks × 0.2 CPU-s and breakdown.genotyping; the spec table over the full panel', function () {
+  cost.DEFAULT_GENOTYPE_CPU_S_PER_GENOME.should.equal(0.2);
+  cost.genotypeCoefficient(CFG).should.equal(0.2);
+  const panel = realPanel();
+  // [unique primers, CPU-s without genotyping, with genotyping]
+  [[3, 1333, 1357], [6, 2666, 2690], [12, 5332, 5356], [13, 5776, 5800], [14, 6221, 6245]].forEach(function (row) {
+    const opts = { unique_primers: row[0], mode: 'region', reference: BICOLOR, pangenome: panel, cfg: CFG };
+    const without = cost.estimate(opts);
+    const withG = cost.estimate(Object.assign({ genotyping: true }, opts));
+    without.cpu_s.should.equal(row[1], row[0] + ' primers');
+    withG.cpu_s.should.equal(row[2], row[0] + ' primers with genotyping');
+    Object.keys(without.breakdown).should.eql(['reference', 'transcriptome', 'pangenome', 'realign']);
+    Object.keys(withG.breakdown).should.eql(['reference', 'transcriptome', 'pangenome', 'realign', 'genotyping']);
+    withG.breakdown.should.eql(Object.assign({ genotyping: 24 }, without.breakdown));
+    withG.total.should.equal(without.total);
+    withG.word_sizes.should.eql(without.word_sizes);
+  });
+  // 13 primers is the largest full-panel genotyping check (check_max_unique_primers, §4.18); 14 primers are refused
+  const opts = function (n) { return { unique_primers: n, mode: 'region', reference: BICOLOR, pangenome: panel, cfg: CFG, genotyping: true }; };
+  cost.assertWithinLimit(cost.estimate(opts(13)), CFG).cpu_s.should.equal(5800);
+  should.throws(function () { cost.assertWithinLimit(cost.estimate(opts(14)), CFG); }, /estimated at 6245 CPU-seconds/);
+});
+
+test('genotyping term: the §2.11 check (6 primers, 3 genomes) stays at 95 CPU-s; the coefficient comes from config', function () {
+  const cat = genomes.buildCatalog(mapsFixture, taxonomyFixture);
+  const three = ['sorghum_bicolorv5', 'sorghum_pi180348', 'sorghum_pi329250'].map(function (n) {
+    return { system_name: n, total_bases: cat.bySystemName.get(n).regions.lengths.reduce(function (a, b) { return a + b; }, 0) };
+  });
+  const opts = { unique_primers: 6, mode: 'region', reference: BICOLOR, pangenome: three, cfg: CFG };
+  cost.estimate(opts).cpu_s.should.equal(95); // 94.16
+  const withG = cost.estimate(Object.assign({ genotyping: true }, opts));
+  withG.cpu_s.should.equal(95); // 94.96
+  withG.breakdown.genotyping.should.equal(0.8);
+  cost.estimate({ unique_primers: 3, mode: 'gene', reference: BICOLOR, cfg: CFG, genotyping: true }).breakdown.genotyping.should.equal(0.2);
+  cost.estimate({ unique_primers: 0, mode: 'region', reference: BICOLOR, pangenome: three, cfg: CFG, genotyping: true }).cpu_s.should.equal(1);
+
+  const one = makeCfg({ check: { genotype_cpu_s_per_genome: 1 } });
+  cost.genotypeCoefficient(one).should.equal(1);
+  cost.estimate(Object.assign({}, opts, { cfg: one, genotyping: true })).should.match({ cpu_s: 99, breakdown: { genotyping: 4 } });
+  cost.genotypeCoefficient(makeCfg({ check: { genotype_cpu_s_per_genome: 0 } })).should.equal(0);
+  cost.genotypeCoefficient(makeCfg({ check: { genotype_cpu_s_per_genome: -1 } })).should.equal(0.2);
+  cost.genotypeCoefficient(makeCfg({ check: { genotype_cpu_s_per_genome: 'x' } })).should.equal(0.2);
+  // a non-genotyping estimate ignores the coefficient entirely
+  cost.estimate(Object.assign({}, opts, { cfg: one })).should.eql(cost.estimate(opts));
+});

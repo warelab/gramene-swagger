@@ -161,7 +161,10 @@ async function submit(body, deps) {
   const check = deps.check || require('../check');
   const norm = await check.normalize(body, Object.assign({}, deps, { cfg: cfg }));
   const dbs = norm.dbs || dbsOf(norm.resolved);
-  const id = jobId(norm.request, dbs, check.ALGORITHM_VERSION);
+  // Genotyping spec §5.3: the check module picks the version per request ('2+g1' with a genotyping block, '2' otherwise).
+  // A check module without algorithmVersionFor (a test stub) hashes with its ALGORITHM_VERSION, as before.
+  const algo = typeof check.algorithmVersionFor === 'function' ? check.algorithmVersionFor(norm.request) : check.ALGORITHM_VERSION;
+  const id = jobId(norm.request, dbs, algo);
   const doc = newJobDoc(id, norm, (deps.now || Date.now)());
   const store = deps.store || getStore();
 

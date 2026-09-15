@@ -6,6 +6,7 @@
 //   est_cpu_s = uniq_primers × [ ref_Gb × c(ws_ref) + (transcript ? ref_cdna_Gb × c(ws_ref) : 0)
 //                                + f_pan × Σ_pan (transcript ? cdna_Gb : genome_Gb) × c(ws_pan)
 //                                + genome_tasks × c_realign ]
+//               + (genotyping ? genome_tasks × c_genotype : 0)
 //   c(ws) = cfg.check.cpu_s_per_primer_gb['ws' + ws]   ({ws5: 5.2, ws6: 2.2, ws7: 1.2}, single-thread, measured on sorghum)
 //   f_pan = cfg.check.pangenome_cpu_factor, default 2.0 (values below 1 fall back to the default). Pan-genome
 //           genomes run as up to 8 concurrent single-thread blastn processes, which cost more CPU per primer·Gb
@@ -24,10 +25,14 @@
 //               sorghum_353 ws6, 2 primers at max size 5932 0.91-1.13 s, 9 primers 4.93-5.05 s
 //               → 0.26-0.58 CPU-s per primer (re-aligning every site: 0.76-2.07). The full-panel run above measured
 //               0.105 CPU-s per primer·task for re-alignment plus annotation, so 0.6 is conservative.
+//   c_genotype = cfg.check.genotype_cpu_s_per_genome, default 0.2 CPU-s per genome task of a request with a genotyping
+//                block (genotyping spec §5.4), whatever its primer count: the allele caller's anchor fetch and DP
+//                (< 0.01 CPU-s) plus, when needed, one megablast of a ~430 bp segment (0.10-0.15 CPU-s); not yet measured
+//                end to end. A genotyping request always has a genome target (gene or region mode).
 //
 // A job over cfg.check.max_job_cpu_s (6000) is refused with 422 JOB_TOO_LARGE {estimate_cpu_s, limit}. With the
 // factor, 10 primers against all 119 other sorghum genomes estimate about 4,400 CPU-s (accepted) and 20 primers
-// about 8,900 CPU-s (refused).
+// about 8,900 CPU-s (refused). With genotyping, 13 primers over the full panel estimate 5,800 (accepted), 14 primers 6,245.
 
 const { PrimerHttpError } = require('../errors');
 
@@ -42,6 +47,7 @@ const CDNA_GB_ESTIMATE = 0.15;
 const FALLBACK_GENOME_GB = 1.0;
 const DEFAULT_REALIGN_CPU_S_PER_PRIMER_TASK = 0.6;
 const DEFAULT_PANGENOME_CPU_FACTOR = 2.0;
+const DEFAULT_GENOTYPE_CPU_S_PER_GENOME = 0.2;
 
 function realignCoefficient(cfg) {
   const v = Number(checkCfg(cfg).realign_cpu_s_per_primer_task);
@@ -53,6 +59,13 @@ function pangenomeFactor(cfg) {
   const raw = checkCfg(cfg).pangenome_cpu_factor;
   const v = raw === null || raw === undefined || raw === '' ? NaN : Number(raw);
   return Number.isFinite(v) && v >= 1 ? v : DEFAULT_PANGENOME_CPU_FACTOR;
+}
+
+// CPU-s per genome task of a genotyping request; a missing, non-numeric or negative value uses the default.
+function genotypeCoefficient(cfg) {
+  const raw = checkCfg(cfg).genotype_cpu_s_per_genome;
+  const v = raw === null || raw === undefined || raw === '' ? NaN : Number(raw);
+  return Number.isFinite(v) && v >= 0 ? v : DEFAULT_GENOTYPE_CPU_S_PER_GENOME;
 }
 
 function checkCfg(cfg) {
@@ -93,13 +106,14 @@ function ceilCpu(x) {
   return Math.ceil(Math.round(x * 1e6) / 1e6);
 }
 
-// estimate({unique_primers, mode, reference, pangenome, cfg, cdna_gb?})
+// estimate({unique_primers, mode, reference, pangenome, cfg, cdna_gb?, genotyping?})
 //   unique_primers: number of distinct uppercase primers (<= 20)
 //   mode: 'gene' | 'transcript' | 'region' | 'sequence'
 //   reference: resolved assembly ({total_bases}); pangenome: array of resolved assemblies ([] when not checked)
 //   cdna_gb: per-assembly cDNA size in Gb (default CDNA_GB_ESTIMATE)
-// -> {cpu_s (integer, rounded up), total (tasks), breakdown {reference, transcriptome, pangenome, realign} (CPU-s, 1 dp;
-//     pangenome includes the pan-genome CPU factor), word_sizes {reference, pangenome}}
+//   genotyping: true when the request carries a genotyping block (adds the allele-caller term)
+// -> {cpu_s (integer, rounded up), total (tasks), breakdown {reference, transcriptome, pangenome, realign, [genotyping]}
+//     (CPU-s, 1 dp; pangenome includes the pan-genome CPU factor; genotyping only when requested), word_sizes {reference, pangenome}}
 // total = 1 reference genome task + 1 reference cDNA task in transcript mode + 1 per pan-genome genome (§B.2).
 function estimate(opts) {
   const o = opts || {};
@@ -121,10 +135,20 @@ function estimate(opts) {
   const genomeTasks = 1 + (transcript ? 0 : pan.length);
   const realign = primers * genomeTasks * realignCoefficient(o.cfg);
 
+  let cpu = reference + transcriptome + pangenome + realign;
+  const breakdown = { reference: round1(reference), transcriptome: round1(transcriptome), pangenome: round1(pangenome), realign: round1(realign) };
+  // Genotyping spec §5.4: the term and its breakdown key exist only when genotyping is requested, so every other
+  // estimate keeps its value and its four breakdown keys (compatibility test C4).
+  if (o.genotyping) {
+    const genotyping = genomeTasks * genotypeCoefficient(o.cfg);
+    cpu += genotyping;
+    breakdown.genotyping = round1(genotyping);
+  }
+
   return {
-    cpu_s: ceilCpu(reference + transcriptome + pangenome + realign),
+    cpu_s: ceilCpu(cpu),
     total: 1 + (transcript ? 1 : 0) + pan.length,
-    breakdown: { reference: round1(reference), transcriptome: round1(transcriptome), pangenome: round1(pangenome), realign: round1(realign) },
+    breakdown: breakdown,
     word_sizes: { reference: wsRef, pangenome: wsPan }
   };
 }
@@ -151,9 +175,11 @@ module.exports = {
   FALLBACK_GENOME_GB,
   DEFAULT_REALIGN_CPU_S_PER_PRIMER_TASK,
   DEFAULT_PANGENOME_CPU_FACTOR,
+  DEFAULT_GENOTYPE_CPU_S_PER_GENOME,
   coefficient,
   realignCoefficient,
   pangenomeFactor,
+  genotypeCoefficient,
   genomeGb,
   estimate,
   assertWithinLimit,
