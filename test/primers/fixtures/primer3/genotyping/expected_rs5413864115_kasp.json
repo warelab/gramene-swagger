@@ -1,0 +1,46 @@
+{
+  "variant": { "key": "1:11282:CA:C", "requested_id": null, "ids": ["rs5413864115"], "label": "1:11283-11283 A/-", "kind": "deletion",
+               "vcf": { "position": 11282, "ref": "CA", "alt": "C" }, "minimal": { "start": 11283, "end": 11283, "ref": "A", "alt": "-" },
+               "shift": 2, "zone": { "start": 11282, "end": 11286 },
+               "discriminating": { "forward": { "position": 11285, "ref_base": "A", "alt_base": "G", "alt_maps_to": 11286 },
+                                   "reverse": { "position": 11283, "ref_base": "A", "alt_base": "C", "alt_maps_to": 11282 } }, "…": "…" },
+  "template": { "start": 10883, "end": 11685, "length": 803, "alt_length": 802,
+                "features": { "variant": { "start": 400, "end": 401 }, "zone": { "start": 400, "end": 404 },
+                              "discriminating": { "forward": 403, "reverse": 401 }, "alt_offset": -1, "exempt": [[367, 38], [400, 38]] }, "…": "…" },
+  "sets": [
+    { "id": "S1", "key": "a5277232d8ab", "orientation": "forward", "relaxation_level": 1, "quality": "usable", "score": 15.48,
+      "primers": {
+        "as_ref": { "target_seq": "ACAGATGATTTTCCAAATGATGATTCAAA", "len": 29, "tm": 59.22, "gc": 27.59, "end_stability": 2.69,
+                    "genomic": { "region": "1", "start": 11257, "end": 11285, "strand": 1, "blocks": [{ "start": 11257, "end": 11285 }] },
+                    "discrimination": { "own_allele": { "mm_pos": [], "likelihood": "likely" }, "other_allele": { "mm_pos": [1], "likelihood": "likely_weak" },
+                                        "terminal_mismatch_class": "weak", "in_shift_tract": true }, "…": "…" },
+        "as_alt": { "target_seq": "ACAGATGATTTTCCAAATGATGATTCAAG", "len": 29, "tm": 59.53, "gc": 31.03, "end_stability": 3.02,
+                    "genomic": { "region": "1", "start": 11257, "end": 11286, "strand": 1, "blocks": [{ "start": 11257, "end": 11282 }, { "start": 11284, "end": 11286 }] },
+                    "inserted_bases": 0, "…": "…" },
+        "common": { "target_seq": "CCCCATGTTTTTGTTCCTTCCA", "genomic": { "region": "1", "start": 11323, "end": 11344, "strand": -1 }, "tm": 59.3,
+                    "neighbours": [ { "key": "1:11334:A:G", "ids": ["tmp_1_11334_A_G"], "ems": false, "distance_from_3p": 12 },
+                                    { "key": "1:11335:A:G", "ids": ["tmp_1_11335_A_G"], "ems": false, "distance_from_3p": 13 },
+                                    { "key": "1:11340:TG:T", "ids": ["tmp_1_11340_TG_T"], "ems": false, "distance_from_3p": 19 } ], "…": "…" } },
+      "products": { "ref": { "size": 88 }, "alt": { "size": 87 } }, "neighbour_sites": 3,
+      "warnings": [ { "code": "NEIGHBOUR_IN_PRIMER", "details": { "role": "common", "ids": ["tmp_1_11334_A_G", "tmp_1_11335_A_G", "tmp_1_11340_TG_T"], "distances": [12, 13, 19] }, "message": "…" },
+                    { "code": "SHIFT_TRACT_DISCRIMINATION", "details": { "primer": "as_ref", "shift": 2 }, "message": "…" } ], "…": "…" },
+    { "id": "S2", "key": "cb3ef66afd37", "orientation": "reverse", "relaxation_level": 1, "quality": "usable", "score": 23.95,
+      "primers": {
+        "as_ref": { "target_seq": "AGAGTCTTTTCAAATTTCACACTTT", "len": 25, "tm": 56.09,
+                    "genomic": { "region": "1", "start": 11283, "end": 11307, "strand": -1 }, "…": "…" },
+        "as_alt": { "target_seq": "AGAGTCTTTTCAAATTTCACACTTG", "len": 25, "tm": 56.71,
+                    "genomic": { "region": "1", "start": 11282, "end": 11307, "strand": -1, "blocks": [{ "start": 11282, "end": 11282 }, { "start": 11284, "end": 11307 }] }, "…": "…" },
+        "common": { "target_seq": "ACAAAAATAGCTCTCTAGAGTATACACA", "genomic": { "region": "1", "start": 11179, "end": 11206, "strand": 1 }, "tm": 58.12, "…": "…" } },
+      "products": { "ref": { "size": 129 }, "alt": { "size": 128 } }, "neighbour_sites": 3,
+      "warnings": [ { "code": "NEIGHBOUR_IN_PRIMER", "details": { "role": "as_ref", "ids": ["tmp_1_11298_A_G", "tmp_1_11303_A_T"], "distances": [16, 21] }, "message": "…" },
+                    { "code": "NEIGHBOUR_IN_PRIMER", "details": { "role": "common", "ids": ["rs873026643"], "distances": [25] }, "message": "…" },
+                    { "code": "SHIFT_TRACT_DISCRIMINATION", "details": { "primer": "as_ref", "shift": 2 }, "message": "…" } ], "…": "…" }
+  ],
+  "warnings": [
+    { "code": "SHIFTABLE_INDEL", "message": "the deletion can slide 2 bases inside AAA; the forward and reverse primers end at different bases and the wrong-allele primer may still prime through a 1-nt bulge",
+      "details": { "shift": 2, "forward_position": 11285, "reverse_position": 11283, "zone": { "start": 11282, "end": 11286 } } },
+    { "code": "DENSE_NEIGHBOURS", "message": "4 known non-EMS variants lie within 30 bp of the variant", "details": { "count": 4, "window": 30 } },
+    { "code": "RELAXED_CONSTRAINTS", "details": { "orientation": "forward", "level": 1 }, "message": "…" },
+    { "code": "RELAXED_CONSTRAINTS", "details": { "orientation": "reverse", "level": 1 }, "message": "…" }
+  ]
+}

@@ -8,6 +8,7 @@ const fs = require('fs');
 
 const gd = require('../../../api/helpers/primers/genotyping/design');
 const gtemplate = require('../../../api/helpers/primers/genotyping/template');
+const scoring = require('../../../api/helpers/primers/genotyping/scoring');
 const request = require('../../../api/helpers/primers/genotyping/request');
 const design = require('../../../api/helpers/primers/design');
 const template = require('../../../api/helpers/primers/template');
@@ -19,16 +20,23 @@ const stubs = require('../fixtures/design/stubs');
 const fx = require('../fixtures/catalog/fsfixture');
 const cases = require('../fixtures/primer3/genotyping/cases');
 
-// Spec §4.1-§4.8 and the M5 rows of genotyping_design in §7.3: records, explain strings, pairs_returned, not_scored,
-// the scoring cap and budget reservation, the guard, floors and mask exemption. No primer3_core is spawned outside the
-// PRIMERS_REALDATA=1 test.
-// Recorded fixtures: test/primers/fixtures/primer3/genotyping/ (record_genotyping.js, primer3_core 2.6.1, 2026-09-15).
-// Apart from SEQUENCE_ID, every recorded input and output is byte-identical to the design fix pass recordings of the
-// spec (genotyping-design/scratch-fix2/score2/default/p3), which the §2.9-§2.10 values were computed from; the attempt
-// numbers pinned below for §2.10(b) and (d), which the spec elides, are that pass's.
+// Spec §4.1-§4.18 and the genotyping_design rows of §7.3: records, explain strings, pairs_returned, not_scored, the
+// scoring cap and budget reservation, the guard, floors and mask exemption (M5); the complete §2.9 response, the given
+// values of the §2.10 excerpts, the budget warning, template_only, Ensembl outages and the deadline (M6). No
+// primer3_core or ntthal is spawned outside the PRIMERS_REALDATA=1 tests.
+// Recorded fixtures: test/primers/fixtures/primer3/genotyping/ and test/primers/fixtures/thermo/genotyping.json
+// (record_genotyping.js, primer3_core and ntthal 2.6.1, 2026-09-15). Apart from SEQUENCE_ID, every recorded Primer3 input
+// and output is byte-identical to the design fix pass recordings of the spec (genotyping-design/scratch-fix2/score2/
+// default/p3), which the §2.9-§2.10 values were computed from. expected_<case>.json hold the §2.9 response and the
+// §2.10 excerpts exactly as the spec prints them ("…" marks an elided value).
 
 const REALDATA = process.env.PRIMERS_REALDATA === '1';
 const PRIMER3_BIN = '/home/olson/bin/primer3_core';
+const NTTHAL_BIN = '/home/olson/primer3-2.6.1/bin/ntthal';
+
+function expected(name) {
+  return JSON.parse(fs.readFileSync(cases.DIR + '/expected_' + name + '.json', 'utf8'));
+}
 
 function rejected(over) {
   return Object.assign({ force: 0, overlap: 0, common_neighbour_3p: 0, alt_scoring_failed: 0, below_floor: 0, duplicate: 0 }, over || {});
@@ -57,17 +65,48 @@ async function rejectsWith(promise, status, code) {
 
 async function replay(name, extra, body) {
   const calls = [];
-  const deps = cases.deps(name, Object.assign({ primer3: cases.recordedPrimer3(calls) }, extra || {}));
+  const thermoCalls = [];
+  const x = Object.assign({ primer3: cases.recordedPrimer3(calls) }, extra || {});
+  if (x.thermo === undefined) x.thermo = cases.recordedThermo(x.cfg || cases.cfg(), thermoCalls);
+  const deps = cases.deps(name, x);
   const res = await gd.designGenotyping(body || cases.body(name), deps);
-  return { res: res, calls: calls, deps: deps };
+  return { res: res, calls: calls, thermoCalls: thermoCalls, deps: deps };
 }
 
-// A scorer that keeps every candidate and counts `runs` check_primers runs for it, as scoring would.
+// A scorer that keeps every candidate unscored and counts `runs` check_primers runs for it, as scoring would.
 function countingScorer(runs) {
   return async function (candidate, ctx) {
     ctx.budget.countPrimer3(runs);
     return { set: candidate };
   };
+}
+
+// Every value the spec gives in an excerpt equals the response ("…" keys and values are skipped). -> differences
+function subsetDiff(got, want, p, out) {
+  out = out || [];
+  p = p || '$';
+  if (want === '…') return out;
+  if (Array.isArray(want)) {
+    if (!Array.isArray(got)) out.push(p + ': not an array');
+    else {
+      if (got.length !== want.length) out.push(p + ': length ' + got.length + ', want ' + want.length);
+      want.forEach(function (w, i) { subsetDiff(got[i], w, p + '[' + i + ']', out); });
+    }
+    return out;
+  }
+  if (want !== null && typeof want === 'object') {
+    if (got === null || typeof got !== 'object') out.push(p + ': got ' + JSON.stringify(got));
+    else {
+      Object.keys(want).forEach(function (k) {
+        if (k === '…') return;
+        if (!(k in got)) out.push(p + '.' + k + ': missing');
+        else subsetDiff(got[k], want[k], p + '.' + k, out);
+      });
+    }
+    return out;
+  }
+  if (got !== want) out.push(p + ': got ' + JSON.stringify(got) + ', want ' + JSON.stringify(want));
+  return out;
 }
 
 // The candidate of design-run pair `index`; e: {level, as [seq, start, end], common [seq, start, end] (genomic), size,
@@ -120,28 +159,43 @@ function primer3Stub(result, calls) {
   };
 }
 
+// A thermo that must never be used.
+const NO_THERMO = Object.freeze({
+  calls: 0,
+  run: function () { throw new Error('ntthal must not run'); },
+  hairpin: function () { throw new Error('ntthal must not run'); },
+  selfAny: function () { throw new Error('ntthal must not run'); },
+  selfEnd: function () { throw new Error('ntthal must not run'); },
+  cross: function () { throw new Error('ntthal must not run'); },
+  duplex: function () { throw new Error('ntthal must not run'); }
+});
+
 // ctx for runOrientation on one case; over: {body (merged into the case body), ctx (merged into ctx)}. Call dispose().
 async function contextFor(name, over) {
   over = over || {};
   const deps = cases.deps(name);
   const req = request.normalize(Object.assign(cases.body(name), over.body || {}), deps.cfg);
-  const resolved = await deps.resolveVariant(req);
+  const resolved = await cases.resolve(req, deps);
   const vt = await gtemplate.buildVariantTemplate(resolved.variant, resolved.assembly, Object.assign({}, deps, { req: req }));
   const dl = design.createDeadline(45000);
   const ctx = Object.assign({
     cfg: deps.cfg, req: req, variant: resolved.variant, template: vt, maskedSeq: null, neighbours: resolved.neighbours.entries,
-    budget: gd.createBudget(deps.cfg.genotyping), deadline: dl, log: stubs.silentLog
+    budget: gd.createBudget(deps.cfg.genotyping), deadline: dl, thermo: deps.thermo, log: stubs.silentLog
   }, over.ctx || {});
   ctx.dispose = function () { dl.dispose(); };
   return ctx;
 }
 
+const BUDGETS = Object.freeze({
+  rs871475760_kasp: [18, 123], tmp_1_11193_C_T_kasp: [20, 150], rs5413864115_kasp: [20, 141], tmp_1_11502_C_CGT_kasp: [9, 66], rs871475760_as_pcr: [29, 4]
+});
+
 // ---- the recordings --------------------------------------------------------------------------------------------
 
-test('recorded fixtures: every example regenerates its Primer3 design records byte for byte', async function () {
+test('recorded fixtures: every example regenerates its Primer3 records and ntthal calls byte for byte; §4.8 budgets 18/123 … 29/4', async function () {
   const index = cases.loadIndex();
   index.primer3_version.should.equal('2.6.1');
-  Object.keys(index.runs).should.have.length(13);
+  Object.keys(index.runs).should.have.length(96);
   for (const name of Object.keys(cases.CASES)) {
     const r = await replay(name);
     r.calls.map(function (c) { return c.name; }).should.eql(index.cases[name]);
@@ -149,6 +203,9 @@ test('recorded fixtures: every example regenerates its Primer3 design records by
       c.input.should.equal(cases.readRecording(c.name + '.input.txt'));
       index.runs[cases.sha256(c.input)].name.should.equal(c.name);
     });
+    [r.res.budget.primer3_runs, r.res.budget.thermo_calls].should.eql(BUDGETS[name], name);
+    r.thermoCalls.should.have.length(BUDGETS[name][1]);
+    r.res.warnings.map(function (w) { return w.code; }).should.not.containEql('DESIGN_BUDGET_EXHAUSTED');
   }
   // Any other input is refused.
   const stub = cases.recordedPrimer3();
@@ -158,9 +215,13 @@ test('recorded fixtures: every example regenerates its Primer3 design records by
   try { await stub.run(tags); } catch (e) { refused = e; }
   should.exist(refused);
   refused.code.should.equal('UNRECORDED_PRIMER3_INPUT');
+  refused = null;
+  try { await cases.recordedThermo().hairpin('ACGTACGTACGTACGTACGT'); } catch (e) { refused = e; }
+  should.exist(refused);
+  refused.code.should.equal('UNRECORDED_THERMO_INPUT');
 });
 
-test('§4.7 records: buildRecord, then the forced 3′ end, the SEQUENCE_TARGET guard and PRIMER_NUM_RETURN 20; never PICK_ANYWAY', function () {
+test('§4.7 design records: buildRecord, then the forced 3′ end, the SEQUENCE_TARGET guard and PRIMER_NUM_RETURN 20; never PICK_ANYWAY', function () {
   const want = {
     rs871475760_kasp_forward_L0: ['SEQUENCE_FORCE_LEFT_END', '401', '402,10', 'sorghum_bicolor_1_10709-11509_forward_L0', '61-120', 801],
     rs871475760_kasp_reverse_L0: ['SEQUENCE_FORCE_RIGHT_END', '401', '391,10', 'sorghum_bicolor_1_10709-11509_reverse_L0', '61-120', 801],
@@ -177,9 +238,10 @@ test('§4.7 records: buildRecord, then the forced 3′ end, the SEQUENCE_TARGET 
     rs871475760_as_pcr_reverse_L0: ['SEQUENCE_FORCE_RIGHT_END', '401', '391,10', 'sorghum_bicolor_1_10709-11509_reverse_L0', '150-300', 801]
   };
   const index = cases.loadIndex();
-  Object.keys(index.runs).map(function (h) { return index.runs[h].name; }).sort().should.eql(Object.keys(want).sort());
-  Object.keys(index.runs).forEach(function (hash) {
-    const run = index.runs[hash];
+  const runs = Object.keys(index.runs).map(function (h) { return index.runs[h]; });
+  const designRuns = runs.filter(function (r) { return /_L\d$/.test(r.name); });
+  designRuns.map(function (r) { return r.name; }).sort().should.eql(Object.keys(want).sort());
+  designRuns.forEach(function (run) {
     const w = want[run.name];
     const text = cases.readRecording(run.input);
     const tags = boulder.parse(text);
@@ -199,67 +261,57 @@ test('§4.7 records: buildRecord, then the forced 3′ end, the SEQUENCE_TARGET 
   });
 });
 
+test('§4.10 scoring records: check_primers, PICK_ANYWAY, the two primers, widened pair constraints; one base substituted for a mismatch run', function () {
+  const index = cases.loadIndex();
+  const scoringRuns = Object.keys(index.runs).map(function (h) { return index.runs[h]; }).filter(function (r) { return /_p\d+_(alt|mmref|mmalt)$/.test(r.name); });
+  scoringRuns.should.have.length(96 - 13);
+  const kinds = { alt: 0, mmref: 0, mmalt: 0 };
+  scoringRuns.forEach(function (run) {
+    const text = cases.readRecording(run.input);
+    const tags = boulder.parse(text);
+    const keys = text.split('\n').filter(Boolean).map(function (l) { return l.split('=')[0]; });
+    const kind = /_(alt|mmref|mmalt)$/.exec(run.name)[1];
+    kinds[kind]++;
+    keys.slice(-4).should.eql(['PRIMER_PICK_ANYWAY', 'SEQUENCE_PRIMER', 'SEQUENCE_PRIMER_REVCOMP', ''], run.name);
+    tags.should.containEql({ PRIMER_TASK: 'check_primers', PRIMER_PICK_ANYWAY: '1', PRIMER_NUM_RETURN: '1', PRIMER_MIN_SIZE: '15', PRIMER_MAX_SIZE: '36',
+      PRIMER_PAIR_MAX_DIFF_TM: '30' });
+    tags.PRIMER_PRODUCT_SIZE_RANGE.should.equal(/as_pcr/.test(run.name) ? '36-400' : /_L0_/.test(run.name) ? '36-220' : '36-250');
+    ['SEQUENCE_TARGET', 'SEQUENCE_FORCE_LEFT_END', 'SEQUENCE_FORCE_RIGHT_END', 'PRIMER_MAX_NS_ACCEPTED'].forEach(function (k) { tags.should.not.have.property(k); });
+    tags.SEQUENCE_ID.should.match(new RegExp('_p\\d+_' + kind + '$'));
+    const out = boulder.parse(cases.readRecording(run.output));
+    should(out.PRIMER_ERROR).be.undefined();
+    out.PRIMER_PAIR_NUM_RETURNED.should.equal('1');
+  });
+  kinds.should.eql({ alt: 16 + 16 + 16 + 8 + 9, mmref: 9, mmalt: 9 });
+  // the mismatch run's template differs from the REF haplotype at exactly the base opposite the -2 mismatch
+  const ref = boulder.parse(cases.readRecording('rs871475760_as_pcr_reverse_L0.input.txt')).SEQUENCE_TEMPLATE;
+  const mm = boulder.parse(cases.readRecording('rs871475760_as_pcr_reverse_L0_p0_mmref.input.txt'));
+  const diffs = [];
+  for (let i = 0; i < ref.length; i++) if (ref[i] !== mm.SEQUENCE_TEMPLATE[i]) diffs.push([i + 1, ref[i], mm.SEQUENCE_TEMPLATE[i]]);
+  diffs.should.eql([[402, 'T', 'C']]);
+  mm.SEQUENCE_PRIMER_REVCOMP.should.equal('ATCTTTGACTAGCGAGAAATTCGG');
+  scoring.scoringParams({ max_size: 30, product_size_ranges: [[61, 120], [200, 250]], opt_tm: 60 }).should.eql(
+    { max_size: 36, product_size_ranges: [[36, 350]], opt_tm: 60, min_size: 15, max_tm_diff: 30, num_return: 1 });
+});
+
 // ---- §2.9 ------------------------------------------------------------------------------------------------------
 
-test('§2.9 rs871475760 kasp: template, settings, assay and both orientations with their Primer3 explain data', async function () {
-  const { res } = await replay('rs871475760_kasp');
-  res.template.should.containEql({ system_name: 'sorghum_bicolor', region: '1', start: 10709, end: 11509, strand: 1, length: 801,
-    alt_length: 801, masked: false, mask_source: null, mask: [], masked_fraction: 0 });
-  res.template.seq.slice(0, 13).should.equal('GCGAGTTCTCAAG');
-  res.template.seq.slice(-8).should.equal('CATATGAT');
-  res.template.seq[400].should.equal('C');
-  res.template.alt_seq.should.equal(res.template.seq.slice(0, 400) + 'A' + res.template.seq.slice(401));
-  res.template.features.should.eql({ variant: { start: 401, end: 401 }, zone: { start: 401, end: 401 },
-    discriminating: { forward: 401, reverse: 401 }, alt_offset: 0, exempt: [[365, 37], [401, 37]] });
-  res.assay.should.eql({ type: 'kasp', orientation: 'both', tails: 'ref_fam_alt_hex', deliberate_mismatch: 'none', mismatch_position: 2,
-    num_sets: 2, max_relaxation: 2, neighbour_policy: 'avoid_3p', ems_target: false });
-  res.settings.should.eql({
-    preset: 'kasp',
-    params: { opt_size: 22, min_size: 18, max_size: 30, opt_tm: 60, min_tm: 57, max_tm: 63, min_gc: 30, max_gc: 70,
-      max_tm_diff: 3, max_poly_x: 5, product_size_ranges: [[61, 120]] },
-    pinned: [],
-    ladder: [
-      { level: 1, changes: { max_size: 32, min_tm: 55, max_tm: 65, min_gc: 20, max_gc: 80, product_size_ranges: [[65, 150]] } },
-      { level: 2, changes: { min_tm: 52, max_tm_diff: 6 } }
-    ],
-    floors: { as_min_tm: 52, as_min_gc: 15 }
-  });
-  res.orientations.should.eql({
-    forward: {
-      status: 'ok', reason: null, discriminating_position: 11109, relaxation_level: 0, sets_found: 8, blockers: [],
-      attempts: [
-        { level: 0, changes: {},
-          explain: {
-            left: { raw: 'considered 13, GC content failed 5, low tm 6, ok 2', considered: 13, 'GC content failed': 5, 'low tm': 6, ok: 2 },
-            right: { raw: 'considered 4771, GC content failed 1718, low tm 1123, high tm 777, ok 1153', considered: 4771, 'GC content failed': 1718, 'low tm': 1123, 'high tm': 777, ok: 1153 },
-            pair: { raw: 'considered 1463, unacceptable product size 1443, ok 20', considered: 1463, 'unacceptable product size': 1443, ok: 20 } },
-          pairs_returned: 20,
-          rejected: { force: 0, overlap: 0, common_neighbour_3p: 0, alt_scoring_failed: 0, below_floor: 0, duplicate: 0 },
-          not_scored: 12,
-          sets: 8 }
-      ]
-    },
-    reverse: {
-      status: 'ok', reason: null, discriminating_position: 11109, relaxation_level: 0, sets_found: 8, blockers: [],
-      attempts: [
-        { level: 0, changes: {},
-          explain: {
-            left: { raw: 'considered 4771, GC content failed 598, low tm 1550, high tm 1031, ok 1592', considered: 4771, 'GC content failed': 598, 'low tm': 1550, 'high tm': 1031, ok: 1592 },
-            right: { raw: 'considered 13, low tm 6, ok 7', considered: 13, 'low tm': 6, ok: 7 },
-            pair: { raw: 'considered 905, unacceptable product size 883, tm diff too large 1, ok 21', considered: 905, 'unacceptable product size': 883, 'tm diff too large': 1, ok: 21 } },
-          pairs_returned: 20,
-          rejected: { force: 0, overlap: 0, common_neighbour_3p: 6, alt_scoring_failed: 0, below_floor: 0, duplicate: 0 },
-          not_scored: 6,
-          sets: 8 }
-      ]
-    }
-  });
-  res.warnings.should.eql([]);
-  res.engine.should.eql({ primer3: '2.6.1', thermo: null, genotyping_design: '1', variation_source: 'ensembl 115' });
-  res.sets.should.eql([]);
-  should(res.check).be.null();
-  res.variant.key.should.equal('1:11109:C:A');
+test('§2.9 rs871475760 kasp: the complete response deep-equals the spec (template sequences elided as the spec prints them)', async function () {
+  const { res, deps } = await replay('rs871475760_kasp');
+  const got = JSON.parse(JSON.stringify(res));
+  const window = cases.windowSeq();
+  got.template.seq.should.equal(window.slice(10709 - 10500, 11509 - 10500 + 1));
+  got.template.alt_seq.should.equal(got.template.seq.slice(0, 400) + 'A' + got.template.seq.slice(401));
+  got.template.seq = got.template.seq.slice(0, 13) + '…' + got.template.seq.slice(-8);
+  got.template.alt_seq = got.template.alt_seq.slice(0, 13) + '…' + got.template.alt_seq.slice(-8);
+  got.should.eql(expected('rs871475760_kasp'));
+  // key order as printed
+  Object.keys(got).should.eql(Object.keys(expected('rs871475760_kasp')));
+  Object.keys(got.sets[0]).should.eql(['id', 'key', 'rank', 'orientation', 'relaxation_level', 'quality', 'score', 'primers', 'products', 'thermo',
+    'tm_balance', 'neighbour_sites', 'primer3_penalty', 'warnings', 'issues', 'check', 'order']);
+  Object.keys(got.sets[0].primers.as_alt).should.eql(Object.keys(expected('rs871475760_kasp').sets[0].primers.as_alt));
   Object.keys(res).should.not.containEql('candidates');
+  deps.semaphore.order.should.eql(['acquire', 'release']);
 });
 
 test('§2.9 rs871475760 kasp: the pairs of S1 (reverse, Primer3 pair 0) and S2 (forward, pair 2), and forward pair 0', async function () {
@@ -272,24 +324,27 @@ test('§2.9 rs871475760 kasp: the pairs of S1 (reverse, Primer3 pair 0) and S2 (
   s1.common.hairpin_th.should.be.approximately(34.99, 0.005);
   s1.common.end_stability.should.equal(4.55);
   s1.params.should.equal(res.settings.params);
+  s1.scored.key.should.equal('f9df650ad116');
   const s2 = expectCandidate(res, 'forward', 2, { level: 0, as: ['GGTTATCCGAATATAGTCATACTCTATTC', 11081, 11109],
     common: ['TCTTTGTCTACTGAGAAATCCAGA', 11149, 11172], size: 92, penalty: 14.634369, as_tm: 57.28, common_tm: 57.08 });
   s2.as.hairpin_th.should.be.approximately(39.2, 0.005);
   s2.as.self_any_th.should.be.approximately(12.01, 0.005);
   s2.common.hairpin_th.should.be.approximately(35.39, 0.005);
+  s2.scored.key.should.equal('1accc54c262d');
   // §4.16 S1: pair 0 of the forward run is the 30-mer with penalty 14.376148, not S2's pair.
   const p0 = res.candidates.forward[0];
   p0.as.seq.should.equal('TGGTTATCCGAATATAGTCATACTCTATTC');
   p0.pair.penalty.should.equal(14.376148);
   res.candidates.reverse.forEach(function (c) { c.common_neighbours_3p.should.eql([]); });
-  res.budget.primer3_runs.should.equal(2);
+  res.budget.primer3_runs.should.equal(18);
   res.budget.exhausted.should.eql([]);
 });
 
 // ---- §2.10 -----------------------------------------------------------------------------------------------------
 
-test('§2.10(a) tmp_1_11193_C_T: an EMS target needing level 1 in both orientations, with the four explain strings', async function () {
+test('§2.10(a) tmp_1_11193_C_T: an EMS target needing level 1 in both orientations, with the four explain strings and the spec values', async function () {
   const { res } = await replay('tmp_1_11193_C_T_kasp');
+  subsetDiff(JSON.parse(JSON.stringify(res)), expected('tmp_1_11193_C_T_kasp')).should.eql([]);
   res.template.should.containEql({ region: '1', start: 10793, end: 11593, length: 801 });
   res.assay.ems_target.should.be.true();
   res.variant.records.should.eql([{ id: 'tmp_1_11193_C_T', source: 'EMS_PMID38100514_Jiao', ems: true }]);
@@ -315,18 +370,23 @@ test('§2.10(a) tmp_1_11193_C_T: an EMS target needing level 1 in both orientati
       pair: 'considered 1364, unacceptable product size 1341, tm diff too large 2, ok 21' }
   ]);
   res.warnings.should.eql([
+    { code: 'EMS_TARGET', message: 'the target is an EMS mutation, private to BTx623-background mutant lines; natural neighbours are reported as warnings rather than blocking an orientation',
+      details: { sources: ['EMS_PMID38100514_Jiao'] } },
     { code: 'RELAXED_CONSTRAINTS', message: 'forward: sets need relaxation level 1', details: { orientation: 'forward', level: 1, changes: L1 } },
     { code: 'RELAXED_CONSTRAINTS', message: 'reverse: sets need relaxation level 1', details: { orientation: 'reverse', level: 1, changes: L1 } }
   ]);
+  res.neighbours.should.eql({ data: 'ensembl', window: { start: 10793, end: 11593 }, variants: 54, non_ems: 45, ems: 9, dense_non_ems: 1 });
+  res.variant.submission_sequence.should.equal('GCATATTCTGGATTTCTCWGTAGACAAAGATAGATAACARAAATAGCTCT[C/T]TAGAGTATACACAATATATTAAAAAGTTGTTAGAGAGTGAAAATATATAG');
   expectCandidate(res, 'forward', 0, { level: 1, as: ['ACAAAGATAGATAACAAAAATAGCTCTC', 11166, 11193],
     common: ['TCACACTTTGAATCATCATTTGGA', 11268, 11291], size: 126, penalty: 14.470497, as_tm: 56.43, common_tm: 57.10 });
   expectCandidate(res, 'reverse', 4, { level: 1, as: ['ACAACTTTTTAATATATTGTGTATACTCTAG', 11193, 11223],
     common: ['TGAATTTCTCGCTAGTCAAAGA', 11110, 11131], size: 114, penalty: 18.278417, as_tm: 55.21, common_tm: 55.51 });
 });
 
-test('§2.10(b) rs5413864115 entered in Ensembl style: the shiftable deletion template and level-1 pairs', async function () {
+test('§2.10(b) rs5413864115 entered in Ensembl style: the shiftable deletion, ids filled from Ensembl, and the spec values', async function () {
   const { res } = await replay('rs5413864115_kasp');
-  res.variant.should.containEql({ key: '1:11282:CA:C', ids: ['rs5413864115'], label: '1:11283-11283 A/-', kind: 'deletion', shift: 2 });
+  subsetDiff(JSON.parse(JSON.stringify(res)), expected('rs5413864115_kasp')).should.eql([]);
+  res.variant.should.containEql({ key: '1:11282:CA:C', requested_id: null, ids: ['rs5413864115'], label: '1:11283-11283 A/-', kind: 'deletion', shift: 2 });
   res.variant.vcf.should.eql({ position: 11282, ref: 'CA', alt: 'C' });
   res.variant.zone.should.eql({ start: 11282, end: 11286 });
   res.template.should.containEql({ start: 10883, end: 11685, length: 803, alt_length: 802 });
@@ -343,16 +403,21 @@ test('§2.10(b) rs5413864115 entered in Ensembl style: the shiftable deletion te
     { level: 0, pairs_returned: 0, rejected: rejected(), not_scored: 0, sets: 0 },
     { level: 1, pairs_returned: 20, rejected: rejected(), not_scored: 12, sets: 8 }
   ]);
-  res.warnings.map(function (w) { return [w.code, w.details.orientation, w.details.level]; })
-    .should.eql([['RELAXED_CONSTRAINTS', 'forward', 1], ['RELAXED_CONSTRAINTS', 'reverse', 1]]);
+  res.warnings.map(function (w) { return w.code; }).should.eql(['SHIFTABLE_INDEL', 'DENSE_NEIGHBOURS', 'RELAXED_CONSTRAINTS', 'RELAXED_CONSTRAINTS']);
+  res.warnings[0].should.eql({ code: 'SHIFTABLE_INDEL',
+    message: 'the deletion can slide 2 bases inside AAA; the forward and reverse primers end at different bases and the wrong-allele primer may still prime through a 1-nt bulge',
+    details: { shift: 2, forward_position: 11285, reverse_position: 11283, zone: { start: 11282, end: 11286 } } });
+  res.warnings[1].should.eql({ code: 'DENSE_NEIGHBOURS', message: '4 known non-EMS variants lie within 30 bp of the variant', details: { count: 4, window: 30 } });
+  res.variant.submission_sequence.should.equal('AAAATATATAGAAAACAATTTTATACAGATGATTTTCCAAATGATGATTC[A/]AAGTGTGAAATTTGRAAAGWCTCTTRGASATGMTYTAAGTGGAAGGAACA');
   expectCandidate(res, 'forward', 1, { level: 1, as: ['ACAGATGATTTTCCAAATGATGATTCAAA', 11257, 11285],
     common: ['CCCCATGTTTTTGTTCCTTCCA', 11323, 11344], size: 88, penalty: 8.47932, as_tm: 59.22, common_tm: 59.30 });
   expectCandidate(res, 'reverse', 0, { level: 1, as: ['AGAGTCTTTTCAAATTTCACACTTT', 11283, 11307],
     common: ['ACAAAAATAGCTCTCTAGAGTATACACA', 11179, 11206], size: 129, penalty: 14.793151, as_tm: 56.09, common_tm: 58.12 });
 });
 
-test('§2.10(c) tmp_1_11502_C_CGT: forward blocked by rs5413863234 at distance 4, reverse at level 0', async function () {
+test('§2.10(c) tmp_1_11502_C_CGT: forward blocked by rs5413863234 at distance 4, reverse at level 0; ids merged; the spec values', async function () {
   const { res, calls } = await replay('tmp_1_11502_C_CGT_kasp');
+  subsetDiff(JSON.parse(JSON.stringify(res)), expected('tmp_1_11502_C_CGT_kasp')).should.eql([]);
   res.variant.ids.should.eql(['tmp_1_11502_C_CGT', 'rs5413863549']);
   res.template.should.containEql({ start: 11102, end: 11903, length: 802, alt_length: 804 });
   res.orientations.forward.should.eql({
@@ -364,21 +429,31 @@ test('§2.10(c) tmp_1_11502_C_CGT: forward blocked by rs5413863234 at distance 4
   res.orientations.reverse.attempts.map(counts).should.eql([
     { level: 0, pairs_returned: 20, rejected: rejected({ common_neighbour_3p: 6 }), not_scored: 6, sets: 8 }
   ]);
-  calls.map(function (c) { return c.name; }).should.eql(['tmp_1_11502_C_CGT_kasp_reverse_L0']);
-  res.warnings.should.eql([{ code: 'ORIENTATION_BLOCKED',
-    message: 'forward: known variant rs5413863234 (G/A) lies 4 nt from the allele-specific primer\'s 3′ end',
-    details: { orientation: 'forward', ids: ['rs5413863234'], distances: [4] } }]);
+  // one design run (no forward run at all), then the ALT scoring run of each of the 8 scored reverse candidates
+  calls.map(function (c) { return c.name; }).should.eql(['tmp_1_11502_C_CGT_kasp_reverse_L0'].concat(res.candidates.reverse.map(function (c) {
+    return 'tmp_1_11502_C_CGT_kasp_reverse_L0_p' + c.pair_index + '_alt';
+  })));
+  calls.should.have.length(9);
+  res.warnings.should.eql([
+    { code: 'DUPLICATE_VARIANT_IDS', message: '2 Ensembl ids describe the same event 1:11502:C:CGT; they were merged',
+      details: { key: '1:11502:C:CGT', ids: ['tmp_1_11502_C_CGT', 'rs5413863549'] } },
+    { code: 'ORIENTATION_BLOCKED', message: 'forward: known variant rs5413863234 (G/A) lies 4 nt from the allele-specific primer\'s 3′ end',
+      details: { orientation: 'forward', ids: ['rs5413863234'], distances: [4] } },
+    { code: 'DENSE_NEIGHBOURS', message: '5 known non-EMS variants lie within 30 bp of the variant', details: { count: 5, window: 30 } }
+  ]);
+  res.sets[0].warnings[0].should.eql({ code: 'AS_TM_IMBALANCE', message: 'as_ref and as_alt Tm differ by 1.16 °C (limit 1.0)', details: { diff: 1.16 } });
+  res.variant.submission_sequence.should.equal('ATGTTAGGATCTTTGCAACCCWGTGTTGCGTGCAATCTCGGTATCTCRCC[/GT]ATATGAYGTTAGGWTTTCTTWTCCTGCAACTGCCAAGAGAAYAAATATAT');
   expectCandidate(res, 'reverse', 3, { level: 0, as: ['GCAGGAAAAGAAATCCTAACATCATATG', 11502, 11529],
     common: ['AGGATCTTTGCAACCCTGTGTT', 11458, 11479], size: 72, penalty: 7.237494, as_tm: 59.19, common_tm: 60.43 });
-  res.budget.primer3_runs.should.equal(1);
 });
 
-test('§2.10(d) rs871475760 as_pcr: preset, attempts and the pair of S1; the EMS neighbour at the common 3′ end does not reject', async function () {
-  const { res } = await replay('rs871475760_as_pcr', { scoreCandidate: countingScorer(3) });
+test('§2.10(d) rs871475760 as_pcr: preset, attempts, the mismatch blocks of S1; the EMS neighbour at the common 3′ end does not reject', async function () {
+  const { res } = await replay('rs871475760_as_pcr');
+  subsetDiff(JSON.parse(JSON.stringify(res)), expected('rs871475760_as_pcr')).should.eql([]);
   res.settings.params.should.eql({ opt_size: 24, min_size: 18, max_size: 30, opt_tm: 60, min_tm: 57, max_tm: 63, min_gc: 30, max_gc: 70,
     max_tm_diff: 3, max_poly_x: 4, product_size_ranges: [[150, 300]] });
   res.assay.should.eql({ type: 'as_pcr', orientation: 'both', tails: 'none', deliberate_mismatch: 'auto', mismatch_position: 2,
-    num_sets: 1, max_relaxation: 2, neighbour_policy: 'avoid_3p', ems_target: false });
+    num_sets: 1, max_relaxation: 2, neighbour_policy: 'avoid_3p', ems_target: false, kasp_mix: null });
   res.orientations.forward.attempts.map(counts).should.eql([
     { level: 0, pairs_returned: 20, rejected: rejected({ common_neighbour_3p: 19 }), not_scored: 0, sets: 1 }
   ]);
@@ -388,18 +463,20 @@ test('§2.10(d) rs871475760 as_pcr: preset, attempts and the pair of S1; the EMS
   const s1 = expectCandidate(res, 'reverse', 0, { level: 0, as: ['ATCTTTGACTAGCGAGAAATTCAG', 11109, 11132],
     common: ['TGCATCAACAAATGTGCTATGTGT', 10880, 10903], size: 253, penalty: 2.922723, as_tm: 57.10, common_tm: 60.02 });
   s1.common_neighbours_3p.should.eql([]);
-  // §4.8 table: 2 design runs + 9 candidates x 3 scoring runs.
-  res.budget.primer3_runs.should.equal(29);
+  res.sets[0].primers.as_ref.should.containEql({ tm_method: 'ntthal_duplex', tailed: null, dye: null, order_seq: 'ATCTTTGACTAGCGAGAAATTCGG' });
+  should(res.sets[0].thermo.tailed).be.null();
+  // §4.8 table: 2 design runs + 9 candidates x 3 scoring runs; 2 duplex calls per set, memoized across candidates.
+  [res.budget.primer3_runs, res.budget.thermo_calls].should.eql([29, 4]);
+  const counted = await replay('rs871475760_as_pcr', { scoreCandidate: countingScorer(3), thermo: NO_THERMO });
+  counted.res.budget.primer3_runs.should.equal(29);
+  counted.res.sets.should.eql([]);
+  should(counted.res.check).be.null();
 });
 
 // ---- the scoring cap and the budget (§4.8) ----------------------------------------------------------------------------
 
-test('§4.8 budget: default caps give 18 Primer3 runs; max_primer3_runs 12 stops reverse after 2 sets without an error', async function () {
-  const full = await replay('rs871475760_kasp', { scoreCandidate: countingScorer(1) });
-  full.res.budget.primer3_runs.should.equal(18);
-  full.res.budget.exhausted.should.eql([]);
-
-  const capped = await replay('rs871475760_kasp', { cfg: cases.cfg({ max_primer3_runs: 12 }), scoreCandidate: countingScorer(1) });
+test('§4.8 budget: max_primer3_runs 12 stops reverse after 2 sets with DESIGN_BUDGET_EXHAUSTED in a 200; the returned keys stay', async function () {
+  const capped = await replay('rs871475760_kasp', { cfg: cases.cfg({ max_primer3_runs: 12 }) });
   const res = capped.res;
   res.orientations.forward.attempts.map(function (a) { return [a.pairs_returned, a.not_scored, a.sets]; }).should.eql([[20, 12, 8]]);
   res.orientations.reverse.attempts.map(function (a) { return [a.pairs_returned, a.not_scored, a.sets, a.rejected.common_neighbour_3p]; })
@@ -408,7 +485,22 @@ test('§4.8 budget: default caps give 18 Primer3 runs; max_primer3_runs 12 stops
   res.candidates.reverse.map(function (c) { return c.pair_index; }).should.eql([0, 1]);
   res.budget.should.containEql({ primer3_runs: 12, max_primer3_runs: 12, max_thermo_calls: 272 });
   res.budget.exhausted.should.eql(['reverse']);
-  res.warnings.should.eql([]);
+  res.warnings.map(function (w) { return [w.code, w.details]; }).should.eql([['DESIGN_BUDGET_EXHAUSTED',
+    { orientation: 'reverse', primer3_runs: 12, thermo_calls: 87, max_primer3_runs: 12, max_thermo_calls: 272, not_scored: 18, sets_returned: 2 }]]);
+  res.sets.map(function (s) { return s.key; }).should.eql(['f9df650ad116', '1accc54c262d']);
+
+  // the ntthal reservation: max_thermo_calls 20 scores one forward candidate (15 calls) and nothing else
+  const thin = (await replay('rs871475760_kasp', { cfg: cases.cfg({ max_thermo_calls: 20 }) })).res;
+  thin.orientations.forward.attempts.map(counts).should.eql([{ level: 0, pairs_returned: 20, rejected: rejected(), not_scored: 19, sets: 1 }]);
+  thin.orientations.reverse.should.containEql({ status: 'no_sets', reason: 'budget_exhausted', sets_found: 0 });
+  thin.orientations.reverse.attempts.map(counts).should.eql([{ level: 0, pairs_returned: 20, rejected: rejected(), not_scored: 20, sets: 0 }]);
+  thin.sets.map(function (s) { return [s.id, s.orientation, s.score]; }).should.eql([['S1', 'forward', 22.3]]);
+  thin.warnings.map(function (w) { return [w.code, w.details]; }).should.eql([
+    ['ORIENTATION_NO_SETS', { orientation: 'reverse', levels_tried: 1 }],
+    ['DESIGN_BUDGET_EXHAUSTED', { orientation: 'forward', primer3_runs: 3, thermo_calls: 15, max_primer3_runs: 54, max_thermo_calls: 20, not_scored: 19, sets_returned: 1 }],
+    ['DESIGN_BUDGET_EXHAUSTED', { orientation: 'reverse', primer3_runs: 3, thermo_calls: 15, max_primer3_runs: 54, max_thermo_calls: 20, not_scored: 20, sets_returned: 1 }]
+  ]);
+  thin.check.set_ids.should.eql(['S1']);
 });
 
 test('reservation, createBudget and exact decimal comparison', function () {
@@ -475,6 +567,33 @@ test('§4.8 filters in rank order: force, overlap, floor, duplicate, a scoring d
     }
     should(err).be.instanceOf(TypeError);
     err.message.should.match(/too_cold/);
+  } finally {
+    ctx.dispose();
+  }
+});
+
+test('§4.7/§4.10: a check_primers PRIMER_ERROR drops the candidate as alt_scoring_failed, never a 500; the run is counted', async function () {
+  const ctx = await contextFor('rs871475760_kasp');
+  try {
+    const design1 = synthetic(ctx.template.seq, [{ left: [373, 29], right: [464, 24] }]);
+    const seen = [];
+    ctx.primer3 = primer3Stub(function (tags) {
+      seen.push(tags.PRIMER_TASK);
+      return tags.PRIMER_TASK === 'check_primers'
+        ? { tags: { PRIMER_ERROR: 'Specified right primer not in sequence' }, error: 'Specified right primer not in sequence', warning: null }
+        : design1;
+    });
+    ctx.thermo = NO_THERMO;
+    ctx.scoreCandidate = scoring.scoreCandidate;
+    const out = await gd.runOrientation('forward', ctx);
+    out.orientation.attempts.map(counts).should.eql([
+      { level: 0, pairs_returned: 1, rejected: rejected({ alt_scoring_failed: 1 }), not_scored: 0, sets: 0 },
+      { level: 1, pairs_returned: 1, rejected: rejected({ duplicate: 1 }), not_scored: 0, sets: 0 },
+      { level: 2, pairs_returned: 1, rejected: rejected({ duplicate: 1 }), not_scored: 0, sets: 0 }
+    ]);
+    out.orientation.should.containEql({ status: 'no_sets', reason: null });
+    seen.should.eql(['generic', 'check_primers', 'generic', 'generic']);
+    ctx.budget.primer3_runs.should.equal(4);
   } finally {
     ctx.dispose();
   }
@@ -557,7 +676,7 @@ test('§4.15 blockers: avoid_3p blocks a natural target without a Primer3 run; i
 test('§4.8 step 3: neighbour_policy ignore keeps the pairs a common 3′ neighbour would reject (rs871475760 reverse)', async function () {
   const b = cases.body('rs871475760_kasp');
   b.assay.neighbour_policy = 'ignore';
-  const { res } = await replay('rs871475760_kasp', {}, b);
+  const { res } = await replay('rs871475760_kasp', { scoreCandidate: countingScorer(1), thermo: NO_THERMO }, b);
   res.orientations.reverse.attempts.map(counts).should.eql([{ level: 0, pairs_returned: 20, rejected: rejected(), not_scored: 12, sets: 8 }]);
   res.candidates.reverse.map(function (c) { return c.pair_index; }).should.eql([0, 1, 2, 3, 4, 5, 6, 7]);
   const kept = res.candidates.reverse.find(function (c) { return c.pair_index === 7; });
@@ -585,7 +704,7 @@ test('§4.5 mask exemption: each orientation\'s Primer3 template has its allele-
   const maskCalls = [];
   const p3 = [];
   const b = Object.assign(cases.body('rs871475760_kasp'), { avoid_repeats: true });
-  const deps = cases.deps('rs871475760_kasp', { repeatMask: maskStub(maskCalls, [[300, 201]], 0.2509), primer3: primer3Stub(synthetic('', []), p3) });
+  const deps = cases.deps('rs871475760_kasp', { repeatMask: maskStub(maskCalls, [[300, 201]], 0.2509), primer3: primer3Stub(synthetic('', []), p3), thermo: NO_THERMO });
   const res = await gd.designGenotyping(b, deps);
   maskCalls.should.have.length(1);
   maskCalls[0].template.should.containEql({ mode: 'region', region: '1', start: 10709, end: 11509, strand: 1 });
@@ -612,11 +731,13 @@ test('§4.5 mask exemption: each orientation\'s Primer3 template has its allele-
   res.warnings[1].details.should.eql({ orientation: 'forward', masked_bases: 37 });
   res.warnings[2].details.should.eql({ orientation: 'reverse', masked_bases: 37 });
   deps.semaphore.order.should.eql(['acquire', 'release']);
+  res.sets.should.eql([]);
+  should(res.check).be.null();
 
   // three_prime: lowercase outside the exemption, uppercase inside
   const p3b = [];
   const b2 = Object.assign(cases.body('rs871475760_kasp'), { avoid_repeats: true, repeat_mask_mode: 'three_prime', assay: { orientation: 'forward' } });
-  await gd.designGenotyping(b2, cases.deps('rs871475760_kasp', { repeatMask: maskStub([], [[380, 10]], 0.0125), primer3: primer3Stub(synthetic('', []), p3b) }));
+  await gd.designGenotyping(b2, cases.deps('rs871475760_kasp', { repeatMask: maskStub([], [[380, 10]], 0.0125), primer3: primer3Stub(synthetic('', []), p3b), thermo: NO_THERMO }));
   p3b.should.have.length(3);
   p3b[0].PRIMER_LOWERCASE_MASKING.should.equal(1);
   p3b[0].SEQUENCE_TEMPLATE.should.equal(seq);
@@ -627,40 +748,85 @@ test('§4.5 mask exemption: each orientation\'s Primer3 template has its allele-
   (function () { gtemplate.orientationTemplate(vt, 'ACGT', 'forward'); }).should.throw(RangeError);
 });
 
-test('template_only: no Primer3 run and no semaphore, unless avoid_repeats needs the masker (§4.1, §4.2)', async function () {
+test('template_only: no Primer3, no ntthal and no semaphore; neighbours and the submission string are still resolved (§4.1, §4.2)', async function () {
   const noRun = primer3Stub(function () { throw new Error('Primer3 must not run for template_only'); });
-  let deps = cases.deps('rs871475760_kasp', { primer3: noRun });
+  let deps = cases.deps('rs871475760_kasp', { primer3: noRun, thermo: NO_THERMO });
   let res = await gd.designGenotyping(Object.assign(cases.body('rs871475760_kasp'), { template_only: true }), deps);
   should(res.orientations).be.null();
   res.sets.should.eql([]);
   should(res.check).be.null();
-  should(res.engine.primer3).be.null();
+  res.engine.should.eql({ primer3: null, thermo: null, genotyping_design: '1', variation_source: 'ensembl 115' });
   res.template.length.should.equal(801);
   res.settings.preset.should.equal('kasp');
+  res.neighbours.should.eql({ data: 'ensembl', window: { start: 10709, end: 11509 }, variants: 57, non_ems: 45, ems: 12, dense_non_ems: 0 });
+  res.variant.submission_sequence.should.equal(expected('rs871475760_kasp').variant.submission_sequence);
+  res.assay.kasp_mix.stock_uM.should.equal(100);
+  res.warnings.should.eql([]);
   deps.semaphore.order.should.eql([]);
 
   const maskCalls = [];
-  deps = cases.deps('rs871475760_kasp', { primer3: noRun, repeatMask: maskStub(maskCalls, [[1, 200]], 0.2497) });
+  deps = cases.deps('rs871475760_kasp', { primer3: noRun, thermo: NO_THERMO, repeatMask: maskStub(maskCalls, [[1, 200]], 0.2497) });
   res = await gd.designGenotyping(Object.assign(cases.body('rs871475760_kasp'), { template_only: true, avoid_repeats: true }), deps);
   maskCalls.should.have.length(1);
   deps.semaphore.order.should.eql(['acquire', 'release']);
   res.template.should.containEql({ masked: true, mask: [[1, 200]], masked_fraction: 0.2497 });
+  res.warnings.map(function (w) { return w.code; }).should.eql(['BLAST_DEPTH_MASK']);
 });
 
-test('orchestration errors: deadline 504, PRIMER_ERROR 400, disabled 503, no resolver 500; the slot is always released', async function () {
-  let deps = cases.deps('rs871475760_kasp', { cfg: cases.cfg(null, { design: { deadline_ms: 100 } }),
+test('Ensembl unavailable: a manual design is 200 with NEIGHBOURS_UNAVAILABLE and no ids; a design by id is 503 and never takes a slot', async function () {
+  const manual = await replay('rs5413864115_kasp', { ensembl: 'down', scoreCandidate: countingScorer(1), thermo: NO_THERMO });
+  const res = manual.res;
+  res.variant.should.containEql({ key: '1:11282:CA:C', requested_id: null, ids: [], records: [] });
+  res.neighbours.should.eql({ data: 'unavailable', window: { start: 10883, end: 11685 }, variants: 0, non_ems: 0, ems: 0, dense_non_ems: 0 });
+  res.warnings.map(function (w) { return w.code; }).should.eql(['SHIFTABLE_INDEL', 'NEIGHBOURS_UNAVAILABLE', 'RELAXED_CONSTRAINTS', 'RELAXED_CONSTRAINTS']);
+  res.warnings[1].details.should.eql({ reason: 'transport' });
+  res.engine.variation_source.should.equal('ensembl 115');
+  // without neighbours every flank base is the reference base: the §4.17 string with each IUPAC code resolved
+  const IUPAC = { R: 'AG', Y: 'CT', S: 'CG', W: 'AT', K: 'GT', M: 'AC' };
+  const withCodes = 'AAAATATATAGAAAACAATTTTATACAGATGATTTTCCAAATGATGATTC[A/]AAGTGTGAAATTTGRAAAGWCTCTTRGASATGMTYTAAGTGGAAGGAACA';
+  const plain = res.variant.submission_sequence;
+  plain.should.not.match(/[RYSWKM]/);
+  plain.should.have.length(withCodes.length);
+  for (let i = 0; i < withCodes.length; i++) {
+    if (IUPAC[withCodes[i]]) IUPAC[withCodes[i]].should.containEql(plain[i]);
+    else plain[i].should.equal(withCodes[i]);
+  }
+  manual.deps.semaphore.order.should.eql(['acquire', 'release']);
+
+  const deps = cases.deps('rs871475760_kasp', { ensembl: 'down', primer3: primer3Stub(function () { throw new Error('Primer3 must not run'); }), thermo: NO_THERMO });
+  const err = await rejectsWith(gd.designGenotyping(cases.body('rs871475760_kasp'), deps), 503, 'VARIATION_SOURCE_UNAVAILABLE');
+  err.details.should.match({ reason: 'transport' });
+  deps.semaphore.order.should.eql([]);
+
+  // a genome without variation data (no primers.variation.species entry; same sequence here): an id is 422 before any
+  // Primer3 run, a manual variant designs with neighbours data "none" and warning NO_VARIATION_DATA
+  const rio = async function (name) { return stubs.resolvedStub({ system_name: name }); };
+  const noData = cases.deps('rs871475760_kasp', { resolve: rio, primer3: primer3Stub(function () { throw new Error('Primer3 must not run'); }), thermo: NO_THERMO });
+  const e422 = await rejectsWith(gd.designGenotyping(Object.assign(cases.body('rs871475760_kasp'), { system_name: 'sorghum_rio' }), noData), 422, 'NO_VARIATION_DATA');
+  e422.details.should.eql({ system_name: 'sorghum_rio' });
+  noData.semaphore.order.should.eql([]);
+  const noDataManual = cases.deps('rs871475760_kasp', { resolve: rio, thermo: NO_THERMO });
+  const m = await gd.designGenotyping({ system_name: 'sorghum_rio', variant: { region: '1', position: 11109, ref: 'C', alt: 'A' }, template_only: true }, noDataManual);
+  m.neighbours.should.eql({ data: 'none', window: { start: 10709, end: 11509 }, variants: 0, non_ems: 0, ems: 0, dense_non_ems: 0 });
+  m.warnings.map(function (w) { return [w.code, w.details]; }).should.eql([['NO_VARIATION_DATA', { system_name: 'sorghum_rio' }]]);
+  m.variant.should.containEql({ key: '1:11109:C:A', ids: [], requested_id: null });
+  should(m.engine.variation_source).be.null();
+});
+
+test('orchestration errors: deadline 504, PRIMER_ERROR 400, PRIMER3_WARNING, disabled 503, unknown keys 400; the slot is always released', async function () {
+  let deps = cases.deps('rs871475760_kasp', { cfg: cases.cfg(null, { design: { deadline_ms: 100 } }), thermo: NO_THERMO,
     primer3: { run: function () { return new Promise(function () {}); }, version: async function () { return '2.6.1'; } } });
   await rejectsWith(gd.designGenotyping(cases.body('rs871475760_kasp'), deps), 504, 'DEADLINE_EXCEEDED');
   deps.semaphore.order.should.eql(['acquire', 'release']);
 
-  deps = cases.deps('rs871475760_kasp', { primer3: primer3Stub({ tags: { PRIMER_ERROR: 'SEQUENCE_TARGET beyond end of sequence' },
+  deps = cases.deps('rs871475760_kasp', { thermo: NO_THERMO, primer3: primer3Stub({ tags: { PRIMER_ERROR: 'SEQUENCE_TARGET beyond end of sequence' },
     error: 'SEQUENCE_TARGET beyond end of sequence', warning: null }) });
   const err = await rejectsWith(gd.designGenotyping(cases.body('rs871475760_kasp'), deps), 400, 'PRIMER3_INPUT_ERROR');
   err.details.should.eql({ primer3_error: 'SEQUENCE_TARGET beyond end of sequence' });
   deps.semaphore.order.should.eql(['acquire', 'release']);
 
   const warned = [];
-  deps = cases.deps('rs871475760_kasp', { primer3: primer3Stub(synthetic('', [], 'unrecognized tag')) });
+  deps = cases.deps('rs871475760_kasp', { thermo: NO_THERMO, primer3: primer3Stub(synthetic('', [], 'unrecognized tag')) });
   const res = await gd.designGenotyping(Object.assign(cases.body('rs871475760_kasp'), { assay: { orientation: 'forward', max_relaxation: 0 } }), deps);
   res.warnings.forEach(function (w) { warned.push([w.code, w.details]); });
   warned.should.eql([
@@ -672,11 +838,18 @@ test('orchestration errors: deadline 504, PRIMER_ERROR 400, disabled 503, no res
 
   await rejectsWith(gd.designGenotyping(cases.body('rs871475760_kasp'), cases.deps('rs871475760_kasp', { cfg: cases.cfg(null, { enabled: false }) })),
     503, 'FEATURE_DISABLED');
-  deps = cases.deps('rs871475760_kasp', { resolveVariant: undefined });
-  await rejectsWith(gd.designGenotyping(cases.body('rs871475760_kasp'), deps), 500, 'INTERNAL');
-  deps.semaphore.order.should.eql([]);
   await rejectsWith(gd.designGenotyping(Object.assign(cases.body('rs871475760_kasp'), { mode: 'region' }), cases.deps('rs871475760_kasp')),
     400, 'INVALID_REQUEST');
+
+  // an injected resolver replaces the variation path
+  const own = cases.deps('rs871475760_kasp', { thermo: NO_THERMO, primer3: primer3Stub(synthetic('', [])) });
+  const seenReq = [];
+  own.resolveVariant = async function (req, opts) {
+    seenReq.push([req.system_name, opts.signal instanceof AbortSignal]);
+    return cases.resolve(req, cases.deps('rs871475760_kasp'));
+  };
+  (await gd.designGenotyping(Object.assign(cases.body('rs871475760_kasp'), { template_only: true }), own)).variant.key.should.equal('1:11109:C:A');
+  seenReq.should.eql([['sorghum_bicolor', true]]);
 });
 
 // ---- the template (§4.3) ------------------------------------------------------------------------------------------------
@@ -711,6 +884,7 @@ test('buildVariantTemplate: flank, ALT haplotype, features; one-sided room skips
   vt.seq.should.equal(w.seq.slice(99, 900));
   vt.alt_seq.should.equal(vt.seq.slice(0, 400) + w.variant.vcf.alt + vt.seq.slice(401));
   vt.region_template.should.containEql({ mode: 'region', id: 'synthetic_c_100-900', start: 100, end: 900 });
+  gtemplate.templateWindow(w.variant, 1000, gtemplate.templateFlank(w.deps.req.levels, 400)).should.eql({ start: 100, end: 900 });
 
   // flank = max(400, largest product-range upper bound + 40)
   const wide = syntheticWorld(3000, 1500);
@@ -718,6 +892,7 @@ test('buildVariantTemplate: flank, ALT haplotype, features; one-sided room skips
     params: { product_size_ranges: [[100, 700]] } }, wide.deps.cfg);
   const wt = await gtemplate.buildVariantTemplate(wide.variant, wide.resolved, wide.deps);
   [wt.start, wt.end].should.eql([760, 2240]);
+  gtemplate.templateFlank(wide.deps.req.levels, 400).should.equal(740);
 
   const nearEnd = syntheticWorld(540, 500);
   const ne = await gtemplate.buildVariantTemplate(nearEnd.variant, nearEnd.resolved, nearEnd.deps);
@@ -756,16 +931,49 @@ test('buildVariantTemplate: an N in the allele-specific window skips that orient
   await rejectsWith(gtemplate.buildVariantTemplate(other, w.resolved, w.deps), 404, 'UNKNOWN_REGION');
 });
 
-// ---- real binary -----------------------------------------------------------------------------------------------------
+// ---- real binaries -----------------------------------------------------------------------------------------------------
 
-test('real primer3_core reproduces every recorded output (PRIMERS_REALDATA=1)',
-  { skip: REALDATA && fs.existsSync(PRIMER3_BIN) ? false : 'set PRIMERS_REALDATA=1 (needs ' + PRIMER3_BIN + ')' }, async function () {
-    const primer3 = require('../../../api/helpers/primers/primer3');
-    const index = cases.loadIndex();
-    for (const hash of Object.keys(index.runs)) {
-      const run = index.runs[hash];
-      const r = await primer3.run(cases.readRecording(run.input), { bin: PRIMER3_BIN, timeoutMs: 30000, maxStdoutBytes: 2000000, log: stubs.silentLog });
-      should(r.error).be.null();
-      r.tags.should.eql(boulder.parse(cases.readRecording(run.output)), run.name);
+const realPrimer3 = { skip: REALDATA && fs.existsSync(PRIMER3_BIN) ? false : 'set PRIMERS_REALDATA=1 (needs ' + PRIMER3_BIN + ')' };
+const realBoth = { skip: REALDATA && fs.existsSync(PRIMER3_BIN) && fs.existsSync(NTTHAL_BIN) ? false : 'set PRIMERS_REALDATA=1 (needs primer3_core and ntthal)' };
+
+test('real primer3_core reproduces every recorded output (PRIMERS_REALDATA=1)', realPrimer3, async function () {
+  const primer3 = require('../../../api/helpers/primers/primer3');
+  const index = cases.loadIndex();
+  for (const hash of Object.keys(index.runs)) {
+    const run = index.runs[hash];
+    const r = await primer3.run(cases.readRecording(run.input), { bin: PRIMER3_BIN, timeoutMs: 30000, maxStdoutBytes: 2000000, log: stubs.silentLog });
+    should(r.error).be.null();
+    r.tags.should.eql(boulder.parse(cases.readRecording(run.output)), run.name);
+  }
+});
+
+test('real binaries: the five designs reproduce their set keys and scores; check_primers on REF reproduces the design run (±0.01)', realBoth, async function () {
+  const primer3 = require('../../../api/helpers/primers/primer3');
+  const thermo = require('../../../api/helpers/primers/thermo');
+  const want = { rs871475760_kasp: [['f9df650ad116', 9.18], ['1accc54c262d', 19.63]], tmp_1_11193_C_T_kasp: [['f5a5c6f2ebcf', 22.51], ['c791a4956fd3', 24.84]],
+    rs5413864115_kasp: [['a5277232d8ab', 15.48], ['cb3ef66afd37', 23.95]], tmp_1_11502_C_CGT_kasp: [['53942cb55348', 9.56]], rs871475760_as_pcr: [['7f9af6b1c938', 7.92]] };
+  for (const name of Object.keys(want)) {
+    const config = cases.cfg(null, { primer3_core: PRIMER3_BIN, ntthal: NTTHAL_BIN });
+    const started = Date.now();
+    const res = await gd.designGenotyping(cases.body(name), cases.deps(name, { cfg: config, primer3: primer3, thermo: thermo.createThermo({ cfg: config }) }));
+    (Date.now() - started).should.be.below(3000);
+    res.sets.map(function (s) { return [s.key, s.score]; }).should.eql(want[name], name);
+    if (name === 'rs871475760_as_pcr') continue;
+    for (const c of res.candidates.forward.concat(res.candidates.reverse)) {
+      const forward = c.orientation === 'forward';
+      const dl = design.createDeadline(30000);
+      try {
+        const run = await scoring.scorePair({ id: 'equivalence', seq: res.template.seq }, forward ? c.as.seq : c.common.seq, forward ? c.common.seq : c.as.seq,
+          c.params, { cfg: config, primer3: primer3, budget: gd.createBudget({ max_primer3_runs: 99, max_thermo_calls: 0 }), deadline: dl, log: stubs.silentLog });
+        ['left', 'right'].forEach(function (side) {
+          const d = c.pair[side];
+          const s = run.pair[side];
+          ['tm', 'hairpin_th', 'self_any_th', 'self_end_th', 'end_stability'].forEach(function (k) { s[k].should.be.approximately(d[k], 0.01, name + ' ' + side + ' ' + k); });
+        });
+        run.pair.product_size.should.equal(c.pair.product_size);
+      } finally {
+        dl.dispose();
+      }
     }
-  });
+  }
+});

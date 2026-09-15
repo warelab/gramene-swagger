@@ -39,6 +39,19 @@ function levelBounds(levels) {
   return { productMin: productMin, productMax: productMax, maxSize: maxSize };
 }
 
+// §4.3 flank F = max(genotyping.template_flank, the largest product-range upper bound over the levels + 40).
+function templateFlank(levels, templateFlankCfg) {
+  return Math.max(templateFlankCfg, levelBounds(levels).productMax + FLANK_PRODUCT_PAD);
+}
+
+// §4.3 template window of a canonical entry: [max(1, min(fwd, rev) - F), min(region_length, max(fwd, rev) + F)]. The
+// design fetches the neighbours of this window before the semaphore, so it is computed from the entry alone.
+function templateWindow(variant, regionLength, flank) {
+  const fwd = variant.discriminating.forward.position;
+  const rev = variant.discriminating.reverse.position;
+  return { start: Math.max(1, Math.min(fwd, rev) - flank), end: Math.min(regionLength, Math.max(fwd, rev) + flank) };
+}
+
 function checkVariant(variant, cfg) {
   if (!variant || typeof variant.region !== 'string' || !variant.vcf || !isPosInt(variant.vcf.position) ||
       typeof variant.vcf.ref !== 'string' || typeof variant.vcf.alt !== 'string') {
@@ -84,9 +97,9 @@ async function buildVariantTemplate(variant, resolved, deps) {
   const rev = variant.discriminating.reverse.position;
 
   const regionLength = await templates.requireRegionLength(sequence, fasta, variant.region);
-  const flank = Math.max(g.template_flank, bounds.productMax + FLANK_PRODUCT_PAD);
-  const start = Math.max(1, Math.min(fwd, rev) - flank);
-  const end = Math.min(regionLength, Math.max(fwd, rev) + flank);
+  const win = templateWindow(variant, regionLength, templateFlank(deps.req.levels, g.template_flank));
+  const start = win.start;
+  const end = win.end;
 
   // Room (§4.3), before any sequence is read.
   const skip = { forward: null, reverse: null };
@@ -199,5 +212,7 @@ module.exports = {
   orientationTemplate,
   publicVariantTemplate,
   levelBounds,
+  templateFlank,
+  templateWindow,
   FLANK_PRODUCT_PAD
 };

@@ -1,14 +1,19 @@
 'use strict';
 
-// The genotyping design examples of spec §2.9-§2.10 as an offline world, and the replay of their recorded Primer3
-// runs (§7.4). Shared by record_genotyping.js (records with the real primer3_core) and the unit tests (replay).
+// The genotyping design examples of spec §2.9-§2.10 as an offline world, and the replay of their recorded Primer3 and
+// ntthal runs (§7.4). Shared by record_genotyping.js (records with the real binaries) and the unit tests (replay).
 //
 // Inputs (read-only, committed):
 //   ../../design/sorghum_bicolor_1_10500-12100.plus.txt: sorghum_bicolor chromosome 1, 1:10500-12100 (provenance in
-//     test/primers/unit/variation_normalize.test.js); it covers every example template window
+//     test/primers/unit/variation_normalize.test.js); it covers every example template window. Bases outside it read
+//     as N: only the wide normalization reads of variation/index.js reach there.
 //   ../../variation/overlap_1_<start>-<end>.json: live Ensembl 115 overlap bodies of the §4.3 template windows
-// variantResolver stands in for variation/index.js: the canonical entry comes from normalize.recordsToEntries over the
-// window's overlap records (a manual variant is merged with them, §3.9), and every other entry is a neighbour.
+//   ../../variation/variation_<id>.json: live Ensembl 115 lookups; an id without one (tmp_1_11193_C_T) is looked up from
+//     its recorded overlap record, with no synonyms (as test/primers/unit/variation_index.test.js does)
+//   ../../thermo/genotyping.json: the recorded ntthal results, keyed by argv
+// The variant and its neighbours are resolved by the production path (genotyping/design.js variationResolver:
+// variation/index.js resolveDesignVariant and neighboursFor) through the real Ensembl client over a fake fetch serving
+// those bodies.
 
 const fs = require('fs');
 const path = require('path');
@@ -18,11 +23,17 @@ const stubs = require('../../design/stubs');
 const ROOT = stubs.ROOT;
 const boulder = require(path.join(ROOT, 'api/helpers/primers/boulder'));
 const normalize = require(path.join(ROOT, 'api/helpers/primers/variation/normalize'));
+const { createVariationClient } = require(path.join(ROOT, 'api/helpers/primers/variation/client'));
+const { PrimerHttpError } = require(path.join(ROOT, 'api/helpers/primers/errors'));
+const thermoModule = require(path.join(ROOT, 'api/helpers/primers/thermo'));
+const gdesign = require(path.join(ROOT, 'api/helpers/primers/genotyping/design'));
 
 const DIR = __dirname;
 const FIX = path.join(DIR, '..', '..');
 const INDEX = path.join(DIR, 'index.json');
+const THERMO = path.join(FIX, 'thermo', 'genotyping.json');
 const WINDOW = Object.freeze({ region: '1', start: 10500, end: 12100, file: 'sorghum_bicolor_1_10500-12100.plus.txt' });
+const OVERLAP_WINDOWS = Object.freeze(['10709-11509', '10793-11593', '10883-11685', '11102-11903']);
 
 // primers.genotyping of spec §3.1, and the primers.variation keys the design reads.
 const GENOTYPING = Object.freeze({
@@ -52,7 +63,7 @@ const GENOTYPING = Object.freeze({
 });
 const VARIATION = Object.freeze({ max_allele_length: 50, max_shift: 1000, ems_source_pattern: '^EMS_' });
 
-// The §2.9-§2.10 requests. overlap: the template window whose Ensembl records supply the entry and its neighbours.
+// The §2.9-§2.10 requests. overlap: the template window of the example.
 const CASES = Object.freeze({
   rs871475760_kasp: Object.freeze({
     section: '2.9', key: '1:11109:C:A', overlap: '10709-11509',
@@ -90,7 +101,7 @@ function cfg(genotyping, extra) {
 
 let windowCache = null;
 function windowSeq() {
-  if (windowCache === null) windowCache = fs.readFileSync(path.join(FIX, 'design', WINDOW.file), 'utf8').trim();
+  if (windowCache === null) windowCache = fs.readFileSync(path.join(FIX, 'design', WINDOW.file), 'utf8').trim().toUpperCase();
   return windowCache;
 }
 
@@ -102,55 +113,80 @@ function overlapRecords(name) {
   return JSON.parse(fs.readFileSync(path.join(FIX, 'variation', 'overlap_1_' + name + '.json'), 'utf8'));
 }
 
-// deps.resolveVariant for one case -> {assembly, variant, neighbours {data, entries}, warnings, variation_source}
-function variantResolver(name) {
-  const c = CASES[name];
-  return async function (req) {
-    let records = overlapRecords(c.overlap);
-    if (req.variant_input === 'manual') records = [normalize.parseManual(req.variant, VARIATION)].concat(records);
-    const opts = Object.assign({ region: WINDOW.region }, VARIATION);
-    if (req.variant_input === 'id') opts.requested_id = req.variant.id;
-    const entries = normalize.recordsToEntries(records, genome(), opts).entries;
-    const variant = entries.find(function (e) { return e.key === c.key; });
-    if (!variant || (req.variant_input === 'id' && variant.ids.indexOf(req.variant.id) < 0)) {
-      throw new Error('cases: ' + name + ' does not resolve to ' + c.key);
+// Every recorded overlap record once (the recorded windows overlap).
+let recordsCache = null;
+function allRecords() {
+  if (recordsCache) return recordsCache;
+  const seen = new Set();
+  recordsCache = [];
+  OVERLAP_WINDOWS.forEach(function (w) {
+    overlapRecords(w).forEach(function (r) {
+      const k = JSON.stringify([r.id, r.start, r.end, r.alleles]);
+      if (!seen.has(k)) {
+        seen.add(k);
+        recordsCache.push(r);
+      }
+    });
+  });
+  return recordsCache;
+}
+
+function respond(body, status) {
+  return new Response(typeof body === 'string' ? body : JSON.stringify(body), { status: status || 200 });
+}
+
+// The recorded Ensembl service as a fetch. mode: 'normal' (default), or 'down' (connection refused).
+function ensemblFetch(mode) {
+  return async function (url) {
+    if (mode === 'down') {
+      throw Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }) });
     }
-    return {
-      assembly: stubs.resolvedStub(),
-      variant: variant,
-      neighbours: { data: 'ensembl', entries: entries.filter(function (e) { return e.key !== c.key; }) },
-      warnings: [],
-      variation_source: 'ensembl 115'
-    };
+    const u = new URL(url);
+    let m = /\/overlap\/region\/sorghum_bicolor\/([^/]+):(\d+)-(\d+)$/.exec(u.pathname);
+    if (m) {
+      const region = decodeURIComponent(m[1]);
+      const s = Number(m[2]);
+      const e = Number(m[3]);
+      return respond(allRecords().filter(function (r) {
+        return String(r.seq_region_name) === region && Math.min(r.start, r.end) <= e && Math.max(r.start, r.end) >= s;
+      }));
+    }
+    m = /\/variation\/sorghum_bicolor\/([^/]+)$/.exec(u.pathname);
+    if (m) {
+      const id = decodeURIComponent(m[1]);
+      const file = path.join(FIX, 'variation', 'variation_' + id + '.json');
+      if (fs.existsSync(file)) return respond(fs.readFileSync(file, 'utf8'));
+      const r = allRecords().find(function (x) { return x.id === id; });
+      if (r) {
+        return respond({ name: id, synonyms: [], most_severe_consequence: r.consequence_type,
+          mappings: [{ seq_region_name: r.seq_region_name, start: r.start, end: r.end, allele_string: r.alleles.join('/') }] });
+      }
+      return respond(fs.readFileSync(path.join(FIX, 'variation', 'variation_not_found.json'), 'utf8'), 400);
+    }
+    return respond('<html><body>404 Not Found</body></html>', 404);
   };
 }
 
+// sequence.js contract over the recorded window, N elsewhere on region 1.
 function sequence() {
-  const files = {};
-  files[stubs.SB_DNA] = { '1': { length: stubs.SB_CHR1_LENGTH, windows: [{ start: WINDOW.start, seq: windowSeq() }] } };
-  return stubs.sequenceStub(files);
-}
-
-// Offline designGenotyping deps for one case; extra overrides (primer3, cfg, semaphore, scoreCandidate ...).
-function deps(name, extra) {
-  const order = [];
-  return Object.assign({
-    cfg: cfg(),
-    log: stubs.silentLog,
-    sequence: sequence(),
-    resolveVariant: variantResolver(name),
-    semaphore: {
-      order: order,
-      acquire: async function () {
-        order.push('acquire');
-        return function () { order.push('release'); };
-      }
+  const seq = windowSeq();
+  const calls = [];
+  return {
+    calls: calls,
+    regionLength: async function (fasta, region) { return fasta === stubs.SB_DNA && region === '1' ? stubs.SB_CHR1_LENGTH : undefined; },
+    fetch: async function (fasta, region, start, end) {
+      calls.push({ region: region, start: start, end: end });
+      if (fasta !== stubs.SB_DNA || region !== '1') throw new PrimerHttpError(404, 'UNKNOWN_REGION', 'stub: unknown region', { region: String(region) });
+      let out = '';
+      for (let p = start; p <= end; p++) out += p >= WINDOW.start && p <= WINDOW.end ? seq[p - WINDOW.start] : 'N';
+      return out;
     }
-  }, extra || {});
+  };
 }
 
-function body(name) {
-  return clone(CASES[name].body);
+async function resolveAssembly(name) {
+  if (name !== 'sorghum_bicolor') throw new PrimerHttpError(404, 'UNKNOWN_GENOME', 'stub: unknown genome', { system_name: name });
+  return stubs.resolvedStub();
 }
 
 // ---- recordings ----------------------------------------------------------------------------------------
@@ -202,9 +238,75 @@ function recordedPrimer3(calls) {
   };
 }
 
+let thermoCache = null;
+function loadThermo() {
+  if (!thermoCache) thermoCache = JSON.parse(fs.readFileSync(THERMO, 'utf8'));
+  return thermoCache;
+}
+
+// The spawn of thermo.createThermo over the recorded ntthal results: only a recorded argv is answered; anything else is
+// rejected with code UNRECORDED_THERMO_INPUT. calls: receives each argv (' '-joined) spawned.
+function recordedNtthal(calls) {
+  const fixture = loadThermo();
+  return async function (bin, args) {
+    const key = args.join(' ');
+    if (!Object.prototype.hasOwnProperty.call(fixture.calls, key)) {
+      const e = new Error('unrecorded ntthal input: ' + key);
+      e.code = 'UNRECORDED_THERMO_INPUT';
+      throw e;
+    }
+    if (calls) calls.push(key);
+    return { stdout: fixture.calls[key] + '\n' };
+  };
+}
+
+// A thermo.js instance (real parsing, memo, pool and counting) over the recorded ntthal results.
+function recordedThermo(config, calls) {
+  return thermoModule.createThermo({ cfg: config || cfg(), log: stubs.silentLog, spawn: recordedNtthal(calls) });
+}
+
+// ---- deps ----------------------------------------------------------------------------------------------
+
+// Offline designGenotyping deps for one case: the production resolver over the recorded Ensembl, the recorded thermo
+// and a semaphore that records acquire/release. extra overrides (primer3, cfg, semaphore, scoreCandidate, thermo,
+// ensembl: 'down' ...). The variation client, and so its caches, belong to this deps object alone.
+function deps(name, extra) {
+  const order = [];
+  const x = extra || {};
+  const out = Object.assign({
+    cfg: cfg(),
+    log: stubs.silentLog,
+    sequence: sequence(),
+    resolve: resolveAssembly,
+    semaphore: {
+      order: order,
+      acquire: async function () {
+        order.push('acquire');
+        return function () { order.push('release'); };
+      }
+    }
+  }, x);
+  delete out.ensembl;
+  if (!out.variationClient) {
+    out.variationClient = createVariationClient({ cfg: out.cfg, log: stubs.silentLog, fetch: ensemblFetch(x.ensembl || 'normal') });
+  }
+  if (out.thermo === undefined) out.thermo = recordedThermo(out.cfg);
+  return out;
+}
+
+// The resolved variant of a request through the same resolver designGenotyping uses by default.
+function resolve(req, d) {
+  return gdesign.variationResolver(d)(req, {});
+}
+
+function body(name) {
+  return clone(CASES[name].body);
+}
+
 module.exports = {
   DIR,
   INDEX,
+  THERMO,
   WINDOW,
   GENOTYPING,
   VARIATION,
@@ -213,13 +315,19 @@ module.exports = {
   genome,
   windowSeq,
   overlapRecords,
-  variantResolver,
+  allRecords,
+  ensemblFetch,
   sequence,
+  resolveAssembly,
   deps,
+  resolve,
   body,
   sha256,
   resultOf,
   loadIndex,
   readRecording,
-  recordedPrimer3
+  recordedPrimer3,
+  loadThermo,
+  recordedNtthal,
+  recordedThermo
 };

@@ -6,26 +6,109 @@
  "cases": {
   "rs871475760_kasp": [
    "rs871475760_kasp_forward_L0",
-   "rs871475760_kasp_reverse_L0"
+   "rs871475760_kasp_forward_L0_p0_alt",
+   "rs871475760_kasp_forward_L0_p1_alt",
+   "rs871475760_kasp_forward_L0_p2_alt",
+   "rs871475760_kasp_forward_L0_p3_alt",
+   "rs871475760_kasp_forward_L0_p4_alt",
+   "rs871475760_kasp_forward_L0_p5_alt",
+   "rs871475760_kasp_forward_L0_p6_alt",
+   "rs871475760_kasp_forward_L0_p7_alt",
+   "rs871475760_kasp_reverse_L0",
+   "rs871475760_kasp_reverse_L0_p0_alt",
+   "rs871475760_kasp_reverse_L0_p1_alt",
+   "rs871475760_kasp_reverse_L0_p2_alt",
+   "rs871475760_kasp_reverse_L0_p3_alt",
+   "rs871475760_kasp_reverse_L0_p4_alt",
+   "rs871475760_kasp_reverse_L0_p5_alt",
+   "rs871475760_kasp_reverse_L0_p6_alt",
+   "rs871475760_kasp_reverse_L0_p8_alt"
   ],
   "tmp_1_11193_C_T_kasp": [
    "tmp_1_11193_C_T_kasp_forward_L0",
    "tmp_1_11193_C_T_kasp_forward_L1",
+   "tmp_1_11193_C_T_kasp_forward_L1_p0_alt",
+   "tmp_1_11193_C_T_kasp_forward_L1_p1_alt",
+   "tmp_1_11193_C_T_kasp_forward_L1_p2_alt",
+   "tmp_1_11193_C_T_kasp_forward_L1_p3_alt",
+   "tmp_1_11193_C_T_kasp_forward_L1_p4_alt",
+   "tmp_1_11193_C_T_kasp_forward_L1_p5_alt",
+   "tmp_1_11193_C_T_kasp_forward_L1_p6_alt",
+   "tmp_1_11193_C_T_kasp_forward_L1_p7_alt",
    "tmp_1_11193_C_T_kasp_reverse_L0",
-   "tmp_1_11193_C_T_kasp_reverse_L1"
+   "tmp_1_11193_C_T_kasp_reverse_L1",
+   "tmp_1_11193_C_T_kasp_reverse_L1_p0_alt",
+   "tmp_1_11193_C_T_kasp_reverse_L1_p1_alt",
+   "tmp_1_11193_C_T_kasp_reverse_L1_p2_alt",
+   "tmp_1_11193_C_T_kasp_reverse_L1_p3_alt",
+   "tmp_1_11193_C_T_kasp_reverse_L1_p4_alt",
+   "tmp_1_11193_C_T_kasp_reverse_L1_p5_alt",
+   "tmp_1_11193_C_T_kasp_reverse_L1_p6_alt",
+   "tmp_1_11193_C_T_kasp_reverse_L1_p7_alt"
   ],
   "rs5413864115_kasp": [
    "rs5413864115_kasp_forward_L0",
    "rs5413864115_kasp_forward_L1",
+   "rs5413864115_kasp_forward_L1_p1_alt",
+   "rs5413864115_kasp_forward_L1_p2_alt",
+   "rs5413864115_kasp_forward_L1_p6_alt",
+   "rs5413864115_kasp_forward_L1_p7_alt",
+   "rs5413864115_kasp_forward_L1_p10_alt",
+   "rs5413864115_kasp_forward_L1_p11_alt",
+   "rs5413864115_kasp_forward_L1_p12_alt",
+   "rs5413864115_kasp_forward_L1_p14_alt",
    "rs5413864115_kasp_reverse_L0",
-   "rs5413864115_kasp_reverse_L1"
+   "rs5413864115_kasp_reverse_L1",
+   "rs5413864115_kasp_reverse_L1_p0_alt",
+   "rs5413864115_kasp_reverse_L1_p1_alt",
+   "rs5413864115_kasp_reverse_L1_p2_alt",
+   "rs5413864115_kasp_reverse_L1_p3_alt",
+   "rs5413864115_kasp_reverse_L1_p4_alt",
+   "rs5413864115_kasp_reverse_L1_p5_alt",
+   "rs5413864115_kasp_reverse_L1_p6_alt",
+   "rs5413864115_kasp_reverse_L1_p7_alt"
   ],
   "tmp_1_11502_C_CGT_kasp": [
-   "tmp_1_11502_C_CGT_kasp_reverse_L0"
+   "tmp_1_11502_C_CGT_kasp_reverse_L0",
+   "tmp_1_11502_C_CGT_kasp_reverse_L0_p0_alt",
+   "tmp_1_11502_C_CGT_kasp_reverse_L0_p1_alt",
+   "tmp_1_11502_C_CGT_kasp_reverse_L0_p3_alt",
+   "tmp_1_11502_C_CGT_kasp_reverse_L0_p4_alt",
+   "tmp_1_11502_C_CGT_kasp_reverse_L0_p5_alt",
+   "tmp_1_11502_C_CGT_kasp_reverse_L0_p6_alt",
+   "tmp_1_11502_C_CGT_kasp_reverse_L0_p7_alt",
+   "tmp_1_11502_C_CGT_kasp_reverse_L0_p9_alt"
   ],
   "rs871475760_as_pcr": [
    "rs871475760_as_pcr_forward_L0",
-   "rs871475760_as_pcr_reverse_L0"
+   "rs871475760_as_pcr_forward_L0_p3_alt",
+   "rs871475760_as_pcr_forward_L0_p3_mmref",
+   "rs871475760_as_pcr_forward_L0_p3_mmalt",
+   "rs871475760_as_pcr_reverse_L0",
+   "rs871475760_as_pcr_reverse_L0_p0_alt",
+   "rs871475760_as_pcr_reverse_L0_p0_mmref",
+   "rs871475760_as_pcr_reverse_L0_p0_mmalt",
+   "rs871475760_as_pcr_reverse_L0_p1_alt",
+   "rs871475760_as_pcr_reverse_L0_p1_mmref",
+   "rs871475760_as_pcr_reverse_L0_p1_mmalt",
+   "rs871475760_as_pcr_reverse_L0_p2_alt",
+   "rs871475760_as_pcr_reverse_L0_p2_mmref",
+   "rs871475760_as_pcr_reverse_L0_p2_mmalt",
+   "rs871475760_as_pcr_reverse_L0_p3_alt",
+   "rs871475760_as_pcr_reverse_L0_p3_mmref",
+   "rs871475760_as_pcr_reverse_L0_p3_mmalt",
+   "rs871475760_as_pcr_reverse_L0_p4_alt",
+   "rs871475760_as_pcr_reverse_L0_p4_mmref",
+   "rs871475760_as_pcr_reverse_L0_p4_mmalt",
+   "rs871475760_as_pcr_reverse_L0_p6_alt",
+   "rs871475760_as_pcr_reverse_L0_p6_mmref",
+   "rs871475760_as_pcr_reverse_L0_p6_mmalt",
+   "rs871475760_as_pcr_reverse_L0_p7_alt",
+   "rs871475760_as_pcr_reverse_L0_p7_mmref",
+   "rs871475760_as_pcr_reverse_L0_p7_mmalt",
+   "rs871475760_as_pcr_reverse_L0_p8_alt",
+   "rs871475760_as_pcr_reverse_L0_p8_mmref",
+   "rs871475760_as_pcr_reverse_L0_p8_mmalt"
   ]
  },
  "runs": {
@@ -34,10 +117,90 @@
    "input": "rs871475760_kasp_forward_L0.input.txt",
    "output": "rs871475760_kasp_forward_L0.output.txt"
   },
+  "6265138399117f3ed6ace289b8645f9bfc399c1b26d64fc495991a00c726ee11": {
+   "name": "rs871475760_kasp_forward_L0_p0_alt",
+   "input": "rs871475760_kasp_forward_L0_p0_alt.input.txt",
+   "output": "rs871475760_kasp_forward_L0_p0_alt.output.txt"
+  },
+  "e668926d3043855db0ad9ac7bc4a6c10a6b703980fa055e47c47bdf1716f8bbc": {
+   "name": "rs871475760_kasp_forward_L0_p1_alt",
+   "input": "rs871475760_kasp_forward_L0_p1_alt.input.txt",
+   "output": "rs871475760_kasp_forward_L0_p1_alt.output.txt"
+  },
+  "bb72186fe7ca868e4ac52d66d5cc24d1bdef393be72c44d8d631a21cbe1c213f": {
+   "name": "rs871475760_kasp_forward_L0_p2_alt",
+   "input": "rs871475760_kasp_forward_L0_p2_alt.input.txt",
+   "output": "rs871475760_kasp_forward_L0_p2_alt.output.txt"
+  },
+  "85eeaa5a118f6a605b734b0b929c0993da4024aee7b7b3590d85ac2d3419c733": {
+   "name": "rs871475760_kasp_forward_L0_p3_alt",
+   "input": "rs871475760_kasp_forward_L0_p3_alt.input.txt",
+   "output": "rs871475760_kasp_forward_L0_p3_alt.output.txt"
+  },
+  "c52eb3a2e5a41130c64fed68a41c835aecf20fc2ff7f353a66d0826ea24b7f22": {
+   "name": "rs871475760_kasp_forward_L0_p4_alt",
+   "input": "rs871475760_kasp_forward_L0_p4_alt.input.txt",
+   "output": "rs871475760_kasp_forward_L0_p4_alt.output.txt"
+  },
+  "9b4dd68880a2b6c9c4da48f86040f0bfaf47777104e96c1583f3ea0c7a2420a6": {
+   "name": "rs871475760_kasp_forward_L0_p5_alt",
+   "input": "rs871475760_kasp_forward_L0_p5_alt.input.txt",
+   "output": "rs871475760_kasp_forward_L0_p5_alt.output.txt"
+  },
+  "2bc30345c4db52f5c6eb22f5c566570e161316188a684ca19dacd6508be4ce09": {
+   "name": "rs871475760_kasp_forward_L0_p6_alt",
+   "input": "rs871475760_kasp_forward_L0_p6_alt.input.txt",
+   "output": "rs871475760_kasp_forward_L0_p6_alt.output.txt"
+  },
+  "a5f547cd06c658ef9e4a4a6bd237f4b9caa3b3565ec7bf3e5dd172f2ab46fc34": {
+   "name": "rs871475760_kasp_forward_L0_p7_alt",
+   "input": "rs871475760_kasp_forward_L0_p7_alt.input.txt",
+   "output": "rs871475760_kasp_forward_L0_p7_alt.output.txt"
+  },
   "e9396ad16327c38293881bf9690171f6f374c89f2737d1153e15d1771d437918": {
    "name": "rs871475760_kasp_reverse_L0",
    "input": "rs871475760_kasp_reverse_L0.input.txt",
    "output": "rs871475760_kasp_reverse_L0.output.txt"
+  },
+  "3fbab02546fbd752cc1ebd320addc93788a03b71b3d1504d0ecf215291f123fd": {
+   "name": "rs871475760_kasp_reverse_L0_p0_alt",
+   "input": "rs871475760_kasp_reverse_L0_p0_alt.input.txt",
+   "output": "rs871475760_kasp_reverse_L0_p0_alt.output.txt"
+  },
+  "d33d3fdc67da6e212001a52366caa39f9f90a567805922e880870cbe28ad9845": {
+   "name": "rs871475760_kasp_reverse_L0_p1_alt",
+   "input": "rs871475760_kasp_reverse_L0_p1_alt.input.txt",
+   "output": "rs871475760_kasp_reverse_L0_p1_alt.output.txt"
+  },
+  "7fa3b85c914bd344ecd43ab8731d4981da2431d8170270303c41bd0633b635db": {
+   "name": "rs871475760_kasp_reverse_L0_p2_alt",
+   "input": "rs871475760_kasp_reverse_L0_p2_alt.input.txt",
+   "output": "rs871475760_kasp_reverse_L0_p2_alt.output.txt"
+  },
+  "140e1496bb0df3ebe613cd9e1b20e26bc9ff0e8827d755e84e1a3ac9632b3222": {
+   "name": "rs871475760_kasp_reverse_L0_p3_alt",
+   "input": "rs871475760_kasp_reverse_L0_p3_alt.input.txt",
+   "output": "rs871475760_kasp_reverse_L0_p3_alt.output.txt"
+  },
+  "5e368f874fafcd376c348b8a39bec793cd3e3c2e72c384bbfb5dbfeaa878e5f3": {
+   "name": "rs871475760_kasp_reverse_L0_p4_alt",
+   "input": "rs871475760_kasp_reverse_L0_p4_alt.input.txt",
+   "output": "rs871475760_kasp_reverse_L0_p4_alt.output.txt"
+  },
+  "65a0db3e737b03baf08ee7a51761fa4f4faa471c9a5fb0b89eea863d3efa27dc": {
+   "name": "rs871475760_kasp_reverse_L0_p5_alt",
+   "input": "rs871475760_kasp_reverse_L0_p5_alt.input.txt",
+   "output": "rs871475760_kasp_reverse_L0_p5_alt.output.txt"
+  },
+  "424eb4aed200cea29faa8759792d8a1d568ea6ff78e35fff98af1e0f8c32f1ba": {
+   "name": "rs871475760_kasp_reverse_L0_p6_alt",
+   "input": "rs871475760_kasp_reverse_L0_p6_alt.input.txt",
+   "output": "rs871475760_kasp_reverse_L0_p6_alt.output.txt"
+  },
+  "d13d4820069eb5dcbd28a3a362f73411a692803f6f728d505c3e28c581beeee5": {
+   "name": "rs871475760_kasp_reverse_L0_p8_alt",
+   "input": "rs871475760_kasp_reverse_L0_p8_alt.input.txt",
+   "output": "rs871475760_kasp_reverse_L0_p8_alt.output.txt"
   },
   "cd8968c2e901ac97b4012c7a03fb3fa8a0b788fea18ba3094f7a40226c1fcdef": {
    "name": "tmp_1_11193_C_T_kasp_forward_L0",
@@ -49,6 +212,46 @@
    "input": "tmp_1_11193_C_T_kasp_forward_L1.input.txt",
    "output": "tmp_1_11193_C_T_kasp_forward_L1.output.txt"
   },
+  "03897ec55a7c42ba0cdd0a27b0f3064725ab05db93af95425cfdfe6baaa0b970": {
+   "name": "tmp_1_11193_C_T_kasp_forward_L1_p0_alt",
+   "input": "tmp_1_11193_C_T_kasp_forward_L1_p0_alt.input.txt",
+   "output": "tmp_1_11193_C_T_kasp_forward_L1_p0_alt.output.txt"
+  },
+  "16ec1152ad36755bde628d73281c2a1a955e5ecc678ff4f5e1e8e90fe701a0e0": {
+   "name": "tmp_1_11193_C_T_kasp_forward_L1_p1_alt",
+   "input": "tmp_1_11193_C_T_kasp_forward_L1_p1_alt.input.txt",
+   "output": "tmp_1_11193_C_T_kasp_forward_L1_p1_alt.output.txt"
+  },
+  "a035e7046b357b3b8f64e68bf4aba2bd515034f84bc61f8a634d8e54c776875a": {
+   "name": "tmp_1_11193_C_T_kasp_forward_L1_p2_alt",
+   "input": "tmp_1_11193_C_T_kasp_forward_L1_p2_alt.input.txt",
+   "output": "tmp_1_11193_C_T_kasp_forward_L1_p2_alt.output.txt"
+  },
+  "a2753a327ff207d1e203a1da5e33c606cac4fbf192ef807a2ffcd8b64ba73e71": {
+   "name": "tmp_1_11193_C_T_kasp_forward_L1_p3_alt",
+   "input": "tmp_1_11193_C_T_kasp_forward_L1_p3_alt.input.txt",
+   "output": "tmp_1_11193_C_T_kasp_forward_L1_p3_alt.output.txt"
+  },
+  "d74ee67c3249d72ef057a60532943687b9eeab7d8a8d6631e685f0467374061a": {
+   "name": "tmp_1_11193_C_T_kasp_forward_L1_p4_alt",
+   "input": "tmp_1_11193_C_T_kasp_forward_L1_p4_alt.input.txt",
+   "output": "tmp_1_11193_C_T_kasp_forward_L1_p4_alt.output.txt"
+  },
+  "5405d84a8a9bd1edfc6b5e2c73f208fd02710c3e984a7b50d63b8e9f1d255fbb": {
+   "name": "tmp_1_11193_C_T_kasp_forward_L1_p5_alt",
+   "input": "tmp_1_11193_C_T_kasp_forward_L1_p5_alt.input.txt",
+   "output": "tmp_1_11193_C_T_kasp_forward_L1_p5_alt.output.txt"
+  },
+  "2811262f411e15bb6a1b7596ec8dd49e5ee957c6f5c33e9d7bca6e41ca4f72d2": {
+   "name": "tmp_1_11193_C_T_kasp_forward_L1_p6_alt",
+   "input": "tmp_1_11193_C_T_kasp_forward_L1_p6_alt.input.txt",
+   "output": "tmp_1_11193_C_T_kasp_forward_L1_p6_alt.output.txt"
+  },
+  "522d715c63b33cf664ea0459dd9ccdc1613cdb9a6ce2bfab097bcace94e8fe1e": {
+   "name": "tmp_1_11193_C_T_kasp_forward_L1_p7_alt",
+   "input": "tmp_1_11193_C_T_kasp_forward_L1_p7_alt.input.txt",
+   "output": "tmp_1_11193_C_T_kasp_forward_L1_p7_alt.output.txt"
+  },
   "703ef5057a7642ade0fd4542b68e9ccfc0525ec9889934593f71d81b0decb0c6": {
    "name": "tmp_1_11193_C_T_kasp_reverse_L0",
    "input": "tmp_1_11193_C_T_kasp_reverse_L0.input.txt",
@@ -58,6 +261,46 @@
    "name": "tmp_1_11193_C_T_kasp_reverse_L1",
    "input": "tmp_1_11193_C_T_kasp_reverse_L1.input.txt",
    "output": "tmp_1_11193_C_T_kasp_reverse_L1.output.txt"
+  },
+  "e40f13f00b13952b8ad2a7b8d7e1e894264cfa11cb8bcfcae085412358f1db77": {
+   "name": "tmp_1_11193_C_T_kasp_reverse_L1_p0_alt",
+   "input": "tmp_1_11193_C_T_kasp_reverse_L1_p0_alt.input.txt",
+   "output": "tmp_1_11193_C_T_kasp_reverse_L1_p0_alt.output.txt"
+  },
+  "06a25d9c08ef2476f9a7c64c083391b2baaebb633ae708ddd4462d46d3f661e0": {
+   "name": "tmp_1_11193_C_T_kasp_reverse_L1_p1_alt",
+   "input": "tmp_1_11193_C_T_kasp_reverse_L1_p1_alt.input.txt",
+   "output": "tmp_1_11193_C_T_kasp_reverse_L1_p1_alt.output.txt"
+  },
+  "b730c807ff4a81ff15c8252423acb980b157554b2e2729303ceb6cd081071347": {
+   "name": "tmp_1_11193_C_T_kasp_reverse_L1_p2_alt",
+   "input": "tmp_1_11193_C_T_kasp_reverse_L1_p2_alt.input.txt",
+   "output": "tmp_1_11193_C_T_kasp_reverse_L1_p2_alt.output.txt"
+  },
+  "6c15190c0db356688adffc18457e738b903a94bb39aa9a626925b8e76a759014": {
+   "name": "tmp_1_11193_C_T_kasp_reverse_L1_p3_alt",
+   "input": "tmp_1_11193_C_T_kasp_reverse_L1_p3_alt.input.txt",
+   "output": "tmp_1_11193_C_T_kasp_reverse_L1_p3_alt.output.txt"
+  },
+  "9c4cd61726165967208d7b97e4c3b78d8ac0746ab7e8debc4b990dd42362375e": {
+   "name": "tmp_1_11193_C_T_kasp_reverse_L1_p4_alt",
+   "input": "tmp_1_11193_C_T_kasp_reverse_L1_p4_alt.input.txt",
+   "output": "tmp_1_11193_C_T_kasp_reverse_L1_p4_alt.output.txt"
+  },
+  "8df3d1685cb01300726a2e5674383c055782e2b722457690fad5e5fe6ee886da": {
+   "name": "tmp_1_11193_C_T_kasp_reverse_L1_p5_alt",
+   "input": "tmp_1_11193_C_T_kasp_reverse_L1_p5_alt.input.txt",
+   "output": "tmp_1_11193_C_T_kasp_reverse_L1_p5_alt.output.txt"
+  },
+  "5e4f9c74cde675009a4c2bbb51fd8afbe9bdd7f65e2e052ffe0e0d076c1bdeb6": {
+   "name": "tmp_1_11193_C_T_kasp_reverse_L1_p6_alt",
+   "input": "tmp_1_11193_C_T_kasp_reverse_L1_p6_alt.input.txt",
+   "output": "tmp_1_11193_C_T_kasp_reverse_L1_p6_alt.output.txt"
+  },
+  "b45fd647012a4f2aaece863fbb72bd3a6a25d528bca8d8989641faa57af942d2": {
+   "name": "tmp_1_11193_C_T_kasp_reverse_L1_p7_alt",
+   "input": "tmp_1_11193_C_T_kasp_reverse_L1_p7_alt.input.txt",
+   "output": "tmp_1_11193_C_T_kasp_reverse_L1_p7_alt.output.txt"
   },
   "ec108e88573e52ad0748ce7f0ece3ef533ad727bc5b90c35596de51fcfbca2f8": {
    "name": "rs5413864115_kasp_forward_L0",
@@ -69,6 +312,46 @@
    "input": "rs5413864115_kasp_forward_L1.input.txt",
    "output": "rs5413864115_kasp_forward_L1.output.txt"
   },
+  "f5960f4d7a4e4687d8eb61c9c19f5dc6fd2ac34a29f0e50c33611a21642a2830": {
+   "name": "rs5413864115_kasp_forward_L1_p1_alt",
+   "input": "rs5413864115_kasp_forward_L1_p1_alt.input.txt",
+   "output": "rs5413864115_kasp_forward_L1_p1_alt.output.txt"
+  },
+  "c5cdc1d4f7d9d118d4d3753aff4fa8b335462f00dca3afee87337aa714f9806d": {
+   "name": "rs5413864115_kasp_forward_L1_p2_alt",
+   "input": "rs5413864115_kasp_forward_L1_p2_alt.input.txt",
+   "output": "rs5413864115_kasp_forward_L1_p2_alt.output.txt"
+  },
+  "695998e3466dcd86bdf872b4cd1eb0f04027b8454dc3639145195d813e264686": {
+   "name": "rs5413864115_kasp_forward_L1_p6_alt",
+   "input": "rs5413864115_kasp_forward_L1_p6_alt.input.txt",
+   "output": "rs5413864115_kasp_forward_L1_p6_alt.output.txt"
+  },
+  "ea4760c4be01359b372c586bbcef3291950a0c5be1ac693882177046de5a6f16": {
+   "name": "rs5413864115_kasp_forward_L1_p7_alt",
+   "input": "rs5413864115_kasp_forward_L1_p7_alt.input.txt",
+   "output": "rs5413864115_kasp_forward_L1_p7_alt.output.txt"
+  },
+  "64eeaad1ad73f2dbccd1f1e59c2df8e6e2ae069a6b70c57cfe3238bf745e739c": {
+   "name": "rs5413864115_kasp_forward_L1_p10_alt",
+   "input": "rs5413864115_kasp_forward_L1_p10_alt.input.txt",
+   "output": "rs5413864115_kasp_forward_L1_p10_alt.output.txt"
+  },
+  "fcf3c05d9fc1b3394b603d118b9674cd4ceaf6460fd0145e7598a04e5d6d60f6": {
+   "name": "rs5413864115_kasp_forward_L1_p11_alt",
+   "input": "rs5413864115_kasp_forward_L1_p11_alt.input.txt",
+   "output": "rs5413864115_kasp_forward_L1_p11_alt.output.txt"
+  },
+  "7bdb9a41a159a0ae305514cca7fddc398f9d3169df760679f1e8a59f42e4fb1b": {
+   "name": "rs5413864115_kasp_forward_L1_p12_alt",
+   "input": "rs5413864115_kasp_forward_L1_p12_alt.input.txt",
+   "output": "rs5413864115_kasp_forward_L1_p12_alt.output.txt"
+  },
+  "50fde738a8b44802a2f56c90308944a9b6ca22da24af1a138695386e68ca3cc7": {
+   "name": "rs5413864115_kasp_forward_L1_p14_alt",
+   "input": "rs5413864115_kasp_forward_L1_p14_alt.input.txt",
+   "output": "rs5413864115_kasp_forward_L1_p14_alt.output.txt"
+  },
   "35cb7075166e155a8c09396ef00e08896f11487a7412b4baaaa589694fe707a0": {
    "name": "rs5413864115_kasp_reverse_L0",
    "input": "rs5413864115_kasp_reverse_L0.input.txt",
@@ -79,20 +362,235 @@
    "input": "rs5413864115_kasp_reverse_L1.input.txt",
    "output": "rs5413864115_kasp_reverse_L1.output.txt"
   },
+  "7a5601f0fd778b43686a9e971d94f1da6b72c6758f704b10dbc7afd7f07c50b0": {
+   "name": "rs5413864115_kasp_reverse_L1_p0_alt",
+   "input": "rs5413864115_kasp_reverse_L1_p0_alt.input.txt",
+   "output": "rs5413864115_kasp_reverse_L1_p0_alt.output.txt"
+  },
+  "4d1ec6bcfb5cbb0089eed58fa0eb991481d8f011a2e8c9acf3618b96b491a13a": {
+   "name": "rs5413864115_kasp_reverse_L1_p1_alt",
+   "input": "rs5413864115_kasp_reverse_L1_p1_alt.input.txt",
+   "output": "rs5413864115_kasp_reverse_L1_p1_alt.output.txt"
+  },
+  "ddf544573f34640ca156f35ee318c59aa7d5b79b9549c7a1bab75c82a4e7c4a3": {
+   "name": "rs5413864115_kasp_reverse_L1_p2_alt",
+   "input": "rs5413864115_kasp_reverse_L1_p2_alt.input.txt",
+   "output": "rs5413864115_kasp_reverse_L1_p2_alt.output.txt"
+  },
+  "74e7a5c13d4c6789c901641e210c75b010466e1a98354b721f0d8d15ee4e6b89": {
+   "name": "rs5413864115_kasp_reverse_L1_p3_alt",
+   "input": "rs5413864115_kasp_reverse_L1_p3_alt.input.txt",
+   "output": "rs5413864115_kasp_reverse_L1_p3_alt.output.txt"
+  },
+  "4b375cff4737b406f409edfc33ec98a19526961564c2f706769aa0ef19cb1c13": {
+   "name": "rs5413864115_kasp_reverse_L1_p4_alt",
+   "input": "rs5413864115_kasp_reverse_L1_p4_alt.input.txt",
+   "output": "rs5413864115_kasp_reverse_L1_p4_alt.output.txt"
+  },
+  "6026fbbe8422b71123ddfeacd0e82ebb33238082138c42285af745a0024bd759": {
+   "name": "rs5413864115_kasp_reverse_L1_p5_alt",
+   "input": "rs5413864115_kasp_reverse_L1_p5_alt.input.txt",
+   "output": "rs5413864115_kasp_reverse_L1_p5_alt.output.txt"
+  },
+  "a55c3c0b299e8705c8080ee3fc24b7844ff32d34e64e67990a014b164987b08c": {
+   "name": "rs5413864115_kasp_reverse_L1_p6_alt",
+   "input": "rs5413864115_kasp_reverse_L1_p6_alt.input.txt",
+   "output": "rs5413864115_kasp_reverse_L1_p6_alt.output.txt"
+  },
+  "3f570afeddc41d30f5aa0ee47beb8d28070595afd156c9ac2f2ff2c6b4008dc8": {
+   "name": "rs5413864115_kasp_reverse_L1_p7_alt",
+   "input": "rs5413864115_kasp_reverse_L1_p7_alt.input.txt",
+   "output": "rs5413864115_kasp_reverse_L1_p7_alt.output.txt"
+  },
   "aa677dbfae4a959cd9065914017c063c4cf57a716bd234a30688467952cddde1": {
    "name": "tmp_1_11502_C_CGT_kasp_reverse_L0",
    "input": "tmp_1_11502_C_CGT_kasp_reverse_L0.input.txt",
    "output": "tmp_1_11502_C_CGT_kasp_reverse_L0.output.txt"
+  },
+  "c10576ad125bd602c6c6c6fae1faebab51e847b1e2d95516355ca2781a31e760": {
+   "name": "tmp_1_11502_C_CGT_kasp_reverse_L0_p0_alt",
+   "input": "tmp_1_11502_C_CGT_kasp_reverse_L0_p0_alt.input.txt",
+   "output": "tmp_1_11502_C_CGT_kasp_reverse_L0_p0_alt.output.txt"
+  },
+  "82691bdc5bc6c9d079251f9c9327266a21a95d3730f702dfd6e9322e3a1bb185": {
+   "name": "tmp_1_11502_C_CGT_kasp_reverse_L0_p1_alt",
+   "input": "tmp_1_11502_C_CGT_kasp_reverse_L0_p1_alt.input.txt",
+   "output": "tmp_1_11502_C_CGT_kasp_reverse_L0_p1_alt.output.txt"
+  },
+  "ba0e7d3b45ae2d539cefdaf3e1da8e7705191f1cd1eb5e7fb6ecb37ac42a7d4d": {
+   "name": "tmp_1_11502_C_CGT_kasp_reverse_L0_p3_alt",
+   "input": "tmp_1_11502_C_CGT_kasp_reverse_L0_p3_alt.input.txt",
+   "output": "tmp_1_11502_C_CGT_kasp_reverse_L0_p3_alt.output.txt"
+  },
+  "e87be45f9a5ec491eb06db98973619055ea76a8e1b678769fa793fa536aeae2b": {
+   "name": "tmp_1_11502_C_CGT_kasp_reverse_L0_p4_alt",
+   "input": "tmp_1_11502_C_CGT_kasp_reverse_L0_p4_alt.input.txt",
+   "output": "tmp_1_11502_C_CGT_kasp_reverse_L0_p4_alt.output.txt"
+  },
+  "badbffd00b52b83376f7e933731a0b88857c3867d3ed344367b8553586b26b89": {
+   "name": "tmp_1_11502_C_CGT_kasp_reverse_L0_p5_alt",
+   "input": "tmp_1_11502_C_CGT_kasp_reverse_L0_p5_alt.input.txt",
+   "output": "tmp_1_11502_C_CGT_kasp_reverse_L0_p5_alt.output.txt"
+  },
+  "2974c1a794815b867e5166b337eac5f4450f1cefa92f398d26c4325a7ddf6b2a": {
+   "name": "tmp_1_11502_C_CGT_kasp_reverse_L0_p6_alt",
+   "input": "tmp_1_11502_C_CGT_kasp_reverse_L0_p6_alt.input.txt",
+   "output": "tmp_1_11502_C_CGT_kasp_reverse_L0_p6_alt.output.txt"
+  },
+  "3d0e08ba3fb7dcec9ff5fe98b0394e080f49d605256f5ab8f3eb0d071adc50ba": {
+   "name": "tmp_1_11502_C_CGT_kasp_reverse_L0_p7_alt",
+   "input": "tmp_1_11502_C_CGT_kasp_reverse_L0_p7_alt.input.txt",
+   "output": "tmp_1_11502_C_CGT_kasp_reverse_L0_p7_alt.output.txt"
+  },
+  "3d08b3ae4784b6783d07c92c1833dfb808eeda37e4d0fd73ffc2df652c3cc843": {
+   "name": "tmp_1_11502_C_CGT_kasp_reverse_L0_p9_alt",
+   "input": "tmp_1_11502_C_CGT_kasp_reverse_L0_p9_alt.input.txt",
+   "output": "tmp_1_11502_C_CGT_kasp_reverse_L0_p9_alt.output.txt"
   },
   "7ea49382921dcaa4bb1e18a5c26bf901fea2a8b0e5d4fbef2ed2c9278731f184": {
    "name": "rs871475760_as_pcr_forward_L0",
    "input": "rs871475760_as_pcr_forward_L0.input.txt",
    "output": "rs871475760_as_pcr_forward_L0.output.txt"
   },
+  "cad65ab32337cc81870581f1f3eea47efee1b7eed78f69efc41a8cb9cfaeb37a": {
+   "name": "rs871475760_as_pcr_forward_L0_p3_alt",
+   "input": "rs871475760_as_pcr_forward_L0_p3_alt.input.txt",
+   "output": "rs871475760_as_pcr_forward_L0_p3_alt.output.txt"
+  },
+  "3812171d9008cc64fc0e55aa39abc1a8e364b92656d7b2a374d1b0f6284dab00": {
+   "name": "rs871475760_as_pcr_forward_L0_p3_mmref",
+   "input": "rs871475760_as_pcr_forward_L0_p3_mmref.input.txt",
+   "output": "rs871475760_as_pcr_forward_L0_p3_mmref.output.txt"
+  },
+  "41e505e5d6647521bf784938dc35a53e890b0e475d500333636708dd76fbf7ff": {
+   "name": "rs871475760_as_pcr_forward_L0_p3_mmalt",
+   "input": "rs871475760_as_pcr_forward_L0_p3_mmalt.input.txt",
+   "output": "rs871475760_as_pcr_forward_L0_p3_mmalt.output.txt"
+  },
   "1009cfe91103a5d9139c27b52ad4febd5405d0c98fa7bc0866ae85f4f3b5dd84": {
    "name": "rs871475760_as_pcr_reverse_L0",
    "input": "rs871475760_as_pcr_reverse_L0.input.txt",
    "output": "rs871475760_as_pcr_reverse_L0.output.txt"
+  },
+  "cd933f9838caf2be9f25535a64f8fc4fe0cb669bfa9eaab57c2fa70da0f58954": {
+   "name": "rs871475760_as_pcr_reverse_L0_p0_alt",
+   "input": "rs871475760_as_pcr_reverse_L0_p0_alt.input.txt",
+   "output": "rs871475760_as_pcr_reverse_L0_p0_alt.output.txt"
+  },
+  "afa91f8f29d1d41a997782a00f33edc46f8ade12ca6ce285b154ebab70e877ae": {
+   "name": "rs871475760_as_pcr_reverse_L0_p0_mmref",
+   "input": "rs871475760_as_pcr_reverse_L0_p0_mmref.input.txt",
+   "output": "rs871475760_as_pcr_reverse_L0_p0_mmref.output.txt"
+  },
+  "1cfa88f96e0364efe6a20419dabc9e2b51317f87de2d70776b776c05d25b606f": {
+   "name": "rs871475760_as_pcr_reverse_L0_p0_mmalt",
+   "input": "rs871475760_as_pcr_reverse_L0_p0_mmalt.input.txt",
+   "output": "rs871475760_as_pcr_reverse_L0_p0_mmalt.output.txt"
+  },
+  "9d89387379d8fede2a86c8423f3646c769e4ae98dc061e7722393259a4849d4c": {
+   "name": "rs871475760_as_pcr_reverse_L0_p1_alt",
+   "input": "rs871475760_as_pcr_reverse_L0_p1_alt.input.txt",
+   "output": "rs871475760_as_pcr_reverse_L0_p1_alt.output.txt"
+  },
+  "9660833d64020e69c4b7aa8858316053dfc6a4f274128b1754776a70218a0567": {
+   "name": "rs871475760_as_pcr_reverse_L0_p1_mmref",
+   "input": "rs871475760_as_pcr_reverse_L0_p1_mmref.input.txt",
+   "output": "rs871475760_as_pcr_reverse_L0_p1_mmref.output.txt"
+  },
+  "693c2301f511d91142e12596f10ae48dac9cf8a657ab7f248c63d979c249cf52": {
+   "name": "rs871475760_as_pcr_reverse_L0_p1_mmalt",
+   "input": "rs871475760_as_pcr_reverse_L0_p1_mmalt.input.txt",
+   "output": "rs871475760_as_pcr_reverse_L0_p1_mmalt.output.txt"
+  },
+  "13c81975e0698d2a279e41ef6f88db00a79708539f45dde290bb78b766e6e195": {
+   "name": "rs871475760_as_pcr_reverse_L0_p2_alt",
+   "input": "rs871475760_as_pcr_reverse_L0_p2_alt.input.txt",
+   "output": "rs871475760_as_pcr_reverse_L0_p2_alt.output.txt"
+  },
+  "99b9e159c107a36bd8f334f8b819ffd2c8a50b5020838f33fab41f9ed3200cc2": {
+   "name": "rs871475760_as_pcr_reverse_L0_p2_mmref",
+   "input": "rs871475760_as_pcr_reverse_L0_p2_mmref.input.txt",
+   "output": "rs871475760_as_pcr_reverse_L0_p2_mmref.output.txt"
+  },
+  "a5a4e58813011a628218ef93d813a5a1126a24f554d8aced8f479d193dc1c708": {
+   "name": "rs871475760_as_pcr_reverse_L0_p2_mmalt",
+   "input": "rs871475760_as_pcr_reverse_L0_p2_mmalt.input.txt",
+   "output": "rs871475760_as_pcr_reverse_L0_p2_mmalt.output.txt"
+  },
+  "53da38bcb8dafceb042b1906b150d2f1fdb748ebffbb69003921944f00114e59": {
+   "name": "rs871475760_as_pcr_reverse_L0_p3_alt",
+   "input": "rs871475760_as_pcr_reverse_L0_p3_alt.input.txt",
+   "output": "rs871475760_as_pcr_reverse_L0_p3_alt.output.txt"
+  },
+  "5626024312e94565e7c22a9552f77be8a81a62bf204031d8ff5777ce9419957d": {
+   "name": "rs871475760_as_pcr_reverse_L0_p3_mmref",
+   "input": "rs871475760_as_pcr_reverse_L0_p3_mmref.input.txt",
+   "output": "rs871475760_as_pcr_reverse_L0_p3_mmref.output.txt"
+  },
+  "366ca9bd0bdc199b960d971ba32d85c064e18c17cf69ccba7f61f8b08ea311b3": {
+   "name": "rs871475760_as_pcr_reverse_L0_p3_mmalt",
+   "input": "rs871475760_as_pcr_reverse_L0_p3_mmalt.input.txt",
+   "output": "rs871475760_as_pcr_reverse_L0_p3_mmalt.output.txt"
+  },
+  "4fe96dff1a0fb154413c1efac1418bb086971097c62b34e5e971a4143a1a8e3a": {
+   "name": "rs871475760_as_pcr_reverse_L0_p4_alt",
+   "input": "rs871475760_as_pcr_reverse_L0_p4_alt.input.txt",
+   "output": "rs871475760_as_pcr_reverse_L0_p4_alt.output.txt"
+  },
+  "f72cc2827b3dfeea7b88b277b40fa9054e25898bcf183eee8469b6765d9b9ba5": {
+   "name": "rs871475760_as_pcr_reverse_L0_p4_mmref",
+   "input": "rs871475760_as_pcr_reverse_L0_p4_mmref.input.txt",
+   "output": "rs871475760_as_pcr_reverse_L0_p4_mmref.output.txt"
+  },
+  "fee17453fc478c168bda7ddfecbd4e35e3c1485bfd45cc6f411d0af6237ebc30": {
+   "name": "rs871475760_as_pcr_reverse_L0_p4_mmalt",
+   "input": "rs871475760_as_pcr_reverse_L0_p4_mmalt.input.txt",
+   "output": "rs871475760_as_pcr_reverse_L0_p4_mmalt.output.txt"
+  },
+  "52d9570cb57cd1f6c4ec5ba3296ab943bfd942a3a9fb3efec89abee7761e8c8e": {
+   "name": "rs871475760_as_pcr_reverse_L0_p6_alt",
+   "input": "rs871475760_as_pcr_reverse_L0_p6_alt.input.txt",
+   "output": "rs871475760_as_pcr_reverse_L0_p6_alt.output.txt"
+  },
+  "bf57c672be812015f54153f065fdd77f4b54be2c94df6c7889863b35521998e1": {
+   "name": "rs871475760_as_pcr_reverse_L0_p6_mmref",
+   "input": "rs871475760_as_pcr_reverse_L0_p6_mmref.input.txt",
+   "output": "rs871475760_as_pcr_reverse_L0_p6_mmref.output.txt"
+  },
+  "d845a1a846837085ace577d651bee9e7ef9b74a69c6ab87af4cb36450569c536": {
+   "name": "rs871475760_as_pcr_reverse_L0_p6_mmalt",
+   "input": "rs871475760_as_pcr_reverse_L0_p6_mmalt.input.txt",
+   "output": "rs871475760_as_pcr_reverse_L0_p6_mmalt.output.txt"
+  },
+  "da06a18bc40a0f6fd20108dc461e474d03ef193d10cbf9b706510ab784a71b63": {
+   "name": "rs871475760_as_pcr_reverse_L0_p7_alt",
+   "input": "rs871475760_as_pcr_reverse_L0_p7_alt.input.txt",
+   "output": "rs871475760_as_pcr_reverse_L0_p7_alt.output.txt"
+  },
+  "fc9474ed9d2ed2389bde334047258b27ecbc422b1638c287e1db6d600312abf7": {
+   "name": "rs871475760_as_pcr_reverse_L0_p7_mmref",
+   "input": "rs871475760_as_pcr_reverse_L0_p7_mmref.input.txt",
+   "output": "rs871475760_as_pcr_reverse_L0_p7_mmref.output.txt"
+  },
+  "8377e9364f62c9e18fdc4390cd12034899c4885723183e8aa64c7b7e20ed6f6a": {
+   "name": "rs871475760_as_pcr_reverse_L0_p7_mmalt",
+   "input": "rs871475760_as_pcr_reverse_L0_p7_mmalt.input.txt",
+   "output": "rs871475760_as_pcr_reverse_L0_p7_mmalt.output.txt"
+  },
+  "c3f40cd82526b48c219cac2b45a245c661700cf640afcc5ad899151e6ec3d5a7": {
+   "name": "rs871475760_as_pcr_reverse_L0_p8_alt",
+   "input": "rs871475760_as_pcr_reverse_L0_p8_alt.input.txt",
+   "output": "rs871475760_as_pcr_reverse_L0_p8_alt.output.txt"
+  },
+  "1534645b433a9f8e5a626810813d7a4287d04a50d074aac6bf380c4083949dd6": {
+   "name": "rs871475760_as_pcr_reverse_L0_p8_mmref",
+   "input": "rs871475760_as_pcr_reverse_L0_p8_mmref.input.txt",
+   "output": "rs871475760_as_pcr_reverse_L0_p8_mmref.output.txt"
+  },
+  "1dac50f92db1cb0a62c38ac1eb2a29d3e177a98fca53cad6c7d6f6a6f587920d": {
+   "name": "rs871475760_as_pcr_reverse_L0_p8_mmalt",
+   "input": "rs871475760_as_pcr_reverse_L0_p8_mmalt.input.txt",
+   "output": "rs871475760_as_pcr_reverse_L0_p8_mmalt.output.txt"
   }
  }
 }

@@ -1,24 +1,29 @@
 'use strict';
 
-// POST /primers/genotyping/design (spec §4.1-§4.8).
+// POST /primers/genotyping/design (spec §4.1-§4.18).
 //
 // runOrientation(orientation, ctx) is step 9 of §4.1: the neighbour blocker check, then one Primer3 design run per
 // relaxation level, with the allele-specific 3' end forced and the SEQUENCE_TARGET guard beside the zone (§4.4, §4.7).
-// Each returned pair goes, in Primer3 rank order, through the §4.8 filters: force guard, zone guard on both
-// haplotypes, common-primer 3' neighbour, duplicates, the per-orientation scoring cap and the budget reservation. A
-// pair that passes is floored on its designed allele-specific Tm and handed to the injected scorer. Every attempt
-// keeps Primer3's explain data, and pairs_returned always equals rejected + not_scored + sets. The ladder stops at the
-// first level that keeps a set, or when the budget stops it.
+// Each returned pair goes, in Primer3 rank order, through the §4.8 filters (sets.candidatesFromPairs: force guard, zone
+// guard on both haplotypes, common-primer 3' neighbour, duplicates), then the per-orientation scoring cap and the budget
+// reservation. A pair that passes is floored on its designed allele-specific Tm and handed to the scorer
+// (scoring.scoreCandidate). Every attempt keeps Primer3's explain data, and pairs_returned always equals rejected +
+// not_scored + sets. The ladder stops at the first level that keeps a set, or when the budget stops it.
 //
-// designGenotyping(body, deps) orchestrates steps 1 and 6-9: request, deadline, the injected variant resolution (steps
-// 2-5, before the semaphore), semaphore, template, repeat mask and both orientations. Sets (steps 10-16: ALT
-// derivation, scoring, ranking, order rows) are built on the candidates runOrientation returns and are not produced here.
+// designGenotyping(body, deps) orchestrates the request: request rules and the deadline, variant and neighbour
+// resolution through variation/index.js (steps 2-5, all Ensembl work, before the semaphore, §4.2), the semaphore,
+// template, repeat mask, both orientations with scoring, then ranking, order rows, the proposed check request and the
+// response warnings.
 
 const boulder = require('../boulder');
 const design = require('../design');
 const { PrimerHttpError } = require('../errors');
+const normalize = require('../variation/normalize');
 const guard = require('./guard');
+const order = require('./order');
 const request = require('./request');
+const scoring = require('./scoring');
+const sets = require('./sets');
 const templates = require('./template');
 
 const ORIENTATIONS = Object.freeze(['forward', 'reverse']);
@@ -26,6 +31,8 @@ const GENOTYPING_DESIGN_VERSION = '1';
 const REJECTED_KEYS = Object.freeze(['force', 'overlap', 'common_neighbour_3p', 'alt_scoring_failed', 'below_floor', 'duplicate']);
 const REQUIRED_CONFIG = Object.freeze(['template_flank', 'num_return_per_run', 'max_scored_per_orientation', 'max_primer3_runs',
   'max_thermo_calls', 'guard_gap', 'mask_exempt_pad', 'neighbour_3p_window']);
+// §4.18 caps when the config lacks them (config.js DEFAULTS carry the same values).
+const DEFAULT_CHECK_CAPS = Object.freeze({ check_max_sets: 5, check_max_unique_primers: 13, max_pairs: 10 });
 
 // Worst-case cost reserved for one candidate before it is scored (§4.8 step 6): one check_primers run, or three with a
 // deliberate mismatch; 15 ntthal calls with tails, plus 2 mismatch duplexes.
@@ -80,8 +87,8 @@ function compareDecimal(a, b) {
 // createBudget(limits, opts) -> the Primer3 run and ntthal call counters of one design request (§4.8 step 6, §4.16).
 //   limits: {max_primer3_runs, max_thermo_calls} (primers.genotyping)
 //   opts.thermoCalls(): the distinct ntthal calls made so far (thermo.js memoizes); without it, the countThermo() total
-// Every Primer3 run is counted when it starts, design runs included; only candidates are checked against the caps.
-// exhausted lists, in order, the orientations whose ladder the budget stopped.
+// Every Primer3 run is counted when it starts, design and scoring runs alike; only candidates are checked against the
+// caps. exhausted lists, in order, the orientations whose ladder the budget stopped.
 function createBudget(limits, opts) {
   const l = limits || {};
   ['max_primer3_runs', 'max_thermo_calls'].forEach(function (k) {
@@ -116,81 +123,6 @@ function emptyRejected() {
   const r = {};
   REJECTED_KEYS.forEach(function (k) { r[k] = 0; });
   return r;
-}
-
-// ---- neighbours ----------------------------------------------------------------------------------------
-
-// `count` reference coordinates under a primer, from its 3' base at p3: a plus-strand primer reads leftwards, a
-// minus-strand primer rightwards.
-function coordsFrom3p(p3, count, strand) {
-  const out = [];
-  for (let k = 0; k < count; k++) out.push(strand === 1 ? p3 - k : p3 + k);
-  return out;
-}
-
-function neighbourHit(n, distance) {
-  return {
-    key: n.key,
-    ids: (n.ids || []).slice(),
-    label: n.label,
-    start: n.minimal.start,
-    end: n.minimal.end,
-    alleles: (n.alleles || [n.minimal.ref, n.minimal.alt]).join('/'),
-    ems: n.ems === true,
-    distance_from_3p: distance
-  };
-}
-
-// Known variants under reference coordinates listed from a primer's 3' end (§4.15), as PrimerNeighbourHit objects:
-// distance_from_3p is 1 + the index of the first listed coordinate inside the neighbour's minimal span (an insertion
-// covers both flanking bases). Sorted by distance, then key. neighbours: canonical entries; targetKey is skipped;
-// coords may hold null (an inserted base).
-function neighbourHits(targetKey, neighbours, coords) {
-  const real = coords.filter(function (c) { return c !== null && c !== undefined; });
-  if (real.length === 0) return [];
-  const lo = Math.min.apply(null, real);
-  const hi = Math.max.apply(null, real);
-  const hits = [];
-  (neighbours || []).forEach(function (n) {
-    if (!n || n.key === targetKey || !n.minimal) return;
-    const a = Math.min(n.minimal.start, n.minimal.end);
-    const b = Math.max(n.minimal.start, n.minimal.end);
-    if (b < lo || a > hi) return;
-    const i = coords.findIndex(function (c) { return c !== null && c !== undefined && c >= a && c <= b; });
-    if (i >= 0) hits.push(neighbourHit(n, i + 1));
-  });
-  return hits.sort(function (x, y) {
-    return x.distance_from_3p - y.distance_from_3p || (x.key < y.key ? -1 : x.key > y.key ? 1 : 0);
-  });
-}
-
-function nonEms(hits) {
-  return hits.filter(function (h) { return !h.ems; });
-}
-
-// ---- one pair ------------------------------------------------------------------------------------------
-
-// §4.8 steps 1-3 for one design-run pair (boulder.extractPairs, template coordinates).
-//   s: {orientation, as_3p (template position of the forced 3' end), zone (template), delta (alt_offset),
-//       template_start, target_key, neighbours (entries), window (neighbour_3p_window), block (reject on a 3' neighbour)}
-// -> {reject: 'force' | 'overlap' | 'common_neighbour_3p'} | {candidate}
-//   candidate: {orientation, pair_index, pair, as, common (the pair's oligos), common_neighbours_3p (non-EMS neighbours
-//               inside the common primer's 3' window; present when they did not block, e.g. for an EMS target)}
-function screenPair(pair, s) {
-  const forward = s.orientation === 'forward';
-  const as = forward ? pair.left : pair.right;
-  const common = forward ? pair.right : pair.left;
-  if ((forward ? as.end : as.start) !== s.as_3p) return { reject: 'force' };
-  const set = { orientation: s.orientation, as: { start: as.start, end: as.end }, common: { start: common.start, end: common.end } };
-  if (!guard.commonPrimerOk(set, s.zone, { delta: s.delta })) return { reject: 'overlap' };
-  // The common primer is the minus-strand right primer of a forward set (3' base at its start) and the plus-strand left
-  // primer of a reverse set (3' base at its end).
-  const p3 = s.template_start - 1 + (forward ? common.start : common.end);
-  const hits = nonEms(neighbourHits(s.target_key, s.neighbours, coordsFrom3p(p3, s.window, forward ? -1 : 1)));
-  if (hits.length > 0 && s.block) return { reject: 'common_neighbour_3p' };
-  return {
-    candidate: { orientation: s.orientation, pair_index: pair.rank, pair: pair, as: as, common: common, common_neighbours_3p: hits }
-  };
 }
 
 // ---- Primer3 -------------------------------------------------------------------------------------------
@@ -235,7 +167,8 @@ async function runDesignRecord(ctx, tags) {
   return result;
 }
 
-// The default scorer keeps every candidate as it is; the scoring modules replace it (ctx.scoreCandidate).
+// The default of runOrientation's ctx.scoreCandidate keeps every candidate unscored; designGenotyping scores them
+// (scoring.scoreCandidate).
 async function keepCandidate(candidate) {
   return { set: candidate };
 }
@@ -251,12 +184,13 @@ function belowFloor(oligo, floors) {
 // runOrientation(orientation, ctx) -> Promise<{orientation, sets, budget_exhausted, warnings}>
 //   ctx: {cfg, req (request.normalize), variant (canonical entry), template (buildVariantTemplate), maskedSeq (the
 //         repeat-masked template, or null), neighbours (canonical entries of the template window), budget
-//         (createBudget), deadline (design.createDeadline), primer3 {run}, scoreCandidate(candidate, ctx) ->
-//         {set} | {dropped: 'alt_scoring_failed' | 'below_floor'} (default keepCandidate), log}
+//         (createBudget), deadline (design.createDeadline), primer3 {run}, thermo (thermo.createThermo, for the scorer),
+//         scoreCandidate(candidate, ctx) -> {set} | {dropped: 'alt_scoring_failed' | 'below_floor'} (default
+//         keepCandidate), log}
 //   orientation: PrimerGenotypingOrientation {status, reason, discriminating_position, relaxation_level, sets_found,
 //                blockers, attempts[{level, changes, explain {left, right, pair}, pairs_returned, rejected, not_scored,
 //                sets}]}
-//   sets: what the scorer kept, in Primer3 order (each candidate also carries level and params)
+//   sets: what the scorer kept, in Primer3 order (each candidate also carries level, params and, once scored, scored)
 //   budget_exhausted: the budget stopped this orientation's ladder (also pushed to budget.exhausted)
 //   warnings: PRIMER3_WARNING and VARIANT_IN_REPEAT of this orientation
 async function runOrientation(orientation, ctx) {
@@ -279,7 +213,7 @@ async function runOrientation(orientation, ctx) {
 
   // §4.15: a non-EMS neighbour in the allele-specific primer's last bases blocks a natural target's orientation.
   const block = req.assay.neighbour_policy === 'avoid_3p' && v.ems !== true;
-  const at3p = nonEms(neighbourHits(v.key, ctx.neighbours, coordsFrom3p(d.position, g.neighbour_3p_window, orientation === 'forward' ? 1 : -1)));
+  const at3p = sets.nonEms(sets.neighbourHits(v.key, ctx.neighbours, sets.coordsFrom3p(d.position, g.neighbour_3p_window, orientation === 'forward' ? 1 : -1)));
   if (block && at3p.length > 0) {
     pub.status = 'blocked';
     pub.reason = 'neighbour_at_3p';
@@ -322,27 +256,21 @@ async function runOrientation(orientation, ctx) {
     };
     pub.attempts.push(attempt);
 
+    const screened = sets.candidatesFromPairs(pairs, screen, seen);
     let stopped = false;
-    for (let i = 0; i < pairs.length; i++) {
-      const screened = screenPair(pairs[i], screen);
-      if (screened.reject) {
-        attempt.rejected[screened.reject]++;
+    for (let i = 0; i < screened.length; i++) {
+      if (screened[i].reject) {
+        attempt.rejected[screened[i].reject]++;
         continue;
       }
-      const candidate = screened.candidate;
-      const dup = candidate.as.seq + '|' + candidate.common.seq;
-      if (seen.has(dup)) {
-        attempt.rejected.duplicate++;
-        continue;
-      }
-      seen.add(dup);
+      const candidate = screened[i].candidate;
       if (scored >= g.max_scored_per_orientation) {
         attempt.not_scored++;
         continue;
       }
       if (!ctx.budget.fits(reserve.primer3_runs, reserve.thermo_calls)) {
         // This pair and every later pair of the level stay unscored, and the ladder stops (§4.8 step 6).
-        attempt.not_scored += pairs.length - i;
+        attempt.not_scored += screened.length - i;
         stopped = true;
         break;
       }
@@ -407,6 +335,65 @@ function orientationWarnings(results) {
   return out;
 }
 
+// ---- variant-level warnings and summaries ----------------------------------------------------------------
+
+// EMS_TARGET, MULTIALLELIC_SITE and SHIFTABLE_INDEL of the resolved variant (§2.15). vt: the variant template.
+function variantWarnings(variant, vt) {
+  const out = [];
+  if (variant.ems === true) {
+    const sources = [];
+    (variant.records || []).forEach(function (r) { if (r.source && sources.indexOf(r.source) < 0) sources.push(r.source); });
+    out.push(warning('EMS_TARGET', 'the target is an EMS mutation, private to BTx623-background mutant lines; natural neighbours are ' +
+      'reported as warnings rather than blocking an orientation', { sources: sources }));
+  }
+  const others = variant.multiallelic ? variant.multiallelic.other_alts.filter(function (a) { return a !== '*'; }) : [];
+  if (others.length) {
+    out.push(warning('MULTIALLELIC_SITE', variant.key + ' also has the alternative allele' + (others.length === 1 ? ' ' : 's ') + others.join(', ') +
+      '; assemblies carrying ' + (others.length === 1 ? 'it' : 'them') + ' mismatch both allele-specific primers', { key: variant.key, other_alts: others }));
+  }
+  if (variant.shift > 0) {
+    const tract = normalize.tractOf(variant.vcf, variant.shift);
+    const bases = vt.seq.slice(tract.start - vt.start, tract.end - vt.start + 1);
+    const bulge = Math.abs(variant.vcf.alt.length - variant.vcf.ref.length);
+    out.push(warning('SHIFTABLE_INDEL', 'the ' + variant.kind + ' can slide ' + variant.shift + ' base' + (variant.shift === 1 ? '' : 's') + ' inside ' + bases +
+      '; the forward and reverse primers end at different bases and the wrong-allele primer may still prime through a ' + bulge + '-nt bulge', {
+      shift: variant.shift,
+      forward_position: variant.discriminating.forward.position,
+      reverse_position: variant.discriminating.reverse.position,
+      zone: { start: variant.zone.start, end: variant.zone.end }
+    }));
+  }
+  return out;
+}
+
+// PrimerGenotypingNeighbourSummary when the resolver did not supply one (variation.neighboursFor does).
+function neighbourSummary(data, vt, variant, entries, g) {
+  const denseWindow = Number.isSafeInteger(g.dense_window) ? g.dense_window : 30;
+  const nonEms = entries.filter(function (e) { return !e.ems; });
+  const a = variant.vcf.position - denseWindow;
+  const b = variant.vcf.position + variant.vcf.ref.length - 1 + denseWindow;
+  return {
+    data: data, window: { start: vt.start, end: vt.end }, variants: entries.length, non_ems: nonEms.length, ems: entries.length - nonEms.length,
+    dense_non_ems: nonEms.filter(function (e) { return normalize.inWindow(e.minimal, a, b); }).length
+  };
+}
+
+function budgetWarnings(budget, results, setsReturned) {
+  return budget.exhausted.map(function (o) {
+    const notScored = results[o].orientation.attempts.reduce(function (n, a) { return n + a.not_scored; }, 0);
+    return warning('DESIGN_BUDGET_EXHAUSTED', o + ': the design budget (' + budget.max_primer3_runs + ' Primer3 runs, ' + budget.max_thermo_calls +
+      ' ntthal calls) left ' + notScored + ' pair' + (notScored === 1 ? '' : 's') + ' unscored; the sets scored so far are returned', {
+      orientation: o,
+      primer3_runs: budget.primer3_runs,
+      thermo_calls: budget.thermo_calls,
+      max_primer3_runs: budget.max_primer3_runs,
+      max_thermo_calls: budget.max_thermo_calls,
+      not_scored: notScored,
+      sets_returned: setsReturned
+    });
+  });
+}
+
 function versionOrNull(primer3, log) {
   return Promise.resolve().then(function () { return primer3.version(); }).catch(function (err) {
     logSafe(log, 'warn', 'primers: primer3 version unavailable: ' + (err && err.code));
@@ -414,88 +401,169 @@ function versionOrNull(primer3, log) {
   });
 }
 
+// ---- variant resolution (§4.1 steps 2-5) -------------------------------------------------------------------
+
+// The production deps.resolveVariant: variation/index.js resolveDesignVariant (assembly, id or manual variant, REF
+// verification, one FASTA read), then neighboursFor over the §4.3 template window. Every Ensembl call happens here,
+// before the semaphore. deps: {cfg, variation (module), variationClient, resolve | assemblies, catalog, mongo, sequence, log}
+// -> (req, {signal, deadline}) => {assembly, variant, neighbours {data, entries, summary}, warnings, variation_source}
+function variationResolver(deps) {
+  return async function (req, opts) {
+    const cfg = deps.cfg;
+    const variation = deps.variation || require('../variation');
+    const vdeps = { cfg: cfg, signal: opts && opts.signal, log: deps.log };
+    [['client', 'variationClient'], ['resolve', 'resolve'], ['assemblies', 'assemblies'], ['catalog', 'catalog'], ['mongo', 'mongo'],
+      ['sequence', 'sequence']].forEach(function (kv) {
+      if (deps[kv[1]] !== undefined) vdeps[kv[0]] = deps[kv[1]];
+    });
+    const flank = templates.templateFlank(req.levels, cfg.genotyping.template_flank);
+    const r = await variation.resolveDesignVariant({ system_name: req.system_name, variant: req.variant, flank: flank }, vdeps);
+    const n = await variation.neighboursFor({
+      system_name: req.system_name, variant: r.variant, window: templates.templateWindow(r.variant, r.region_length, flank),
+      resolved: r.resolved, region_length: r.region_length, genome: r.genome
+    }, vdeps);
+    const release = cfg.variation && cfg.variation.release !== undefined && cfg.variation.release !== null ? String(cfg.variation.release) : null;
+    return {
+      assembly: r.resolved,
+      variant: n.variant,
+      neighbours: { data: n.data, entries: n.entries, summary: n.summary },
+      warnings: r.warnings.concat(n.warnings),
+      variation_source: r.species ? ['ensembl', release].filter(Boolean).join(' ') : null
+    };
+  };
+}
+
 // ---- orchestration -------------------------------------------------------------------------------------
 
-// designGenotyping(body, deps) -> Promise<response>
+// designGenotyping(body, deps) -> Promise<PrimerGenotypingResponse>
 //   deps: {cfg, log, signal (client abort), now, semaphore {acquire}, primer3 {run, version}, repeatMask {repeatMask},
-//          sequence, scoreCandidate, and
+//          sequence, thermo (thermo.createThermo instance; default one per request), scoreCandidate (default
+//          scoring.scoreCandidate), budget, and either
 //          resolveVariant(req, {signal, deadline}) -> {assembly (assemblies.resolve), variant (canonical entry, REF
-//            verified), neighbours {data, entries}, warnings [], variation_source}: the variant and neighbour
-//            resolution of §4.1 steps 2-5, which runs before the semaphore}
-// response: {variant, template, assay, orientations (null for template_only), sets [], check null, settings, engine,
-//            warnings, candidates {forward, reverse} (the kept candidates; not part of the public response)}
-// template_only skips the semaphore unless avoid_repeats needs the masker (§4.2).
+//            verified), neighbours {data, entries, summary?}, warnings [], variation_source}
+//          or the deps of the default resolver (variationResolver: variation, variationClient, resolve | assemblies ...)}
+// The response also carries two non-enumerable properties for tests and logs: candidates {forward, reverse} (the kept
+// candidates, each with .scored) and budget.
+// template_only skips the semaphore unless avoid_repeats needs the masker (§4.2), and never scores.
 async function designGenotyping(body, deps) {
   deps = deps || {};
   const cfg = deps.cfg || require('../config').get();
   if (cfg.enabled === false) throw new PrimerHttpError(503, 'FEATURE_DISABLED', 'primer design is disabled on this server', {});
   const log = deps.log || console;
   const req = request.normalize(body, cfg);
-  genotypingConfig(cfg);
+  const g = genotypingConfig(cfg);
   const dl = design.createDeadline(cfg.design.deadline_ms, deps.signal, deps.now);
   let release = null;
   try {
-    if (typeof deps.resolveVariant !== 'function') {
-      throw new PrimerHttpError(500, 'INTERNAL', 'genotyping variant resolution is not configured', {});
-    }
-    const resolved = await dl.within(deps.resolveVariant(req, { signal: dl.signal, deadline: dl }));
+    const resolveVariant = typeof deps.resolveVariant === 'function'
+      ? deps.resolveVariant : variationResolver(Object.assign({}, deps, { cfg: cfg, log: log }));
+    const resolved = await dl.within(resolveVariant(req, { signal: dl.signal, deadline: dl }));
     if (!req.template_only || req.avoid_repeats) {
       const semaphore = deps.semaphore || require('../semaphore').designSemaphore();
       release = await semaphore.acquire({ signal: dl.signal });
     }
     const tdeps = Object.assign({}, deps, { cfg: cfg, req: req, signal: dl.signal, log: log });
     const vt = await dl.within(templates.buildVariantTemplate(resolved.variant, resolved.assembly, tdeps));
-    const warnings = (resolved.warnings || []).concat(vt.warnings);
 
     let mask = { masked: false, mask_source: null, mask: [], masked_fraction: 0 };
     let maskedSeq = null;
+    let maskWarnings = [];
     if (req.avoid_repeats) {
       const masker = deps.repeatMask || require('../repeat_mask');
       const m = await dl.within(masker.repeatMask(vt.region_template, { mode: req.repeat_mask_mode, signal: dl.signal, deadline: dl.deadlineAt }, tdeps));
       mask = { masked: m.masked, mask_source: m.mask_source, mask: m.mask, masked_fraction: m.masked_fraction };
       maskedSeq = m.seq;
-      m.warnings.forEach(function (w) { warnings.push(w); });
+      maskWarnings = m.warnings;
     }
 
-    const primer3 = deps.primer3 || require('../primer3');
+    const entries = resolved.neighbours && Array.isArray(resolved.neighbours.entries) ? resolved.neighbours.entries : [];
+    const data = resolved.neighbours && resolved.neighbours.data ? resolved.neighbours.data : 'none';
+    // §4.17: the template covers the variant +- 400 bp, more than the 50 bp submission flanks.
+    const submission = normalize.submissionSequence(resolved.variant, normalize.sequenceWindow(vt.seq, vt.start, vt.region_length), entries);
+    const variant = Object.assign({}, resolved.variant, { submission_sequence: submission.sequence });
+
+    // Warning order: variant identity, variant properties, neighbour consequences, submission, template and mask, the
+    // design runs, the budget.
+    const resolverWarnings = resolved.warnings || [];
+    const identity = resolverWarnings.filter(function (w) { return w.code === 'DUPLICATE_VARIANT_IDS'; });
+    const neighbourNotes = resolverWarnings.filter(function (w) { return w.code !== 'DUPLICATE_VARIANT_IDS'; });
+    const early = identity.concat(variantWarnings(variant, vt));
+    const late = [];
+    if (submission.omitted_ids.length) {
+      late.push(warning('SUBMISSION_NEIGHBOURS_OMITTED', 'known indel or multi-allelic variants in the submission flanks are written as reference bases: ' +
+        submission.omitted_ids.join(', '), { ids: submission.omitted_ids }));
+    }
+    vt.warnings.concat(maskWarnings).forEach(function (w) { late.push(w); });
+
     const response = {
-      variant: resolved.variant,
+      variant: variant,
       template: templates.publicVariantTemplate(vt, mask),
-      assay: Object.assign({}, req.assay, { ems_target: resolved.variant.ems === true }),
+      assay: Object.assign({}, req.assay, { ems_target: variant.ems === true, kasp_mix: order.kaspMix(req.assay.type) }),
+      neighbours: resolved.neighbours && resolved.neighbours.summary ? resolved.neighbours.summary : neighbourSummary(data, vt, variant, entries, g),
       orientations: null,
       sets: [],
       check: null,
       settings: { preset: req.preset, params: req.params, pinned: req.pinned, ladder: req.ladder, floors: req.floors },
       engine: { primer3: null, thermo: null, genotyping_design: GENOTYPING_DESIGN_VERSION, variation_source: resolved.variation_source || null },
-      warnings: warnings
+      warnings: null
     };
-    if (req.template_only) return response;
+    if (req.template_only) {
+      response.warnings = early.concat(neighbourNotes, late);
+      return response;
+    }
 
+    const primer3 = deps.primer3 || require('../primer3');
     response.engine.primer3 = await dl.within(versionOrNull(primer3, log));
+    // ntthal prints no version; it is built and installed with primer3_core from the same Primer3 release.
+    response.engine.thermo = response.engine.primer3 ? 'ntthal ' + response.engine.primer3 : null;
+    const thermo = deps.thermo || require('../thermo').createThermo({ cfg: cfg, signal: dl.signal, deadline: dl, salts: req.params, log: log });
+    const budget = deps.budget || createBudget(g, { thermoCalls: function () { return thermo.calls; } });
     const ctx = {
       cfg: cfg,
       req: req,
-      variant: resolved.variant,
+      variant: variant,
       template: vt,
       maskedSeq: maskedSeq,
-      neighbours: resolved.neighbours && Array.isArray(resolved.neighbours.entries) ? resolved.neighbours.entries : [],
-      budget: deps.budget || createBudget(cfg.genotyping),
+      neighbours: entries,
+      budget: budget,
       deadline: dl,
       primer3: primer3,
-      scoreCandidate: deps.scoreCandidate,
+      thermo: thermo,
+      scoreCandidate: deps.scoreCandidate || scoring.scoreCandidate,
       log: log
     };
     const results = {};
+    const runWarnings = [];
     for (const o of ORIENTATIONS) {
       results[o] = await runOrientation(o, ctx);
-      results[o].warnings.forEach(function (w) { warnings.push(w); });
+      results[o].warnings.forEach(function (w) { runWarnings.push(w); });
     }
     response.orientations = { forward: results.forward.orientation, reverse: results.reverse.orientation };
-    orientationWarnings(results).forEach(function (w) { warnings.push(w); });
+
+    const scored = [];
+    ORIENTATIONS.forEach(function (o) {
+      results[o].sets.forEach(function (c) { if (c && c.scored) scored.push(c.scored); });
+    });
+    const label = order.labelFor(req.label, variant);
+    response.sets = sets.rankSets(scored, req.assay.num_sets).map(function (s, rank) {
+      return sets.finalizeSet(s, rank, { label: label, variant: variant });
+    });
+    response.check = sets.proposedCheckRequest(response.sets, {
+      system_name: req.system_name,
+      variant: variant,
+      max_sets: Number.isSafeInteger(g.check_max_sets) ? g.check_max_sets : DEFAULT_CHECK_CAPS.check_max_sets,
+      max_pairs: cfg.check && Number.isSafeInteger(cfg.check.max_pairs) ? cfg.check.max_pairs : DEFAULT_CHECK_CAPS.max_pairs,
+      max_unique_primers: Number.isSafeInteger(g.check_max_unique_primers) ? g.check_max_unique_primers : DEFAULT_CHECK_CAPS.check_max_unique_primers
+    });
+
+    const summary = orientationWarnings(results);
+    const blocked = summary.filter(function (w) { return w.code === 'ORIENTATION_BLOCKED'; });
+    const others = summary.filter(function (w) { return w.code !== 'ORIENTATION_BLOCKED'; });
+    response.warnings = early.concat(blocked, neighbourNotes, late, runWarnings, others, budgetWarnings(budget, results, response.sets.length));
     Object.defineProperty(response, 'candidates', {
       value: { forward: results.forward.sets, reverse: results.reverse.sets }, enumerable: false
     });
-    Object.defineProperty(response, 'budget', { value: ctx.budget, enumerable: false });
+    Object.defineProperty(response, 'budget', { value: budget, enumerable: false });
     return response;
   } finally {
     dl.dispose();
@@ -506,16 +574,19 @@ async function designGenotyping(body, deps) {
 module.exports = {
   designGenotyping,
   runOrientation,
-  screenPair,
+  variationResolver,
   designRecord,
-  neighbourHits,
-  coordsFrom3p,
   createBudget,
   reservation,
   keepCandidate,
   compareDecimal,
   orientationWarnings,
+  variantWarnings,
   emptyRejected,
+  // moved to sets.js in M6; kept here for the M5 surface
+  screenPair: sets.screenPair,
+  neighbourHits: sets.neighbourHits,
+  coordsFrom3p: sets.coordsFrom3p,
   ORIENTATIONS,
   REJECTED_KEYS,
   GENOTYPING_DESIGN_VERSION

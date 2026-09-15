@@ -1,0 +1,42 @@
+{
+  "variant": { "key": "1:11502:C:CGT", "requested_id": "tmp_1_11502_C_CGT", "ids": ["tmp_1_11502_C_CGT", "rs5413863549"],
+               "label": "1:11502^11503 -/GT", "kind": "insertion", "shift": 0, "zone": { "start": 11502, "end": 11503 },
+               "discriminating": { "forward": { "position": 11503, "ref_base": "A", "alt_base": "G", "alt_maps_to": null },
+                                   "reverse": { "position": 11502, "ref_base": "C", "alt_base": "T", "alt_maps_to": null } }, "…": "…" },
+  "template": { "start": 11102, "end": 11903, "length": 802, "alt_length": 804, "…": "…" },
+  "orientations": {
+    "forward": { "status": "blocked", "reason": "neighbour_at_3p", "discriminating_position": 11503, "relaxation_level": null, "sets_found": 0,
+                 "blockers": [{ "key": "1:11500:G:A", "ids": ["rs5413863234"], "label": "1:11500 G/A", "start": 11500, "end": 11500, "alleles": "G/A", "ems": false, "distance_from_3p": 4 }],
+                 "attempts": [] },
+    "reverse": { "status": "ok", "reason": null, "discriminating_position": 11502, "relaxation_level": 0, "sets_found": 8, "blockers": [], "…": "…" }
+  },
+  "sets": [
+    { "id": "S1", "key": "53942cb55348", "orientation": "reverse", "relaxation_level": 0, "quality": "usable", "score": 9.56,
+      "primers": {
+        "as_ref": { "allele": "C", "three_prime_base": "G", "target_seq": "GCAGGAAAAGAAATCCTAACATCATATG", "len": 28,
+                    "genomic": { "region": "1", "start": 11502, "end": 11529, "strand": -1 }, "tm": 59.19, "gc": 35.71, "hairpin_th": 45.59, "end_stability": 1.78,
+                    "neighbours": [ { "key": "1:11509:T:C", "ids": ["rs5413864238"], "ems": false, "distance_from_3p": 8 },
+                                    { "key": "1:11516:A:T", "ids": ["rs5413863874"], "ems": false, "distance_from_3p": 15 },
+                                    { "key": "1:11523:T:A", "ids": ["rs5413863270"], "ems": false, "distance_from_3p": 22 } ], "…": "…" },
+        "as_alt": { "allele": "CGT", "three_prime_base": "A", "target_seq": "GCAGGAAAAGAAATCCTAACATCATATA", "len": 28,
+                    "genomic": { "region": "1", "start": 11503, "end": 11529, "strand": -1, "blocks": [{ "start": 11503, "end": 11529 }] },
+                    "inserted_bases": 1, "tm": 58.03, "gc": 32.14, "hairpin_th": 45.59, "end_stability": 0.86, "…": "…" },
+        "common": { "target_seq": "AGGATCTTTGCAACCCTGTGTT", "genomic": { "region": "1", "start": 11458, "end": 11479, "strand": 1 },
+                    "tm": 60.43, "gc": 45.45, "end_stability": 3.32,
+                    "neighbours": [ { "key": "1:11474:T:A", "ids": ["rs5413863452"], "ems": false, "distance_from_3p": 6 } ], "…": "…" } },
+      "products": { "ref": { "size": 72 }, "alt": { "size": 74, "inserted_bases": 2 } },
+      "tm_balance": { "as_tm_diff": 1.16, "common_minus_as": 1.24 },
+      "neighbour_sites": 4,
+      "warnings": [
+        { "code": "AS_TM_IMBALANCE", "message": "as_ref and as_alt Tm differ by 1.16 °C (limit 1.0)", "details": { "diff": 1.16 } },
+        { "code": "NEIGHBOUR_IN_PRIMER", "details": { "role": "as_ref", "ids": ["rs5413864238", "rs5413863874", "rs5413863270"], "distances": [8, 15, 22] }, "message": "…" },
+        { "code": "NEIGHBOUR_IN_PRIMER", "details": { "role": "common", "ids": ["rs5413863452"], "distances": [6] }, "message": "…" }
+      ], "…": "…" }
+  ],
+  "warnings": [
+    { "code": "DUPLICATE_VARIANT_IDS", "details": { "key": "1:11502:C:CGT", "ids": ["tmp_1_11502_C_CGT", "rs5413863549"] }, "message": "…" },
+    { "code": "ORIENTATION_BLOCKED", "message": "forward: known variant rs5413863234 (G/A) lies 4 nt from the allele-specific primer's 3′ end",
+      "details": { "orientation": "forward", "ids": ["rs5413863234"], "distances": [4] } },
+    { "code": "DENSE_NEIGHBOURS", "details": { "count": 5, "window": 30 }, "message": "…" }
+  ]
+}

@@ -56,6 +56,7 @@ function buildApp(ctrl, extra) {
   app.get(base + '/variants', swagger(listParams), function (req, res) { ctrl.listPrimerVariants(req, res, function () {}); });
   app.get(base + '/variants/:variant_id', swagger({ variant_id: (r) => r.params.variant_id, system_name: (r) => r.query.system_name }),
     function (req, res) { ctrl.getPrimerVariant(req, res, function () {}); });
+  app.post(base + '/genotyping/design', swagger({ body: (r) => r.body }), function (req, res) { ctrl.designGenotypingPrimers(req, res, function () {}); });
   // swagger-node-runner's 405 for a path that is defined but lacks the method
   app.all(base + '/check/:job_id', function (req, res, next) {
     const err = new Error('Path [/primers/check/{job_id}] defined in Swagger, but ' + req.method + ' operation is not.');
@@ -107,13 +108,15 @@ const tick = () => new Promise((resolve) => setImmediate(resolve));
 
 test('loading the controller exports the operations and the app.js middleware without loading heavy helpers', function () {
   const ctrl = require(CONTROLLER);
-  ['designPrimers', 'primerGenomes', 'submitPrimerCheck', 'getPrimerCheck', 'listPrimerVariants', 'getPrimerVariant',
+  ['designPrimers', 'primerGenomes', 'submitPrimerCheck', 'getPrimerCheck', 'listPrimerVariants', 'getPrimerVariant', 'designGenotypingPrimers',
     'noStore', 'notFound', 'errorHandler', 'startup', 'createController']
     .forEach(function (k) { ctrl[k].should.be.a.Function(); });
   ctrl.listPrimerVariants.name.should.equal('listPrimerVariants');
   ctrl.getPrimerVariant.name.should.equal('getPrimerVariant');
+  ctrl.designGenotypingPrimers.name.should.equal('designGenotypingPrimers');
   const loaded = Object.keys(require.cache);
-  ['design.js', 'jobs/index.js', 'genomes.js', 'assemblies.js', 'redis_store.js', 'variation/index.js', 'variation/client.js'].forEach(function (f) {
+  ['design.js', 'jobs/index.js', 'genomes.js', 'assemblies.js', 'redis_store.js', 'variation/index.js', 'variation/client.js',
+    'genotyping/design.js', 'genotyping/scoring.js', 'thermo.js'].forEach(function (f) {
     loaded.some(function (p) { return p.endsWith('/api/helpers/primers/' + f); }).should.equal(false, f + ' loaded eagerly');
   });
 });
@@ -174,8 +177,12 @@ test('PrimerHttpError status, code and details pass through; 503 adds Retry-Afte
     check: new PrimerHttpError(503, 'JOB_STORE_UNAVAILABLE', 'the job store is unavailable', { retry_after_s: 5 }),
     status: new PrimerHttpError(404, 'UNKNOWN_JOB', 'unknown job', { job_id: '0123456789abcdef0123456789abcdef' }),
     variants: new PrimerHttpError(503, 'VARIATION_SOURCE_UNAVAILABLE', 'the Ensembl variation service is temporarily unavailable', { retry_after_s: 30, reason: 'timeout' }),
-    variant: new PrimerHttpError(404, 'UNKNOWN_VARIANT', 'unknown variant rs0000000001 for sorghum_bicolor', { id: 'rs0000000001', system_name: 'sorghum_bicolor' })
+    variant: new PrimerHttpError(404, 'UNKNOWN_VARIANT', 'unknown variant rs0000000001 for sorghum_bicolor', { id: 'rs0000000001', system_name: 'sorghum_bicolor' }),
+    genotyping: new PrimerHttpError(400, 'REF_MISMATCH', 'the reference allele A does not match the genome base C at 1:11109',
+      { region: '1', position: 11109, given: 'A', genome: 'C' }),
+    thermo: new PrimerHttpError(503, 'THERMO_UNAVAILABLE', 'ntthal is not available on this server', { binary: 'ntthal', retry_after_s: 60 })
   };
+  let genotypingError = errs.genotyping;
   const ctrl = require(CONTROLLER).createController({
     log: quietLog(),
     config: fakeConfig(),
@@ -187,7 +194,8 @@ test('PrimerHttpError status, code and details pass through; 503 adds Retry-Afte
     variation: {
       listVariants: async function () { throw errs.variants; },
       lookupVariant: async function () { throw errs.variant; }
-    }
+    },
+    genotyping: { designGenotyping: async function () { throw genotypingError; } }
   });
   await withServer(buildApp(ctrl), async function (base) {
     let r = await postJson(base + '/primers/design', { mode: 'gene', gene_id: 'NOPE' });
@@ -211,6 +219,17 @@ test('PrimerHttpError status, code and details pass through; 503 adds Retry-Afte
     r.status.should.equal(404);
     r.body.should.eql({ message: 'unknown variant rs0000000001 for sorghum_bicolor', code: 'UNKNOWN_VARIANT', details: { id: 'rs0000000001', system_name: 'sorghum_bicolor' } });
     r.headers.get('cache-control').should.equal('no-store');
+    const manual = { system_name: 'sorghum_bicolor', variant: { region: '1', position: 11109, ref: 'A', alt: 'C' }, template_only: true };
+    r = await postJson(base + '/primers/genotyping/design', manual);
+    r.status.should.equal(400);
+    r.body.should.eql({ message: 'the reference allele A does not match the genome base C at 1:11109', code: 'REF_MISMATCH',
+      details: { region: '1', position: 11109, given: 'A', genome: 'C' } });
+    r.headers.get('cache-control').should.equal('no-store');
+    genotypingError = errs.thermo;
+    r = await postJson(base + '/primers/genotyping/design', manual);
+    r.status.should.equal(503);
+    r.body.should.eql({ message: 'ntthal is not available on this server', code: 'THERMO_UNAVAILABLE', details: { binary: 'ntthal', retry_after_s: 60 } });
+    r.headers.get('retry-after').should.equal('60');
   });
 });
 
@@ -225,6 +244,12 @@ test('success paths: design 200, genomes 200, check 202 when created and 200 whe
     variation: {
       listVariants: async function (query, deps) { seen.list = { query: query, signal: deps.signal }; return { variants: [], warnings: [] }; },
       lookupVariant: async function (query, deps) { seen.lookup = { query: query, signal: deps.signal }; return { requested_id: query.variant_id, variants: [], warnings: [] }; }
+    },
+    genotyping: {
+      designGenotyping: async function (body, deps) {
+        seen.genotyping = { body: body, signal: deps.signal, log: deps.log };
+        return { variant: { key: '1:11109:C:A' }, sets: [], check: null, warnings: [] };
+      }
     },
     jobs: {
       submit: async function (body) {
@@ -276,6 +301,17 @@ test('success paths: design 200, genomes 200, check 202 when created and 200 whe
     r.headers.get('cache-control').should.equal('no-store');
     seen.lookup.query.should.eql({ variant_id: 'tmp_1_13549_TTA_T,*', system_name: 'sorghum_bicolor' });
     seen.lookup.signal.aborted.should.equal(false);
+
+    // the body goes to genotyping/design.js as sent; only the client abort signal and the log are added
+    const body = { system_name: 'sorghum_bicolor', variant: { id: 'rs871475760', alt: 'A' }, assay: { type: 'kasp', num_sets: 2 } };
+    r = await postJson(base + '/primers/genotyping/design', body);
+    r.status.should.equal(200);
+    r.body.should.eql({ variant: { key: '1:11109:C:A' }, sets: [], check: null, warnings: [] });
+    r.headers.get('cache-control').should.equal('no-store');
+    seen.genotyping.body.should.eql(body);
+    seen.genotyping.signal.should.be.instanceOf(AbortSignal);
+    seen.genotyping.signal.aborted.should.equal(false);
+    should.exist(seen.genotyping.log);
   });
 });
 
@@ -286,7 +322,8 @@ test('FEATURE_DISABLED (503, retry_after_s 300) on every endpoint when primers a
     design: { design: async function () { throw new Error('must not be called'); } },
     genomes: { genomesResponse: async function () { throw new Error('must not be called'); } },
     jobs: { submit: async function () { throw new Error('must not be called'); }, status: async function () { throw new Error('must not be called'); } },
-    variation: { listVariants: async function () { throw new Error('must not be called'); }, lookupVariant: async function () { throw new Error('must not be called'); } }
+    variation: { listVariants: async function () { throw new Error('must not be called'); }, lookupVariant: async function () { throw new Error('must not be called'); } },
+    genotyping: { designGenotyping: async function () { throw new Error('must not be called'); } }
   });
   await withServer(buildApp(ctrl), async function (base) {
     const rs = [
@@ -295,8 +332,10 @@ test('FEATURE_DISABLED (503, retry_after_s 300) on every endpoint when primers a
       await postJson(base + '/primers/check', {}),
       await call(base + '/primers/check/' + 'c'.repeat(32)),
       await call(base + '/primers/variants?system_name=x&region=1&start=1&end=2'),
-      await call(base + '/primers/variants/rs871475760?system_name=x')
+      await call(base + '/primers/variants/rs871475760?system_name=x'),
+      await postJson(base + '/primers/genotyping/design', { system_name: 'x', variant: { id: 'rs871475760' } })
     ];
+    rs.should.have.length(7);
     rs.forEach(function (r) {
       r.status.should.equal(503);
       r.body.code.should.equal('FEATURE_DISABLED');
@@ -371,6 +410,39 @@ test('a client that disconnects aborts the variants signal (list and lookup); no
       aborted[name].code.should.equal('CLIENT_CLOSED_REQUEST');
     }
   });
+  await tick();
+  unhandled.should.have.length(0);
+});
+
+test('a client that disconnects aborts the genotyping design signal (Ensembl waits, Primer3 and ntthal); nothing is sent or thrown', async function (t) {
+  const unhandled = watchUnhandled(t);
+  let resolveStarted;
+  const started = new Promise((resolve) => { resolveStarted = resolve; });
+  let abortedWith = null;
+  const ctrl = require(CONTROLLER).createController({
+    log: quietLog(),
+    config: fakeConfig(),
+    genotyping: {
+      designGenotyping: function (body, deps) {
+        resolveStarted();
+        return new Promise(function (resolve, reject) {
+          deps.signal.addEventListener('abort', function () { abortedWith = deps.signal.reason; reject(deps.signal.reason); });
+        });
+      }
+    }
+  });
+  await withServer(buildApp(ctrl), async function (base) {
+    const ac = new AbortController();
+    const pending = fetch(base + '/primers/genotyping/design', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"system_name":"sorghum_bicolor","variant":{"id":"rs871475760"}}', signal: ac.signal
+    }).catch(function (e) { return e; });
+    await started;
+    ac.abort();
+    (await pending).name.should.equal('AbortError');
+    for (let i = 0; i < 50 && !abortedWith; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  should.exist(abortedWith);
+  abortedWith.code.should.equal('CLIENT_CLOSED_REQUEST');
   await tick();
   unhandled.should.have.length(0);
 });

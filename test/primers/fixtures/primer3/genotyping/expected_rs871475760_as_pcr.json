@@ -1,0 +1,49 @@
+{
+  "assay": { "type": "as_pcr", "orientation": "both", "tails": "none", "deliberate_mismatch": "auto", "mismatch_position": 2,
+             "num_sets": 1, "max_relaxation": 2, "neighbour_policy": "avoid_3p", "ems_target": false, "kasp_mix": null },
+  "sets": [
+    { "id": "S1", "key": "7f9af6b1c938", "orientation": "reverse", "relaxation_level": 0, "quality": "usable", "score": 7.92,
+      "primers": {
+        "as_ref": { "role": "as_ref", "allele": "C", "three_prime_base": "G",
+                    "target_seq": "ATCTTTGACTAGCGAGAAATTCGG", "matched_seq": "ATCTTTGACTAGCGAGAAATTCAG",
+                    "dye": null, "tail_seq": null, "order_seq": "ATCTTTGACTAGCGAGAAATTCGG",
+                    "tm": 54.69, "tm_method": "ntthal_duplex", "matched_tm": 57.1, "gc": 41.67,
+                    "hairpin_th": 49.2, "self_any_th": 0, "self_end_th": 0, "end_stability": 4.3,
+                    "primer3_problems": " Hairpin stability too high;",
+                    "deliberate_mismatch": { "position": 2, "original_base": "A", "new_base": "G", "template_base": "T",
+                                             "terminal_pair": "AG", "terminal_mismatch_class": "max", "added_mismatch_class": "weak",
+                                             "source": "Little 1995 Table 9.8.1" },
+                    "discrimination": { "own_allele": { "mm_pos": [2], "likelihood": "likely" },
+                                        "other_allele": { "mm_pos": [2, 1], "likelihood": "unlikely" },
+                                        "terminal_mismatch_class": "max", "in_shift_tract": false }, "…": "…" },
+        "as_alt": { "role": "as_alt", "allele": "A", "three_prime_base": "T",
+                    "target_seq": "ATCTTTGACTAGCGAGAAATTCGT", "matched_seq": "ATCTTTGACTAGCGAGAAATTCAT", "order_seq": "ATCTTTGACTAGCGAGAAATTCGT",
+                    "tm": 54.58, "tm_method": "ntthal_duplex", "matched_tm": 56.51, "gc": 37.5, "hairpin_th": 50.62, "end_stability": 3.85,
+                    "primer3_problems": " Hairpin stability too high;",
+                    "deliberate_mismatch": { "position": 2, "original_base": "A", "new_base": "G", "template_base": "T",
+                                             "terminal_pair": "CT", "terminal_mismatch_class": "max", "added_mismatch_class": "weak",
+                                             "source": "Little 1995 Table 9.8.1" },
+                    "discrimination": { "own_allele": { "mm_pos": [2], "likelihood": "likely" },
+                                        "other_allele": { "mm_pos": [2, 1], "likelihood": "unlikely" }, "…": "…" }, "…": "…" },
+        "common": { "target_seq": "TGCATCAACAAATGTGCTATGTGT", "genomic": { "region": "1", "start": 10880, "end": 10903, "strand": 1 }, "tm": 60.02,
+                    "neighbours": [ { "key": "1:10902:G:A", "ids": ["tmp_1_10902_G_A"], "ems": true, "distance_from_3p": 2 },
+                                    { "key": "1:10880:T:C", "ids": ["rs5413864006"], "ems": false, "distance_from_3p": 24 } ], "…": "…" } },
+      "products": { "ref": { "size": 253 }, "alt": { "size": 253 } },
+      "tm_balance": { "as_tm_diff": 0.11, "common_minus_as": 2.92 },
+      "warnings": [
+        { "code": "ALT_PRIMER_SUBOPTIMAL", "details": { "oligo": "as_alt", "problems": " Hairpin stability too high;" }, "message": "…" },
+        { "code": "ALT_PRIMER_SUBOPTIMAL", "details": { "oligo": "as_ref", "problems": " Hairpin stability too high;" }, "message": "…" },
+        { "code": "MISMATCH_STRUCTURE", "details": { "oligo": "as_ref", "metric": "hairpin_th", "value": 49.2, "severity": "warn" }, "message": "…" },
+        { "code": "MISMATCH_STRUCTURE", "details": { "oligo": "as_alt", "metric": "hairpin_th", "value": 50.62, "severity": "warn" }, "message": "…" },
+        { "code": "NEIGHBOUR_IN_PRIMER", "details": { "role": "common", "ids": ["rs5413864006"], "distances": [24] }, "message": "…" }
+      ],
+      "order": [
+        { "name": "rs871475760_S1_REF", "role": "as_ref", "allele": "C", "dye": null, "order_seq": "ATCTTTGACTAGCGAGAAATTCGG", "length": 24, "tm": 54.69,
+          "notes": "deliberate mismatch −2 A→G (Little 1995 Table 9.8.1)", "…": "…" },
+        { "name": "rs871475760_S1_ALT", "role": "as_alt", "allele": "A", "dye": null, "order_seq": "ATCTTTGACTAGCGAGAAATTCGT", "length": 24, "tm": 54.58,
+          "notes": "deliberate mismatch −2 A→G (Little 1995 Table 9.8.1)", "…": "…" },
+        { "name": "rs871475760_S1_COM", "role": "common", "allele": null, "dye": null, "order_seq": "TGCATCAACAAATGTGCTATGTGT", "length": 24, "tm": 60.02, "notes": "", "…": "…" }
+      ], "…": "…" }
+  ],
+  "…": "…"
+}

@@ -8,6 +8,7 @@
 //   GET  /primers/check/{job_id} getPrimerCheck     job status, progress and (partial) results
 //   GET  /primers/variants       listPrimerVariants known variants (Ensembl) in a window, normalized
 //   GET  /primers/variants/{variant_id} getPrimerVariant  one Ensembl variation id, normalized
+//   POST /primers/genotyping/design designGenotypingPrimers  synchronous KASP / allele-specific PCR set design
 //
 // Every handler is promise-wrapped: a synchronous throw or a rejected promise becomes a JSON error
 // {message, code, details} via errors.sendError, never an unhandled rejection (Node 24 would crash the
@@ -50,7 +51,7 @@ function echoPath(req) {
 }
 
 // createController(deps) -> handlers and middleware.
-//   deps (tests): {config, design, genomes, jobs, variation (module-like objects), log}
+//   deps (tests): {config, design, genomes, jobs, variation, genotyping (module-like objects), log}
 function createController(deps) {
   deps = deps || {};
   const log = deps.log || console;
@@ -60,7 +61,8 @@ function createController(deps) {
     design: function () { return deps.design || require('../helpers/primers/design'); },
     genomes: function () { return deps.genomes || require('../helpers/primers/genomes'); },
     jobs: function () { return deps.jobs || require('../helpers/primers/jobs'); },
-    variation: function () { return deps.variation || require('../helpers/primers/variation'); }
+    variation: function () { return deps.variation || require('../helpers/primers/variation'); },
+    genotyping: function () { return deps.genotyping || require('../helpers/primers/genotyping/design'); }
   };
 
   function ensureEnabled() {
@@ -190,6 +192,20 @@ function createController(deps) {
     }
   });
 
+  // A client that disconnects aborts the genotyping design: Ensembl waits end, and Primer3 and ntthal are killed.
+  const designGenotypingPrimers = wrap('designGenotypingPrimers', async function (req, res) {
+    ensureEnabled();
+    const body = paramValue(req, 'body', 'body');
+    const abort = clientAbort(res);
+    try {
+      const result = await modules.genotyping().designGenotyping(body, { signal: abort.signal, log: log });
+      if (abort.signal.aborted) return;
+      sendJson(res, 200, result);
+    } finally {
+      abort.dispose();
+    }
+  });
+
   // Before register: every /primers response (validator 400s and body-parser 413s included) is no-store.
   function noStore(req, res, next) {
     setNoStore(res);
@@ -251,6 +267,7 @@ function createController(deps) {
     getPrimerCheck: getPrimerCheck,
     listPrimerVariants: listPrimerVariants,
     getPrimerVariant: getPrimerVariant,
+    designGenotypingPrimers: designGenotypingPrimers,
     noStore: noStore,
     notFound: notFound,
     errorHandler: errorHandler,

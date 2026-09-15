@@ -11,6 +11,7 @@
 // request body whose endpoint comes from the file name (design*.json -> POST /primers/design,
 // check*.json -> POST /primers/check) or, failing that, from its shape (a "pairs" array -> check, else design).
 // variants-*.json (GET /primers/variants[/{variant_id}]) must be wrappers {method, path, query}; their method defaults to GET.
+// genotyping-design-*.json bare bodies go to POST /primers/genotyping/design.
 
 require('../../../api/helpers/primers/node_compat');
 
@@ -30,6 +31,8 @@ const FIXTURE_DIR = process.env.PRIMERS_CONTRACT_FIXTURES
 const design = require(path.join(ROOT, 'api/helpers/primers/design'));
 const checkNormalize = require(path.join(ROOT, 'api/helpers/primers/check/normalize'));
 const config = require(path.join(ROOT, 'api/helpers/primers/config'));
+const grequest = require(path.join(ROOT, 'api/helpers/primers/genotyping/request'));
+const gpresets = require(path.join(ROOT, 'api/helpers/primers/genotyping/presets'));
 
 const P2_L = 'GGACAGCTCCACAACATATCAG';
 const P2_R = 'GGACATTTGAAGCCCATGGCC';
@@ -95,7 +98,8 @@ test('the /primers operations exist before /{collection}, tagged "Primer design"
   const coll = paths.indexOf('/{collection}');
   const expected = [['/primers/design', 'post', 'designPrimers'], ['/primers/genomes', 'get', 'primerGenomes'],
     ['/primers/check', 'post', 'submitPrimerCheck'], ['/primers/check/{job_id}', 'get', 'getPrimerCheck'],
-    ['/primers/variants', 'get', 'listPrimerVariants'], ['/primers/variants/{variant_id}', 'get', 'getPrimerVariant']];
+    ['/primers/variants', 'get', 'listPrimerVariants'], ['/primers/variants/{variant_id}', 'get', 'getPrimerVariant'],
+    ['/primers/genotyping/design', 'post', 'designGenotypingPrimers']];
   expected.forEach(function (row) {
     const idx = paths.indexOf(row[0]);
     idx.should.be.aboveOrEqual(0, row[0]);
@@ -117,14 +121,17 @@ test('the /primers operations exist before /{collection}, tagged "Primer design"
   api.getPath({ url: basePath + '/primers/check/0123456789abcdef0123456789abcdef' }).path.should.equal('/primers/check/{job_id}');
   api.getPath({ url: basePath + '/primers/variants' }).path.should.equal('/primers/variants');
   api.getPath({ url: basePath + '/primers/variants/tmp_1_13549_TTA_T%2C%2A' }).path.should.equal('/primers/variants/{variant_id}');
+  api.getPath({ url: basePath + '/primers/genotyping/design' }).path.should.equal('/primers/genotyping/design');
 });
 
 test('request definitions are strict (additionalProperties false); response definitions are documented', function () {
   const d = definitions();
-  ['PrimerDesignRequest', 'PrimerDesignParams', 'PrimerRegion', 'PrimerCheckRequest'].forEach(function (name) {
+  ['PrimerDesignRequest', 'PrimerDesignParams', 'PrimerRegion', 'PrimerCheckRequest',
+    'PrimerGenotypingRequest', 'PrimerVariantInput', 'PrimerGenotypingAssay', 'PrimerGenotypingParams'].forEach(function (name) {
     should.exist(d[name], name);
     d[name].additionalProperties.should.equal(false, name);
   });
+  d.PrimerGenotypingRequest.required.should.eql(['system_name', 'variant']);
   d.PrimerInterval.minItems.should.equal(2);
   d.PrimerInterval.maxItems.should.equal(2);
   d.PrimerCheckRequest.properties.params.additionalProperties.should.equal(false);
@@ -155,6 +162,35 @@ test('variants definitions (§2.6) are all present and referenced; PrimerWarning
   // the places M3's normalizer can put a null
   [d.PrimerAlleleSite.properties.alt_maps_to, d.PrimerVariantZone, d.PrimerVariantMultiallelic, d.PrimerVariant.properties.discriminating,
     d.PrimerVariant.properties.consequence, d.PrimerVariantRecord.properties.source].forEach(function (s) { s['x-nullable'].should.equal(true); });
+});
+
+// Genotyping spec §2.7-§2.8 and §7.7: the design response definitions are all present, have properties and are referenced,
+// and every place the design can put a null is x-nullable.
+test('genotyping design definitions (§2.7-§2.8) are present and referenced; the response nulls are x-nullable', function () {
+  const r = api.validate();
+  r.warnings.filter(function (w) { return w.code === 'UNUSED_DEFINITION' && /^Primer/.test(String((w.path || [])[1])); }).should.eql([]);
+  const d = definitions();
+  ['PrimerNeighbourHit', 'PrimerLikelihoodAt', 'PrimerDeliberateMismatch', 'PrimerGenotypingDiscrimination', 'PrimerTailedStructures',
+    'PrimerOligoTemplateSpan', 'PrimerGenotypingOligo', 'PrimerGenotypingOrderRow', 'PrimerCheckPairFragment', 'PrimerGenotypingSetRef',
+    'PrimerGenotypingCheckFragment', 'PrimerGenotypingProduct', 'PrimerGenotypingPairThermo', 'PrimerGenotypingTailedThermo',
+    'PrimerGenotypingSetIssue', 'PrimerGenotypingSet', 'PrimerGenotypingExplainSide', 'PrimerGenotypingRejected', 'PrimerGenotypingAttempt',
+    'PrimerGenotypingOrientation', 'PrimerGenotypingTemplateFeatures', 'PrimerGenotypingTemplate', 'PrimerKaspMix',
+    'PrimerGenotypingAssayEffective', 'PrimerGenotypingNeighbourSummary', 'PrimerGenotypingLadderStep', 'PrimerGenotypingSettings',
+    'PrimerGenotypingEngine', 'PrimerGenotypingCheckBlock', 'PrimerGenotypingResponse'].forEach(function (name) {
+    should.exist(d[name], name);
+    should.exist(d[name].properties, name + ' has properties');
+  });
+  const post = api.definition.paths['/primers/genotyping/design'].post;
+  post.responses['200'].schema.$ref.should.equal('#/definitions/PrimerGenotypingResponse');
+  post.parameters[0].schema.$ref.should.equal('#/definitions/PrimerGenotypingRequest');
+  ['400', '404', '422', '500', '503', '504'].forEach(function (s) { post.responses[s].schema.$ref.should.equal('#/definitions/PrimerError'); });
+  [d.PrimerNeighbourHit.properties.distance_from_3p, d.PrimerDeliberateMismatch, d.PrimerGenotypingDiscrimination, d.PrimerTailedStructures,
+    d.PrimerGenotypingOligo.properties.allele, d.PrimerGenotypingOligo.properties.dye, d.PrimerGenotypingOligo.properties.tail_seq,
+    d.PrimerGenotypingOligo.properties.matched_tm, d.PrimerGenotypingOligo.properties.primer3_problems, d.PrimerGenotypingOrderRow.properties.allele,
+    d.PrimerGenotypingOrderRow.properties.dye, d.PrimerGenotypingOrderRow.properties.tail_seq, d.PrimerGenotypingTailedThermo,
+    d.PrimerGenotypingOrientation.properties.reason, d.PrimerGenotypingOrientation.properties.relaxation_level, d.PrimerGenotypingTemplate.properties.mask_source,
+    d.PrimerKaspMix, d.PrimerGenotypingEngine.properties.primer3, d.PrimerGenotypingEngine.properties.thermo, d.PrimerGenotypingEngine.properties.variation_source,
+    d.PrimerGenotypingCheckBlock, d.PrimerGenotypingResponse.properties.orientations].forEach(function (s) { s['x-nullable'].should.equal(true); });
 });
 
 // ---- documented bodies -----------------------------------------------------------------------------
@@ -210,6 +246,81 @@ test('documented design request bodies validate against PrimerDesignRequest', fu
 
 test('documented check request bodies validate against PrimerCheckRequest', function () {
   CHECK_EXAMPLES.forEach(function (body) { valid('POST', '/primers/check', body); });
+});
+
+// Genotyping spec §2.9-§2.10: the documented design requests, and a body with every field.
+const GENOTYPING_EXAMPLES = [
+  { system_name: 'sorghum_bicolor', variant: { id: 'rs871475760', alt: 'A' }, assay: { type: 'kasp', num_sets: 2 } },
+  { system_name: 'sorghum_bicolor', variant: { id: 'tmp_1_11193_C_T' }, assay: { num_sets: 2 } },
+  { system_name: 'sorghum_bicolor', variant: { region: '1', position: 11283, ref: 'A', alt: '-' }, assay: { num_sets: 2 } },
+  { system_name: 'sorghum_bicolor', variant: { id: 'tmp_1_11502_C_CGT' }, assay: { num_sets: 1 } },
+  { system_name: 'sorghum_bicolor', variant: { id: 'rs871475760' }, assay: { type: 'as_pcr', num_sets: 1 } },
+  { system_name: 'sorghum_bicolor', variant: { region: '1', position: 11109, ref: 'A', alt: 'C' }, template_only: true },
+  { system_name: 'sorghum_bicolor', variant: { id: 'rs5413863494' } },
+  { system_name: 'sorghum_bicolor', variant: { id: 'tmp_1_13549_TTA_T,*', alt: 't' } },
+  { system_name: 'sorghum_bicolor', variant: { region: '1', position: 11282, ref: 'ca', alt: 'c' } },
+  { system_name: 'sorghum_bicolor', variant: { region: '1', position: 11503, ref: '-', alt: 'GT' } },
+  {
+    system_name: 'sorghum_bicolor', variant: { region: '1', position: 11109, ref: 'C', alt: 'A' },
+    assay: { type: 'as_pcr', orientation: 'reverse', tails: 'ref_hex_alt_fam', deliberate_mismatch: 'auto', mismatch_position: 3, num_sets: 10,
+      max_relaxation: 0, neighbour_policy: 'ignore' },
+    avoid_repeats: true, repeat_mask_mode: 'three_prime', template_only: false, label: 'my.assay-1',
+    params: {
+      opt_size: 22, min_size: 18, max_size: 30, opt_tm: 60, min_tm: 57, max_tm: 63, opt_gc: 50, min_gc: 30, max_gc: 70, max_tm_diff: 3,
+      max_poly_x: 5, gc_clamp: 1, max_end_stability: 9, salt_monovalent: 50, salt_divalent: 1.5, dntp_conc: 0.6, dna_conc: 50,
+      product_size_ranges: [[61, 120], [150, 300]]
+    }
+  }
+];
+
+test('documented genotyping design bodies validate against PrimerGenotypingRequest and pass genotyping/request.normalize', function () {
+  const cfg = cfgForTests();
+  GENOTYPING_EXAMPLES.forEach(function (body) {
+    valid('POST', '/primers/genotyping/design', body);
+    (function () { grequest.normalize(JSON.parse(JSON.stringify(body)), cfg); }).should.not.throw(JSON.stringify(body));
+  });
+});
+
+test('malformed genotyping design bodies are rejected by the validator', function () {
+  const base = { system_name: 'sorghum_bicolor', variant: { id: 'rs871475760' } };
+  const withVariant = function (v) { return Object.assign({}, base, { variant: v }); };
+  const bad = [
+    [Object.assign({ mode: 'region' }, base), 'OBJECT_ADDITIONAL_PROPERTIES'],
+    [{ system_name: 'sorghum_bicolor' }, 'OBJECT_MISSING_REQUIRED_PROPERTY'],
+    [{ variant: { id: 'rs871475760' } }, 'OBJECT_MISSING_REQUIRED_PROPERTY'],
+    [Object.assign({}, base, { system_name: '../etc' }), 'PATTERN'],
+    [withVariant({ id: 'rs871475760', name: 'x' }), 'OBJECT_ADDITIONAL_PROPERTIES'],
+    [withVariant({ id: 'a/b' }), 'PATTERN'],
+    [withVariant({ id: '.hidden' }), 'PATTERN'],
+    [withVariant({ id: 'a'.repeat(256) }), 'PATTERN'],
+    [withVariant({ region: '1', position: 0, ref: 'C', alt: 'A' }), 'MINIMUM'],
+    [withVariant({ region: '1', position: 1.5, ref: 'C', alt: 'A' }), 'INVALID_TYPE'],
+    [withVariant({ region: '1', position: 11109, ref: 'N', alt: 'A' }), 'PATTERN'],
+    [withVariant({ region: '1', position: 11109, ref: '*', alt: 'A' }), 'PATTERN'],
+    [withVariant({ region: '1', position: 11109, ref: 'C', alt: 'A'.repeat(51) }), 'PATTERN'],
+    [withVariant({ region: 'r'.repeat(256), position: 1, ref: 'C', alt: 'A' }), 'MAX_LENGTH'],
+    [Object.assign({}, base, { assay: { type: 'tetra_arms' } }), 'ENUM_MISMATCH'],
+    [Object.assign({}, base, { assay: { tails: 'fam' } }), 'ENUM_MISMATCH'],
+    [Object.assign({}, base, { assay: { mismatch_position: 4 } }), 'ENUM_MISMATCH'],
+    [Object.assign({}, base, { assay: { num_sets: 11 } }), 'MAXIMUM'],
+    [Object.assign({}, base, { assay: { num_sets: 0 } }), 'MINIMUM'],
+    [Object.assign({}, base, { assay: { max_relaxation: 3 } }), 'MAXIMUM'],
+    [Object.assign({}, base, { assay: { neighbour_policy: 'block' } }), 'ENUM_MISMATCH'],
+    [Object.assign({}, base, { assay: { dye: 'FAM' } }), 'OBJECT_ADDITIONAL_PROPERTIES'],
+    [Object.assign({}, base, { avoid_repeats: 'yes' }), 'INVALID_TYPE'],
+    [Object.assign({}, base, { repeat_mask_mode: 'hard' }), 'ENUM_MISMATCH'],
+    [Object.assign({}, base, { label: 'my label' }), 'PATTERN'],
+    [Object.assign({}, base, { label: 'x'.repeat(41) }), 'PATTERN'],
+    [Object.assign({}, base, { params: { num_return: 5 } }), 'OBJECT_ADDITIONAL_PROPERTIES'],
+    [Object.assign({}, base, { params: { max_ns: 1 } }), 'OBJECT_ADDITIONAL_PROPERTIES'],
+    [Object.assign({}, base, { params: { opt_size: 14 } }), 'MINIMUM'],
+    [Object.assign({}, base, { params: { product_size_ranges: [[61, 120], [61, 120], [61, 120], [61, 120], [61, 120]] } }), 'ARRAY_LENGTH_LONG'],
+    [Object.assign({}, base, { params: { product_size_ranges: [[61, 1001]] } }), 'MAXIMUM'],
+    [Object.assign({}, base, { params: { product_size_ranges: [[19, 120]] } }), 'MINIMUM'],
+    [Object.assign({}, base, { variant: null }), 'INVALID_TYPE']
+  ];
+  bad.forEach(function (row) { invalid('POST', '/primers/genotyping/design', row[0], row[1]); });
+  invalid('POST', '/primers/genotyping/design', GENOTYPING_EXAMPLES[0], 'INVALID_CONTENT_TYPE', { headers: { 'content-type': 'text/plain' } });
 });
 
 test('legacy and malformed check bodies are rejected', function () {
@@ -451,6 +562,74 @@ test('PrimerCheckRequest matches check/normalize.js: params rules, modes, checks
     .should.throw({ code: 'INVALID_REQUEST' });
 });
 
+// Genotyping spec §7.7 (sync tests, design half): PrimerGenotypingParams is the closed subset of design.PARAM_SPECS with
+// equal bounds (product_size_ranges has its own, genotyping/request.js PRODUCT_RANGES); every request, variant, assay and
+// params property is a field genotyping/request.normalize knows; the enums equal the module's tables.
+test('PrimerGenotypingRequest matches genotyping/request.js: params subset and bounds, known fields, assay enums, id and label patterns', function () {
+  const d = definitions();
+  const props = d.PrimerGenotypingParams.properties;
+  Object.keys(props).should.eql(grequest.PARAM_KEYS.slice());
+  Object.keys(props).forEach(function (key) {
+    const spec = design.PARAM_SPECS[key];
+    should.exist(spec, 'design.PARAM_SPECS has ' + key);
+    const p = props[key];
+    if (spec.ranges) {
+      p.type.should.equal('array');
+      p.minItems.should.equal(1);
+      p.maxItems.should.equal(grequest.PRODUCT_RANGES.maxItems);
+      p.items.minItems.should.equal(2);
+      p.items.maxItems.should.equal(2);
+      p.items.items.type.should.equal('integer');
+      p.items.items.minimum.should.equal(grequest.PRODUCT_RANGES.min);
+      p.items.items.maximum.should.equal(grequest.PRODUCT_RANGES.max);
+    } else {
+      p.type.should.equal(spec.int ? 'integer' : 'number', key);
+      p.minimum.should.equal(spec.min, key);
+      p.maximum.should.equal(spec.max, key);
+    }
+  });
+  Object.keys(d.PrimerGenotypingRequest.properties).should.eql(grequest.TOP_LEVEL_FIELDS.slice());
+  Object.keys(d.PrimerVariantInput.properties).should.eql(grequest.VARIANT_FIELDS.slice());
+  Object.keys(d.PrimerGenotypingAssay.properties).should.eql(grequest.ASSAY_FIELDS.slice());
+  Object.keys(grequest.ENUMS).forEach(function (k) {
+    d.PrimerGenotypingAssay.properties[k].enum.should.eql(grequest.ENUMS[k].slice(), k);
+  });
+  d.PrimerGenotypingAssay.properties.num_sets.maximum.should.equal(config.DEFAULTS.genotyping.max_sets);
+  d.PrimerGenotypingAssay.properties.max_relaxation.maximum.should.equal(gpresets.MAX_LEVEL);
+  d.PrimerGenotypingRequest.properties.repeat_mask_mode.enum.should.eql(design.MASK_MODES.slice());
+  d.PrimerVariantInput.properties.id.pattern.should.equal(require(path.join(ROOT, 'api/helpers/primers/variation')).ID_PATTERN);
+  d.PrimerVariantInput.properties.ref.pattern.should.equal('^([ACGTacgt]{1,' + config.DEFAULTS.variation.max_allele_length + '}|-)$');
+  d.PrimerGenotypingRequest.properties.label.pattern.should.equal('^[A-Za-z0-9_.-]{1,40}$');
+  d.PrimerGenotypingAssayEffective.properties.tails.enum.should.eql(grequest.ENUMS.tails.slice());
+
+  // present but absent-valued keys: only the unknown-field rule applies, and it knows every documented property
+  const cfg = cfgForTests();
+  const unknownField = function (body) {
+    try {
+      grequest.normalize(body, cfg);
+      return null;
+    } catch (e) {
+      return e && e.code === 'INVALID_REQUEST' && /^unknown field/.test(e.message) ? e.details.field : null;
+    }
+  };
+  const base = function () { return { system_name: 'sorghum_bicolor', variant: { id: 'rs871475760' } }; };
+  Object.keys(d.PrimerGenotypingRequest.properties).forEach(function (k) {
+    const body = base();
+    if (!(k in body)) body[k] = null;
+    should(unknownField(body)).equal(null, 'request.normalize does not know ' + k);
+  });
+  [['variant', d.PrimerVariantInput], ['assay', d.PrimerGenotypingAssay], ['params', d.PrimerGenotypingParams]].forEach(function (row) {
+    Object.keys(row[1].properties).forEach(function (k) {
+      const body = base();
+      body[row[0]] = Object.assign({}, row[0] === 'variant' ? body.variant : {});
+      if (!(k in body[row[0]])) body[row[0]][k] = null;
+      should(unknownField(body)).equal(null, 'request.normalize does not know ' + row[0] + '.' + k);
+    });
+  });
+  unknownField(Object.assign(base(), { bogus: 1 })).should.equal('bogus');
+  unknownField(Object.assign(base(), { assay: { dye: 'FAM' } })).should.equal('assay.dye');
+});
+
 // ---- request fixtures from gramene-primers ----------------------------------------------------------------
 
 function listJson(dir) {
@@ -477,7 +656,8 @@ function fixtureCase(file, json) {
   }
   if (variants) throw new Error(file + ': variants-*.json fixtures must be {method, path, query} wrappers (GET requests have no body)');
   let url = null;
-  if (/^design/i.test(name)) url = '/primers/design';
+  if (/^genotyping-design/i.test(name)) url = '/primers/genotyping/design';
+  else if (/^design/i.test(name)) url = '/primers/design';
   else if (/^check/i.test(name)) url = '/primers/check';
   else if (json && Array.isArray(json.pairs)) url = '/primers/check';
   else if (json && typeof json.mode === 'string') url = '/primers/design';
@@ -520,6 +700,7 @@ test('request fixtures pass the handler shape rules too, and the check fixtures 
     const paramKeys = new Set();
     let checks = 0;
     let designs = 0;
+    let genotyping = 0;
     for (const file of listJson(FIXTURE_DIR)) {
       const json = JSON.parse(fs.readFileSync(file, 'utf8'));
       const c = fixtureCase(file, json);
@@ -537,10 +718,15 @@ test('request fixtures pass the handler shape rules too, and the check fixtures 
       } else if (c.url === '/primers/design') {
         designs++;
         (function () { design.normalize(JSON.parse(JSON.stringify(c.body)), cfg); }).should.not.throw(rel);
+      } else if (c.url === '/primers/genotyping/design') {
+        genotyping++;
+        // §2.7 rules 1-6 (pure; rules 7-15 need the catalog, Ensembl or the FASTA)
+        (function () { grequest.normalize(JSON.parse(JSON.stringify(c.body)), cfg); }).should.not.throw(rel);
       }
     }
     checks.should.be.above(0);
     designs.should.be.above(0);
     Array.from(paramKeys).sort().should.eql(Object.keys(checkNormalize.PARAM_RULES).sort());
-    t.diagnostic('handler layers: ' + checks + ' check and ' + designs + ' design fixture(s); check params sent: ' + Array.from(paramKeys).sort().join(','));
+    t.diagnostic('handler layers: ' + checks + ' check, ' + designs + ' design and ' + genotyping + ' genotyping design fixture(s); check params sent: ' +
+      Array.from(paramKeys).sort().join(','));
   });
