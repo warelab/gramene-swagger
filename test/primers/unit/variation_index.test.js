@@ -500,6 +500,13 @@ test('neighboursFor manual: ids and records come from Ensembl (§3.9); "none" wi
   none.summary.should.eql({ data: 'none', window: { start: 10709, end: 11509 }, variants: 0, non_ems: 0, ems: 0, dense_non_ems: 0 });
   none.warnings.should.eql([{ code: 'NO_VARIATION_DATA', message: 'sorghum_rio has no known-variant data; neighbouring variants were not screened', details: { system_name: 'sorghum_rio' } }]);
 
+  // Switched off: same code and data 'none', but the message must not claim that sorghum_bicolor lacks data.
+  const off = world({ overrides: { variation: { enabled: false } } });
+  const disabled = await variation.neighboursFor({ system_name: 'sorghum_bicolor', variant: d.variant, window: { start: 11102, end: 11903 }, genome: d.genome }, off.deps);
+  disabled.should.match({ data: 'none', entries: [], target: null });
+  disabled.warnings.should.eql([{ code: 'NO_VARIATION_DATA', message: 'known-variant lookups are disabled on this server; neighbouring variants were not screened', details: { system_name: 'sorghum_bicolor' } }]);
+  off.calls.should.have.length(0);
+
   const down = world({ fetch: function () { throw refused(); } });
   const m = await variation.resolveDesignVariant({ system_name: 'sorghum_bicolor', variant: { region: '1', position: 11109, ref: 'C', alt: 'A' } }, down.deps);
   const req = { system_name: 'sorghum_bicolor', variant: m.variant, window: { start: 10709, end: 11509 }, genome: m.genome };

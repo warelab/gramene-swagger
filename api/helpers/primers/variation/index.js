@@ -702,10 +702,15 @@ async function neighboursFor(request, deps) {
       warnings: [warn], genome: request.genome || null };
   };
 
-  const species = variationEnabled(cfg) ? speciesConfigured(cfg, systemName) : null;
+  const enabled = variationEnabled(cfg);
+  const species = enabled ? speciesConfigured(cfg, systemName) : null;
   if (species === null) {
-    return nothing('none', warning('NO_VARIATION_DATA', systemName + ' has no known-variant data; neighbouring variants were not screened',
-      { system_name: systemName }));
+    // Switched off and "genome without data" share the warning code (§2.15 has no separate one); only the message
+    // says which, so a disabled server does not claim the genome lacks data.
+    const message = enabled
+      ? systemName + ' has no known-variant data; neighbouring variants were not screened'
+      : 'known-variant lookups are disabled on this server; neighbouring variants were not screened';
+    return nothing('none', warning('NO_VARIATION_DATA', message, { system_name: systemName }));
   }
   const resolved = request.resolved || await resolveAssembly(systemName, deps);
   const fasta = resolved && resolved.fasta && resolved.fasta.dna;
