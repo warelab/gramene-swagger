@@ -3181,7 +3181,10 @@ definitions:
         type: object
         x-nullable: true
         description: "{target, pairs: [{id, reference_size, max_size, summary {genomes_total, single_perfect, single_mismatch, multiple, no_amplicon, db_unavailable, error, amplifies, truncated}, genomes: [{system_name, display_name, status, ortholog_annotated, truncated, primary, other_amplicons, others, nearest, reason?, error?}]}]}. The status counts add up to genomes_total and amplifies = single_perfect + single_mismatch + multiple; truncated counts genomes whose search hit a cap (not a status: such a genome's status is a lower bound). nearest (no_amplicon) is the best unlikely product and may be approximate."
-      warnings: { type: array, items: { $ref: "#/definitions/PrimerWarning" } }
+      warnings:
+        type: array
+        items: { $ref: "#/definitions/PrimerWarning" }
+        description: "genotyping jobs can add REFERENCE_CONTROL_FAILED {allele, sets}, GENOTYPE_FALLBACK_FAILED, GENOTYPE_FALLBACK_BUDGET, GENOTYPE_FAILED and WEAK_OFF_TARGETS {count, max_mismatches, examples [{system_name, set_id, pair_id, allele, region, start, end, size, orientation, left_mm, right_mm}] (at most 5)}: off-locus products the check lists as amplifying but with more than check.genotype_offlocus_max_mismatches mismatches in a primer, which do not change results.genotyping predictions; the warning names the genomes that have them"
       timings_ms: { type: object }
       genotyping: { $ref: "#/definitions/PrimerCheckGenotypingResults" }
   PrimerGenotypeVariantInfo:
@@ -3254,7 +3257,7 @@ definitions:
         items:
           type: string
           enum: [common_primer_3p_mismatch, common_primer_weak, ref_signal_off_locus, alt_signal_off_locus, shift_tract_uncertain, approx_alignment, no_orthologous_copy, third_allele]
-      off_locus_products: { type: integer }
+      off_locus_products: { type: integer, description: "off-locus products that change the prediction: amplifying, the allele-specific 3' base matched, the common site a match or weak, and at most check.genotype_offlocus_max_mismatches mismatches in each primer (a declared deliberate mismatch not counted); weaker ones are reported in results warning WEAK_OFF_TARGETS" }
   PrimerGenotypeSetSummary:
     type: object
     properties:

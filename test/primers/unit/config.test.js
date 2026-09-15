@@ -41,7 +41,7 @@ test('get() merges config/default.yaml primers over DEFAULTS and deep-freezes th
   cfg.variation.species.should.eql({ sorghum_bicolor: 'sorghum_bicolor' });
   cfg.genotyping.should.match({ template_flank: 400, max_primer3_runs: 54, max_thermo_calls: 272, as_min_tm: 52, as_min_gc: 15,
     common_tm_low: -1, check_max_unique_primers: 13 });
-  cfg.check.should.match({ genotype_cpu_s_per_genome: 0.2, genotype_max_megablast: 30, genotype_megablast_min_bitscore_frac: 0.9 });
+  cfg.check.should.match({ genotype_cpu_s_per_genome: 0.2, genotype_max_megablast: 30, genotype_megablast_min_bitscore_frac: 0.9, genotype_offlocus_max_mismatches: 2 });
   Object.isFrozen(cfg.variation.species).should.equal(true);
   Object.prototype.hasOwnProperty.call(cfg.check, 'in_process').should.equal(false); // no supervisor-only keys
   Object.isFrozen(cfg).should.equal(true);

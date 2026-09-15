@@ -369,6 +369,54 @@ test('writeResults: summaries count pan-genome genomes only and add up; the cont
   should(genotype.unavailableEntry(prepared, { system_name: 'c', display_name: 'C', is_reference: false }, 'no_such_reason').genome).match({ allele: 'unavailable', reason: 'call_failed', display_name: 'C' });
 });
 
+// ---- M8b: the off-locus mismatch threshold ---------------------------------------------------------------------------------------
+
+test('M8b: an off-locus product changes the prediction only with at most max_offlocus_mismatches in each primer; the others are returned as weak', function () {
+  const call = function (altProducts, opts, set) {
+    const weak = [];
+    const c = genotype.predict(set || FORWARD, { ref: side([amp({})]), alt: altProducts }, { allele: 'ref', copies: [COPY] }, PARAMS, Object.assign({ weak: weak }, opts || {}));
+    return [c.predicted, c.reasons, c.off_locus_products, weak.map(function (w) { return [w.which, w.product.left_mm, w.product.right_mm]; })];
+  };
+  const offAlt = function (o) { return side([amp(Object.assign({ region: '2' }, o))]); };
+  // a forward set: the allele-specific site is left_*, the common site right_*
+  const common3 = offAlt({ right_mm: 3, right_mm_pos: [18, 12, 6], right_3p_mm: 0 });
+  const common2 = offAlt({ right_mm: 2, right_mm_pos: [12, 6], right_3p_mm: 0 });
+  should(call(common3)).eql(['ref', [], 0, [['alt', 0, 3]]]);
+  should(call(common2)).eql(['both', ['alt_signal_off_locus'], 1, []]);
+  should(call(common3, { max_offlocus_mismatches: 3 })).eql(['both', ['alt_signal_off_locus'], 1, []]);
+  should(call(common2, { max_offlocus_mismatches: 1 })).eql(['ref', [], 0, [['alt', 0, 2]]]);
+  should(call(common3, { max_offlocus_mismatches: 'x' })[0]).equal('ref');
+  // the allele-specific primer's own declared deliberate mismatch is not counted: [9,5,2] with a declared -2 is 2 mismatches
+  const as3 = offAlt({ left_mm: 3, left_mm_pos: [9, 5, 2], left_3p_mm: 1 });
+  should(call(as3)).eql(['ref', [], 0, [['alt', 3, 0]]]);
+  should(call(as3, {}, Object.assign({}, FORWARD, { deliberate_mismatch: { as_ref: 2, as_alt: 2 } }))).eql(['both', ['alt_signal_off_locus'], 1, []]);
+  // products the rule never counted are not weak: a 3' mismatch on the allele-specific site, an unlikely product, a blocked common site
+  should(call(offAlt({ left_mm: 3, left_mm_pos: [12, 6, 1] }))).eql(['ref', [], 0, []]);
+  should(call(offAlt({ likelihood: 'unlikely', right_mm: 3, right_mm_pos: [18, 12, 6] }))).eql(['ref', [], 0, []]);
+  should(call(offAlt({ right_mm: 3, right_mm_pos: [9, 2, 1] }))).eql(['ref', [], 0, []]);
+});
+
+test('M8b: WEAK_OFF_TARGETS details count every weak product and keep 5 examples in genome, set, REF-before-ALT, region and start order', function () {
+  const details = genotype.weakOffTargetDetails({ genotype_offlocus_max_mismatches: 2 });
+  should(details).eql({ count: 0, max_mismatches: 2, examples: [] });
+  should(genotype.weakOffTargetDetails({}).max_mismatches).equal(2);
+  should(genotype.weakOffTargetDetails({ genotype_offlocus_max_mismatches: 1.5 }).max_mismatches).equal(2);
+  const order = { genomes: ['ref', 'a', 'b'], sets: ['S1', 'S2'] };
+  const item = function (set, which, region, start, left, right) {
+    return { set: order.sets.indexOf(set), set_id: set, pair_id: set + (which === 'ref' ? '_REF' : '_ALT'), which: which, left_mm: left, right_mm: right,
+      product: { region: region, start: start, end: start + 64, size: 65, orientation: 'RL' } };
+  };
+  // genome b finishes first, the reference last
+  genotype.addWeakOffTargets(details, 'b', [item('S1', 'ref', '1', 500, 3, 3)], order);
+  genotype.addWeakOffTargets(details, 'a', [item('S2', 'alt', '9', 10, 0, 3), item('S2', 'ref', '9', 20, 0, 3), item('S1', 'ref', '4', 30, 3, 3)], order);
+  genotype.addWeakOffTargets(details, 'ref', [item('S2', 'ref', '1', 40, 3, 0), item('S1', 'ref', '9', 50, 3, 3), item('S1', 'ref', '1', 60, 3, 3)], order);
+  should(details.count).equal(7);
+  should(details.examples.map(function (e) { return [e.system_name, e.set_id, e.allele, e.region, e.start]; })).eql([
+    ['ref', 'S1', 'ref', '1', 60], ['ref', 'S1', 'ref', '9', 50], ['ref', 'S2', 'ref', '1', 40], ['a', 'S1', 'ref', '4', 30], ['a', 'S2', 'ref', '9', 20]
+  ]);
+  should(details.examples[0]).eql({ system_name: 'ref', set_id: 'S1', pair_id: 'S1_REF', allele: 'ref', region: '1', start: 60, end: 124, size: 65, orientation: 'RL', left_mm: 3, right_mm: 3 });
+});
+
 test('fillSequences reads a segment and haplotypes that ran past the submit-time window', async function () {
   const prepared = P.prepared(stubs.BODY_2_11, CFG);
   const want = JSON.parse(JSON.stringify([prepared.sets[0].segment, prepared.variant.core, prepared.variant.haplotypes]));

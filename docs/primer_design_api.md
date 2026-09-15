@@ -2523,6 +2523,7 @@ for a one-off run through the config library's `NODE_CONFIG` variable, e.g.
 | `check.genotype_cpu_s_per_genome` | 0.2 | cost of the allele caller per genome task |
 | `check.genotype_flank_min`, `check.genotype_amplicon_pad` | 15, 50 | allele-caller windows, also prepared at submit |
 | `check.genotype_ortholog_min_identity`, `check.genotype_ortholog_size_tolerance`, `check.genotype_max_copies`, `check.genotype_max_anchors`, `check.genotype_max_megablast`, `check.genotype_megablast_timeout_ms`, `check.genotype_megablast_min_identity`, `check.genotype_megablast_min_query_cover`, `check.genotype_megablast_min_bitscore_frac` | 95, 0.2, 10, 50, 30, 20000, 95, 0.8, 0.9 | the worker's allele caller (spec §5.6), described with `results.genotyping` |
+| `check.genotype_offlocus_max_mismatches` | 2 | an off-locus product changes an allele prediction (to `both`) only when each primer has at most this many mismatches; weaker products are reported in the `WEAK_OFF_TARGETS` warning and still appear in specificity and pan-genome results |
 
 ### Redis
 

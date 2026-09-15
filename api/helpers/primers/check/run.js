@@ -282,6 +282,7 @@ class CheckRun {
     this.genoEntries = new Map();
     this.genoMegablast = 0;
     this.genoQuery = null;
+    this.genoWeak = null;
     this.done = 0;
     this.total = 1 + (this.transcript ? 1 : 0) + this.genomes.length;
     this.results = null;
@@ -813,6 +814,7 @@ class CheckRun {
         megablast: () => this.genotypeMegablast(asm, info.system_name)
       });
       entry = { genome: out.genome, sets: out.sets };
+      if (out.weak_off_targets.length) this.genotypeWeakOffTargets(info, out.weak_off_targets);
     } catch (e) {
       if (this.isAbort(e)) throw this.abortError();
       this.log.error('primers check ' + this.tag + ': allele caller failed for ' + info.system_name + ': ' + (e && e.stack ? e.stack : e));
@@ -830,6 +832,17 @@ class CheckRun {
       megablast: out ? out.megablast : null
     };
     return entry;
+  }
+
+  // WEAK_OFF_TARGETS (M8b): one warning for the job naming the genomes with off-locus products left out of the predictions by
+  // genotype_offlocus_max_mismatches; its details object is shared by every add and grows with each genome.
+  genotypeWeakOffTargets(info, items) {
+    const genotype = require('./genotype');
+    if (!this.genoWeak) this.genoWeak = genotype.weakOffTargetDetails(this.ccfg);
+    const order = { genomes: [this.request.system_name].concat(this.genomes), sets: this.geno.sets.map((s) => s.id) };
+    genotype.addWeakOffTargets(this.genoWeak, info.system_name, items, order);
+    this.warnings.add('WEAK_OFF_TARGETS', 'off-target products with more than ' + this.genoWeak.max_mismatches + ' mismatches in a primer do not change ' +
+      'the allele predictions; the specificity and pan-genome results still list them', info.system_name, this.genoWeak);
   }
 
   // §5.8 reference control: the reference's own call, its per-set verdicts and REFERENCE_CONTROL_FAILED.

@@ -342,3 +342,61 @@ describe('genotyping', () => {
     }
   });
 });
+
+// ---- M8b: the off-locus mismatch threshold (check.genotype_offlocus_max_mismatches) -------------------------------------------------
+// An off-locus product changes a prediction only when each of its primers has at most genotype_offlocus_max_mismatches (default 2)
+// mismatches; weaker ones, which the specificity and pan-genome blocks still list, go into results warning WEAK_OFF_TARGETS.
+// g11 and g12 carry the REF locus plus an ALT paralog whose three common sites have 3 (g11) or 2 (g12) mismatches, all at least
+// 11 nt from the 3' end; g07's ALT paralog is perfect.
+
+describe('genotyping: the off-locus mismatch threshold (M8b)', () => {
+  const G = require('../fixtures/check_core/genotype/world');
+  const GENOMES = ['g07_alt_paralog', 'g11_alt_paralog_3mm', 'g12_alt_paralog_2mm'];
+  let gw;
+  before(() => {
+    gw = G.genotypingWorld();
+  });
+  after(() => gw.cleanup());
+
+  // A CheckRun over the three genomes with ctx.config.check overrides → a JSON copy of the results.
+  const thresholdRun = async (check) => {
+    const body = gw.body(GENOMES);
+    const request = W.request(body);
+    request.genotyping = body.genotyping;
+    const { ctx } = W.worldCtx(gw.world, { gene: null, procs: 4, check });
+    return JSON.parse(JSON.stringify(await new runInternal.CheckRun(request, ctx, { retryDelayMs: 0 }).execute()));
+  };
+  const predictions = (results) => results.genotyping.sets.map((s) => [s.id, s.control.status].concat(s.genomes.map((x) => [x.system_name, x.predicted, x.agrees, x.reasons, x.off_locus_products])));
+  const everySet = (rows) => ['S1', 'S2', 'A1'].map((id) => [id, 'pass'].concat(rows));
+  const both = (sys) => [sys, 'both', false, ['alt_signal_off_locus'], 1];
+  const ref = (sys) => [sys, 'ref', true, [], 0];
+  const example = (sys, set, start, end, size, left, right) => ({ system_name: sys, set_id: set, pair_id: set + '_ALT', allele: 'alt', region: '2', start, end, size, orientation: 'LR', left_mm: left, right_mm: right });
+  const G11 = [example('g11_alt_paralog_3mm', 'S1', 2469, 2533, 65, 3, 0), example('g11_alt_paralog_3mm', 'S2', 2482, 2573, 92, 0, 3), example('g11_alt_paralog_3mm', 'A1', 2281, 2533, 253, 3, 0)];
+
+  it('default 2: the ALT paralog with 3 common-site mismatches no longer makes both and is reported; with 2 mismatches it still does', async () => {
+    const results = await thresholdRun();
+    should(predictions(results)).eql(everySet([both('g07_alt_paralog'), ref('g11_alt_paralog_3mm'), both('g12_alt_paralog_2mm')]));
+    should(results.genotyping.genomes.map((x) => [x.system_name, x.allele, x.paralog_copies])).eql([['ref', 'ref', 0], ['g07_alt_paralog', 'ref', 1], ['g11_alt_paralog_3mm', 'ref', 1], ['g12_alt_paralog_2mm', 'ref', 1]]);
+    should(results.warnings).eql([{
+      code: 'WEAK_OFF_TARGETS',
+      message: 'off-target products with more than 2 mismatches in a primer do not change the allele predictions; the specificity and pan-genome results still list them (g11_alt_paralog_3mm)',
+      details: { count: 3, max_mismatches: 2, examples: G11 }
+    }]);
+    // the pan-genome block still counts the weak paralog product as amplifying
+    const pan = results.pangenome.pairs.find((p) => p.id === 'S1_ALT').genomes.find((x) => x.system_name === 'g11_alt_paralog_3mm');
+    should(pan.status).equal('multiple');
+  });
+
+  it('the threshold follows check.genotype_offlocus_max_mismatches: 3 counts the 3-mismatch paralog, 1 drops the 2-mismatch one, 0 keeps a perfect one', async () => {
+    const three = await thresholdRun({ genotype_offlocus_max_mismatches: 3 });
+    should(predictions(three)).eql(everySet([both('g07_alt_paralog'), both('g11_alt_paralog_3mm'), both('g12_alt_paralog_2mm')]));
+    should(three.warnings).eql([]);
+    const one = await thresholdRun({ genotype_offlocus_max_mismatches: 1 });
+    should(predictions(one)).eql(everySet([both('g07_alt_paralog'), ref('g11_alt_paralog_3mm'), ref('g12_alt_paralog_2mm')]));
+    should(one.warnings.map((w) => [w.code, w.details.count, w.details.max_mismatches])).eql([['WEAK_OFF_TARGETS', 6, 1]]);
+    should(one.warnings[0].message).endWith('(g11_alt_paralog_3mm, g12_alt_paralog_2mm)');
+    should(one.warnings[0].details.examples).eql(G11.concat([example('g12_alt_paralog_2mm', 'S1', 2469, 2533, 65, 2, 0), example('g12_alt_paralog_2mm', 'S2', 2482, 2573, 92, 0, 2)]));
+    const zero = await thresholdRun({ genotype_offlocus_max_mismatches: 0 });
+    should(predictions(zero).map((row) => row[2])).eql([both('g07_alt_paralog'), both('g07_alt_paralog'), both('g07_alt_paralog')]);
+  });
+});

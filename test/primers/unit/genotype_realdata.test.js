@@ -8,8 +8,8 @@
 // the reference control and the predictions, plus the measured cost of the genotype stage (each genome's call replayed alone)
 // and of one megablast fallback per assembly (whose calls must match). Then pi536008, whose amplicon-window identity is 78.2 %:
 // its amplicon call, and what the megablast fallback alone gives.
-// Unlike §7.5, which was verified on megablast locus alignments only, S1 and A1 predict both on the 5 ALT genomes: their REF
-// pairs have 3 amplifying genome-wide off-targets (see the predictions block).
+// S1_REF and A1_REF have genome-wide off-targets with 3 mismatches in a primer: under check.genotype_offlocus_max_mismatches (M8b)
+// they do not change the predictions and are reported as WEAK_OFF_TARGETS (see the predictions block).
 
 const { describe, it, before, after } = require('node:test');
 const should = require('should');
@@ -136,22 +136,29 @@ describe('real data: rs871475760 allele calls in the research assemblies (§7.5)
       for (const e of EXAMPLE.genomes) {
         should(by[e.system_name]).eql(Object.assign({}, e, { paralog_copies: PARALOGS[e.system_name], copies: e.copies.map((k) => Object.assign({}, k, { anchors: k.anchors + 1 })) }), e.system_name);
       }
+      // every S1 and S2 call of §2.13, except that S2 predicts both on pi180348 (its 1:72.9 Mb REF paralog, below)
       const primerCalls = (x) => [x.system_name, x.ref_primer, x.alt_primer, x.common_primer];
+      const fullCalls = (x) => primerCalls(x).concat([x.predicted, x.strength, x.agrees, x.reasons, x.off_locus_products]);
       for (const s of EXAMPLE.sets) {
         const got = g.sets.find((x) => x.id === s.id);
-        should(primerCalls(got.reference)).eql(primerCalls(s.reference), s.id);
+        should(fullCalls(got.reference)).eql(fullCalls(s.reference), s.id);
+        should(got.control).eql(s.control, s.id);
         const mine = byName(got.genomes);
-        for (const e of s.genomes) should(primerCalls(mine[e.system_name])).eql(primerCalls(e), s.id + ' ' + e.system_name);
+        for (const e of s.genomes) {
+          const calls = s.id === 'S2' && e.system_name === 'sorghum_pi180348' ? primerCalls : fullCalls;
+          should(calls(mine[e.system_name])).eql(calls(e), s.id + ' ' + e.system_name);
+        }
       }
       // §7.5: S1's own anchor on bicolorv5 is 1:31523-31587
       should(c.results.pangenome.pairs.find((p) => p.id === 'S1_REF').genomes.find((x) => x.system_name === 'sorghum_bicolorv5').primary).match({ region: '1', start: 31523, end: 31587 });
       should(by.sorghum_pi180348.copies.map((k) => [k.start, k.end, k.strand])).eql([[15028, 15132, -1], [38342, 38446, 1]]);
       should(byName(g.sets[2].genomes).sorghum_pi180348).match({ ref_primer: { status: 'blocked', mm_pos: [2, 1] }, alt_primer: { status: 'match', mm_pos: [2] }, common_primer: { status: 'match' } });
 
-      // Predictions (§5.7). On the locus every set reads the genome's allele. Off the locus, S1_REF and A1_REF (both on S1's common
-      // primer) amplify 3 genome-wide off-targets each (likely: 3 mismatches per primer, none at a 3' base), which the reference
-      // already reports as off_targets; they add FAM on the 5 ALT genomes (both, ref_signal_off_locus) and warn in the control.
-      // S2 is specific; on pi180348 its REF pair amplifies the 1:72.9 Mb paralog, which carries C.
+      // Predictions (§5.7 with the M8b threshold). On the locus every set reads the genome's allele. S1_REF and A1_REF (both on S1's
+      // common primer) have 3 genome-wide off-targets each in the reference, which the specificity check still lists; each has 3
+      // mismatches in a primer, over genotype_offlocus_max_mismatches (2), so none adds FAM on an ALT genome and all 52 of them over
+      // the 12 genomes go into WEAK_OFF_TARGETS. S2 is specific; on pi180348 its REF pair amplifies the 1:72.9 Mb paralog (1 and 2
+      // mismatches), which carries C: both.
       const spec = byName(c.results.specificity.pairs.map((p) => Object.assign({ system_name: p.id }, p)));
       should(['S1_REF', 'S1_ALT', 'S2_REF', 'S2_ALT', 'A1_REF', 'A1_ALT'].map((id) => [spec[id].verdict, spec[id].off_target_count])).eql([
         ['off_targets', 3], ['specific', 0], ['specific', 0], ['specific', 0], ['off_targets', 3], ['on_target_missing', 0]
@@ -159,16 +166,25 @@ describe('real data: rs871475760 allele calls in the research assemblies (§7.5)
       for (const s of g.sets) {
         const rows = byName(s.genomes);
         for (const sys of Object.keys(TABLE)) {
-          const allele = TABLE[sys][0];
-          const offLocus = allele === 'alt' && (s.id !== 'S2' || sys === 'sorghum_pi180348');
-          const want = offLocus ? ['both', false] : [allele, true];
-          should([rows[sys].predicted, rows[sys].agrees]).eql(want, s.id + ' ' + sys);
-          if (offLocus) should(rows[sys].reasons).eql(['ref_signal_off_locus'], s.id + ' ' + sys);
+          const paralog = s.id === 'S2' && sys === 'sorghum_pi180348';
+          should([rows[sys].predicted, rows[sys].agrees, rows[sys].reasons, rows[sys].off_locus_products])
+            .eql(paralog ? ['both', false, ['ref_signal_off_locus'], 1] : [TABLE[sys][0], true, [], 0], s.id + ' ' + sys);
         }
-        should(s.reference.predicted).equal('ref', s.id);
-        should(s.control).eql(s.id === 'S2' ? { status: 'pass', allele: 'ref', reasons: [] } : { status: 'warn', allele: 'ref', reasons: ['off_locus_products', 'ref_signal_off_locus'] }, s.id);
+        should([s.reference.predicted, s.control]).eql(['ref', { status: 'pass', allele: 'ref', reasons: [] }], s.id);
       }
-      should(g.sets.map((s) => [s.id, s.summary.agree, s.summary.both])).eql([['S1', 6, 5], ['S2', 10, 1], ['A1', 6, 5]]);
+      should(g.sets.map((s) => [s.id, s.summary.agree, s.summary.both])).eql([['S1', 11, 0], ['S2', 10, 1], ['A1', 11, 0]]);
+      const weak = c.results.warnings.filter((w) => w.code === 'WEAK_OFF_TARGETS');
+      t.diagnostic('WEAK_OFF_TARGETS ' + JSON.stringify(weak));
+      should(weak).have.length(1);
+      should(weak[0].details).match({ count: 52, max_mismatches: 2 });
+      should(weak[0].message).endWith(' and 2 more)');
+      should(weak[0].details.examples.map((e) => [e.system_name, e.pair_id, e.region + ':' + e.start + '-' + e.end, e.size, e.left_mm, e.right_mm])).eql([
+        ['sorghum_bicolor', 'S1_REF', '1:372590-372654', 65, 3, 3],
+        ['sorghum_bicolor', 'S1_REF', '4:46360759-46360823', 65, 3, 3],
+        ['sorghum_bicolor', 'S1_REF', '9:14931544-14931612', 69, 3, 3],
+        ['sorghum_bicolor', 'A1_REF', '1:14486256-14486320', 65, 3, 3],
+        ['sorghum_bicolor', 'A1_REF', '1:21241308-21241372', 65, 3, 3]
+      ]);
 
       // Cost of the genotype stage: each genome's call replayed alone (one warm-up, then the mean of 3), and one megablast each.
       const cost = [];

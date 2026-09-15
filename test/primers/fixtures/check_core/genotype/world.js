@@ -127,8 +127,22 @@ const GENOMES = Object.freeze({
   m1_mb_alt: 'ALT locus whose allele-specific sites carry 6 mismatches each (no product; megablast finds the locus)',
   m2_mb_fail: 'ALT locus without products whose megablast fails',
   m3_nodb: 'no BLAST database',
-  m4_blast_error: 'every BLAST fails'
+  m4_blast_error: 'every BLAST fails',
+  g11_alt_paralog_3mm: 'REF locus + an ALT paralog whose common sites carry 3 mismatches away from the 3\' end (M8b: no longer both)',
+  g12_alt_paralog_2mm: 'REF locus + an ALT paralog whose common sites carry 2 mismatches away from the 3\' end (M8b: still both)'
 });
+
+// Substitutions at the given distances from each common primer's 3' end (never at -1 to -5, so the site stays unblocked).
+function commonMismatchSubs(distances) {
+  const out = {};
+  COMMONS.forEach(function (c) {
+    distances.forEach(function (d) {
+      const p = c.face === 'F' ? c.p3 - (d - 1) : c.p3 + (d - 1);
+      out[p] = other(p);
+    });
+  });
+  return out;
+}
 
 // 6 substitutions in each allele-specific site (S1/A1 11109-11132, S2 11081-11109), none in the core 11108-11110.
 const NO_AS_SITES = Object.freeze([11112, 11115, 11118, 11121, 11124, 11127, 11083, 11086, 11092, 11095, 11098, 11101]);
@@ -154,7 +168,9 @@ function genotypingWorld(opts) {
     m1_mb_alt: { chromosomes: [chr('1', locus(noSites), 701)] },
     m2_mb_fail: { chromosomes: [chr('1', locus(noSites), 711)] },
     m3_nodb: { chromosomes: [chr('1', locus(), 721)], dnaDb: false },
-    m4_blast_error: { chromosomes: [chr('1', locus(), 731)], failures: Infinity }
+    m4_blast_error: { chromosomes: [chr('1', locus(), 731)], failures: Infinity },
+    g11_alt_paralog_3mm: { chromosomes: [chr('1', locus(), 741), chr('2', paralog(Object.assign(commonMismatchSubs([11, 15, 19]), alt)), 743)] },
+    g12_alt_paralog_2mm: { chromosomes: [chr('1', locus(), 751), chr('2', paralog(Object.assign(commonMismatchSubs([11, 15]), alt)), 753)] }
   };
   const world = W.buildWorld({ genomes: spec });
   // No gene annotation in region mode; W.worldCtx still wants a mongo handle.
@@ -208,4 +224,4 @@ function withMegablast(world, opts) {
   return spawnLines;
 }
 
-module.exports = { LOCUS, VARIANT, SITES, COMMON_3P, COMMON_2, COMMONS, PAIRS, SETS, GENOMES, NO_AS_SITES, locus, paralog, blockedCommonSubs, genotypingWorld, withMegablast };
+module.exports = { LOCUS, VARIANT, SITES, COMMON_3P, COMMON_2, COMMONS, PAIRS, SETS, GENOMES, NO_AS_SITES, locus, paralog, blockedCommonSubs, commonMismatchSubs, genotypingWorld, withMegablast };

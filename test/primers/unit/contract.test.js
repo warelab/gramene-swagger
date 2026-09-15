@@ -872,6 +872,7 @@ test('PrimerCheckResults.genotyping references the §2.12 definitions; their enu
   const d = definitions();
   const genotype = require(path.join(ROOT, 'api/helpers/primers/check/genotype'));
   d.PrimerCheckResults.properties.genotyping.should.eql({ $ref: '#/definitions/PrimerCheckGenotypingResults' });
+  d.PrimerCheckResults.properties.warnings.description.should.match(/WEAK_OFF_TARGETS \{count, max_mismatches, examples/);
   GENOTYPING_RESULT_DEFINITIONS.forEach(function (name) {
     should.exist(d[name], name);
     should.exist(d[name].properties, name + ' has properties');

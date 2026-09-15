@@ -502,8 +502,11 @@ const CALLER_DEFAULTS = Object.freeze({
   genotype_max_anchors: 50,
   genotype_megablast_min_identity: 95,
   genotype_megablast_min_query_cover: 0.8,
-  genotype_megablast_min_bitscore_frac: 0.9
+  genotype_megablast_min_bitscore_frac: 0.9,
+  genotype_offlocus_max_mismatches: 2
 });
+// WEAK_OFF_TARGETS details list at most this many example products.
+const WEAK_OFF_TARGET_EXAMPLES = 5;
 // The megablast query is ref[zone.start - 200 - K, zone.end + 200 + K] (§5.6 step 8).
 const MEGABLAST_FLANK = 200;
 // An anchor's genome window is the product ± WINDOW_PADS x genotype_amplicon_pad, not ± 1 pad as §5.6 step 2 words it: the
@@ -538,6 +541,11 @@ const LEFT = 3;
 function cfgNumber(ccfg, key) {
   const v = ccfg ? ccfg[key] : undefined;
   return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : CALLER_DEFAULTS[key];
+}
+
+function cfgInteger(ccfg, key) {
+  const v = ccfg ? ccfg[key] : undefined;
+  return Number.isInteger(v) && v >= 0 ? v : CALLER_DEFAULTS[key];
 }
 
 // 100 x part / whole, rounded half away from zero to 2 decimals in integer arithmetic (§2.1); null without a whole.
@@ -1007,10 +1015,22 @@ function unknownPrediction() {
 
 const amplifies = function (s) { return s === 'match' || s === 'weak'; };
 
+// The mismatches of a product's allele-specific site, without the primer's own declared deliberate mismatch.
+function allelePrimerMismatches(product, side, declared) {
+  const mm = product[side + '_mm'];
+  const pos = product[side + '_mm_pos'];
+  return Array.isArray(pos) && Number.isInteger(declared) && pos.indexOf(declared) >= 0 ? mm - 1 : mm;
+}
+
 // §5.7 for one set on one genome. products: {ref: {amplicons, unlikely}, alt: {...}}; genome: {allele, copies (the orthologous
-// PrimerGenotypeCopy objects)}; params: the check's classify params.
+// PrimerGenotypeCopy objects)}; params: the check's classify params. opts: {max_offlocus_mismatches (default 2), weak (an array)}:
+// an off-locus product changes the prediction only when each of its primers has at most max_offlocus_mismatches mismatches
+// (M8b); one the rule would otherwise count is pushed to opts.weak as {which: 'ref' | 'alt', product} instead.
 // -> {ref_primer, alt_primer, common_primer, predicted, strength, agrees, reasons, off_locus_products}
-function predict(set, products, genome, params) {
+function predict(set, products, genome, params, opts) {
+  const o = opts || {};
+  const maxMismatches = Number.isInteger(o.max_offlocus_mismatches) && o.max_offlocus_mismatches >= 0
+    ? o.max_offlocus_mismatches : CALLER_DEFAULTS.genotype_offlocus_max_mismatches;
   if (genome.allele === 'unavailable') return unknownPrediction();
   const p = products || {};
   const asSide = set.orientation === 'forward' ? 'left' : 'right';
@@ -1062,7 +1082,8 @@ function predict(set, products, genome, params) {
     }
   }
 
-  // Off-locus products add only the dye that is missing; unknown never changes.
+  // Off-locus products add only the dye that is missing; unknown never changes. A product with more than maxMismatches
+  // mismatches in either primer (up to max_amplifying_mismatches, so the check still lists it) is only reported.
   let offLocus = 0;
   const signal = { ref: false, alt: false };
   [['ref', ref.off, declared.as_ref], ['alt', alt.off, declared.as_alt]].forEach(function (row) {
@@ -1070,6 +1091,10 @@ function predict(set, products, genome, params) {
       if (!classify.countsAsAmplicon(a.likelihood)) return;
       const residual = residualOf(a[asSide + '_mm_pos'], row[2]);
       if (residual === null || residual.indexOf(1) >= 0 || !amplifies(commonStatus(siteOf(a, commonSide), params))) return;
+      if (allelePrimerMismatches(a, asSide, row[2]) > maxMismatches || a[commonSide + '_mm'] > maxMismatches) {
+        if (Array.isArray(o.weak)) o.weak.push({ which: row[0], product: a });
+        return;
+      }
       offLocus++;
       signal[row[0]] = true;
     });
@@ -1182,10 +1207,52 @@ async function callGenome(input, deps) {
     }).length,
     reason: allele === 'missing' ? reason : null
   };
+  const maxMismatches = cfgInteger(ccfg, 'genotype_offlocus_max_mismatches');
+  const weakOffTargets = [];
   const sets = prepared.sets.map(function (set, si) {
-    return Object.assign({ system_name: input.system_name }, predict(set, products[si], { allele: allele, copies: copies }, input.params));
+    const weak = [];
+    const call = predict(set, products[si], { allele: allele, copies: copies }, input.params, { max_offlocus_mismatches: maxMismatches, weak: weak });
+    const asSide = set.orientation === 'forward' ? 'left' : 'right';
+    weak.forEach(function (w) {
+      const declared = (set.deliberate_mismatch || {})[w.which === 'ref' ? 'as_ref' : 'as_alt'];
+      const mm = { left: w.product.left_mm, right: w.product.right_mm };
+      mm[asSide] = allelePrimerMismatches(w.product, asSide, declared);
+      weakOffTargets.push({ set: si, set_id: set.id, pair_id: w.which === 'ref' ? set.ref_pair : set.alt_pair, which: w.which, product: w.product, left_mm: mm.left, right_mm: mm.right });
+    });
+    return Object.assign({ system_name: input.system_name }, call);
   });
-  return { genome: genome, sets: sets, megablast: megablast, anchors: anchors.length, failed_reads: failedReads };
+  return { genome: genome, sets: sets, megablast: megablast, anchors: anchors.length, failed_reads: failedReads, weak_off_targets: weakOffTargets };
+}
+
+// WEAK_OFF_TARGETS (M8b): the off-locus products left out of the predictions because a primer has more than
+// genotype_offlocus_max_mismatches mismatches, over a whole job. details: {count, max_mismatches, examples [{system_name, set_id,
+// pair_id, allele, region, start, end, size, orientation, left_mm, right_mm}]}, mismatches as the rule counts them.
+function weakOffTargetDetails(ccfg) {
+  return { count: 0, max_mismatches: cfgInteger(ccfg, 'genotype_offlocus_max_mismatches'), examples: [] };
+}
+
+// Adds one genome's callGenome weak_off_targets to details (mutated and returned). The examples kept are the first
+// WEAK_OFF_TARGET_EXAMPLES in (genome, set, REF before ALT, region, start) order, where order.genomes lists the system names (the
+// reference first) and order.sets the set ids, so they do not depend on the order in which genomes finish.
+function addWeakOffTargets(details, systemName, items, order) {
+  details.count += items.length;
+  const rank = function (e) {
+    return [order.genomes.indexOf(e.system_name), order.sets.indexOf(e.set_id), e.allele === 'ref' ? 0 : 1];
+  };
+  const examples = details.examples.concat(items.map(function (w) {
+    const p = w.product;
+    return { system_name: systemName, set_id: w.set_id, pair_id: w.pair_id, allele: w.which, region: p.region, start: p.start, end: p.end,
+      size: p.size, orientation: p.orientation, left_mm: w.left_mm, right_mm: w.right_mm };
+  }));
+  examples.sort(function (a, b) {
+    const ra = rank(a);
+    const rb = rank(b);
+    for (let k = 0; k < ra.length; k++) if (ra[k] !== rb[k]) return ra[k] - rb[k];
+    if (a.region !== b.region) return String(a.region) < String(b.region) ? -1 : 1;
+    return a.start - b.start;
+  });
+  details.examples = examples.slice(0, WEAK_OFF_TARGET_EXAMPLES);
+  return details;
 }
 
 // A genome the check could not search (db_unavailable, blast_error) or whose call threw (call_failed): allele unavailable and
@@ -1350,5 +1417,8 @@ module.exports = {
   predict,
   writeResults,
   unavailableEntry,
+  weakOffTargetDetails,
+  addWeakOffTargets,
+  WEAK_OFF_TARGET_EXAMPLES,
   _internal: { readCore, readAlignment, opsStats, percent, anchorsOf, isOrthologous, hspAlignment, residualOf, commonStatus, referenceControl }
 };

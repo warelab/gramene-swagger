@@ -153,6 +153,9 @@ const DEFAULTS = deepFreeze({
     genotype_megablast_min_identity: 95,
     genotype_megablast_min_query_cover: 0.8,
     genotype_megablast_min_bitscore_frac: 0.9,
+    // an off-locus product changes an allele prediction only with at most this many mismatches in each primer; weaker ones that
+    // the check still lists are reported as WEAK_OFF_TARGETS
+    genotype_offlocus_max_mismatches: 2,
     defaults: {
       max_product_size: 4000,
       ignore_mismatches: 6,

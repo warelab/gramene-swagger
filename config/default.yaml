@@ -159,6 +159,7 @@ primers:
     genotype_megablast_min_identity: 95
     genotype_megablast_min_query_cover: 0.8
     genotype_megablast_min_bitscore_frac: 0.9
+    genotype_offlocus_max_mismatches: 2    # an off-locus product changes an allele prediction only with <= this many mismatches per primer; weaker ones are reported as WEAK_OFF_TARGETS
     defaults: { max_product_size: 4000, ignore_mismatches: 6, min_total_mismatches: 2, min_3p_mismatches: 2,
                 three_prime_window: 5, include_unlikely: false, repeat_site_threshold: 5,
                 max_amplifying_mismatches: 3 }   # must stay below ignore_mismatches
