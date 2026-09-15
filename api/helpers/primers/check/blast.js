@@ -1,12 +1,15 @@
 'use strict';
 
 // BLAST argument arrays, query FASTA, streaming outfmt-6 parser and a local
-// niced line-streaming spawner (spec §B.3).
+// niced line-streaming spawner (spec §B.3); the allele caller's megablast fallback
+// (genotyping spec §5.6 step 8: buildMegablastArgs, megablastQueryFasta, parseMegablastLine).
 
 const { spawn } = require('child_process');
 
 const GENOME_OUTFMT = '6 qseqid sseqid qlen qstart qend sstart send sstrand mismatch';
 const CDNA_OUTFMT = GENOME_OUTFMT + ' qseq sseq';
+// One megablast HSP of a reference segment against a genome DB; sseq is printed on the query strand.
+const GENOTYPE_OUTFMT = '6 sseqid sstart send sstrand pident length bitscore qstart qend qseq sseq';
 const MIN_MAX_TARGET_SEQS = 5000;
 const DEFAULT_TIMEOUT_MS = 600000;
 const STDERR_TAIL_BYTES = 2048;
@@ -50,6 +53,69 @@ function buildArgs(opts) {
     '-max_target_seqs', String(mts), '-max_hsps', '100000',
     '-num_threads', String(o.threads), '-db', db, '-query', '-',
     '-outfmt', o.target === 'cdna' ? CDNA_OUTFMT : GENOME_OUTFMT];
+}
+
+// Genotyping spec §5.6 step 8: megablast of one reference segment (stdin, megablastQueryFasta) against a genome DB, at most 50
+// subjects and 10 HSPs each; `db` as for buildArgs, `threads` defaults to 1.
+function buildMegablastArgs(opts) {
+  const o = opts || {};
+  const threads = o.threads === undefined ? 1 : o.threads;
+  if (!Number.isInteger(threads) || threads < 1 || threads > 64) {
+    throw new TypeError('threads must be an integer in 1..64');
+  }
+  if (typeof o.db !== 'string' || o.db === '' || /\s/.test(o.db) || o.db[0] === '-') {
+    throw new TypeError('db must be a non-empty path without whitespace');
+  }
+  const db = o.db.replace(/\.(nal|nin)$/, '');
+  return ['-task', 'megablast', '-db', db, '-query', '-', '-dust', 'no', '-soft_masking', 'false', '-evalue', '1e-20',
+    '-max_target_seqs', '50', '-max_hsps', '10', '-num_threads', String(threads), '-outfmt', GENOTYPE_OUTFMT];
+}
+
+// '>genotype\n<SEQ>\n' for the megablast query; letters only (no FASTA injection).
+function megablastQueryFasta(seq) {
+  const s = typeof seq === 'string' ? seq.toUpperCase() : '';
+  if (!/^[A-Z]+$/.test(s)) throw new TypeError('the megablast query must be a non-empty sequence of letters');
+  return '>genotype\n' + s + '\n';
+}
+
+function toDecimal(field, name) {
+  if (!/^\d+(\.\d+)?([eE][+-]?\d+)?$/.test(field)) throw codedError('BLAST_PARSE', 'bad ' + name + ': ' + field);
+  return Number(field);
+}
+
+// One GENOTYPE_OUTFMT line → row, or null for blank/comment lines. Throws err.code 'BLAST_PARSE' on malformed lines.
+//   row = { sseqid, sstart, send, strand: 1|-1, pident, length, bitscore, qstart, qend, qseq, sseq }
+function parseMegablastLine(line) {
+  if (typeof line !== 'string') return null;
+  if (line.length && line.charCodeAt(line.length - 1) === 13) line = line.slice(0, -1);
+  if (line === '' || line[0] === '#') return null;
+  const f = line.split('\t');
+  if (f.length !== 11) throw codedError('BLAST_PARSE', 'expected 11 fields, got ' + f.length);
+  if (f[0] === '') throw codedError('BLAST_PARSE', 'empty sseqid');
+  const row = {
+    sseqid: f[0],
+    sstart: toInt(f[1], 'sstart', 1),
+    send: toInt(f[2], 'send', 1),
+    strand: 0,
+    pident: toDecimal(f[4], 'pident'),
+    length: toInt(f[5], 'length', 1),
+    bitscore: toDecimal(f[6], 'bitscore'),
+    qstart: toInt(f[7], 'qstart', 1),
+    qend: toInt(f[8], 'qend', 1),
+    qseq: f[9],
+    sseq: f[10]
+  };
+  if (f[3] === 'plus') row.strand = 1;
+  else if (f[3] === 'minus') row.strand = -1;
+  else throw codedError('BLAST_PARSE', 'bad sstrand: ' + f[3]);
+  if (row.qstart > row.qend) throw codedError('BLAST_PARSE', 'bad query range');
+  if (row.strand === 1 ? row.sstart > row.send : row.sstart < row.send) {
+    throw codedError('BLAST_PARSE', 'subject range does not match strand');
+  }
+  if (!/^[A-Za-z*-]+$/.test(row.qseq) || !/^[A-Za-z*-]+$/.test(row.sseq) || row.qseq.length !== row.sseq.length || row.qseq.length !== row.length) {
+    throw codedError('BLAST_PARSE', 'bad qseq/sseq');
+  }
+  return row;
 }
 
 // Short description for results.engine.reference / .pangenome.
@@ -394,12 +460,16 @@ async function dbInfo(opts) {
 module.exports = {
   GENOME_OUTFMT,
   CDNA_OUTFMT,
+  GENOTYPE_OUTFMT,
   MIN_MAX_TARGET_SEQS,
   DEFAULT_TIMEOUT_MS,
   STDERR_TAIL_BYTES,
   KILL_GRACE_MS,
   CHILD_ENV,
   buildArgs,
+  buildMegablastArgs,
+  megablastQueryFasta,
+  parseMegablastLine,
   engineDescription,
   targetFromArgs,
   uniquePrimers,

@@ -32,6 +32,15 @@
 // Mongo: when annotation or transcript→gene mapping is unavailable because a supplied mongo handle failed
 // and ctx.fatalOnMongoUnavailable is true (the worker), run() throws err.code 'MONGO_UNAVAILABLE' with
 // err.fatal = true; otherwise it adds warning ANNOTATION_UNAVAILABLE and completes.
+//
+// Genotyping (genotyping spec §5.6-§5.9), only for a request with a genotyping block in gene or region mode:
+// before the reference stage, check/genotype.js validateSets re-derives the prepared variant and sets over
+// this job's FASTA access and results.genotyping is added after pangenome; the reference stage calls the
+// allele caller for the reference (the control) before its flush; every pan-genome genome records an entry
+// (unavailable when its DB is missing or its BLAST failed; otherwise the caller, after markOrthologs); each
+// flush rebuilds results.genotyping. The megablast fallback runs through ctx.spawnLines in the private cwd:
+// genotype_megablast_timeout_ms, no retry, at most genotype_max_megablast per job. Requests without
+// genotyping produce exactly the results they always did.
 
 const fs = require('fs');
 const os = require('os');
@@ -54,6 +63,11 @@ const REALIGN_MAX_FETCH = 2000000;
 const PARAM_KEYS = Object.freeze(Object.keys(classify.DEFAULT_PARAMS));
 const NOOP_LOG = Object.freeze({ info() {}, warn() {}, error() {} });
 const MAX_SUBJECTS_IN_WARNING = 10;
+// Genotyping fallbacks (primers.check.genotype_max_megablast / genotype_megablast_timeout_ms) and the megablast rows kept
+// (-max_target_seqs 50 x -max_hsps 10 is at most 500).
+const GENOTYPE_MAX_MEGABLAST = 30;
+const GENOTYPE_MEGABLAST_TIMEOUT_MS = 20000;
+const GENOTYPE_MAX_HSP_ROWS = 1000;
 
 function codedError(code, message, extra) {
   const e = new Error(message);
@@ -147,17 +161,19 @@ function clearVersionCache() {
   versionCache.clear();
 }
 
-// Warnings deduplicated by (code, message); subjects (genome names) are appended to the message.
+// Warnings deduplicated by (code, message); subjects (genome names) are appended to the message. details (the first
+// add's) is kept only when given, so {code, message} warnings stay as they were.
 class WarningSet {
   constructor() {
     this.map = new Map();
   }
 
-  add(code, message, subject) {
+  add(code, message, subject, details) {
     const key = code + ' ' + message;
     let w = this.map.get(key);
     if (!w) {
       w = { code, message, subjects: [] };
+      if (details !== undefined) w.details = details;
       this.map.set(key, w);
     }
     if (subject != null && w.subjects.indexOf(subject) < 0) w.subjects.push(subject);
@@ -170,10 +186,16 @@ class WarningSet {
 
   toArray() {
     return Array.from(this.map.values()).map((w) => {
-      if (!w.subjects.length) return { code: w.code, message: w.message };
-      const shown = w.subjects.slice(0, MAX_SUBJECTS_IN_WARNING).join(', ');
-      const more = w.subjects.length > MAX_SUBJECTS_IN_WARNING ? ' and ' + (w.subjects.length - MAX_SUBJECTS_IN_WARNING) + ' more' : '';
-      return { code: w.code, message: w.message + ' (' + shown + more + ')' };
+      let out;
+      if (!w.subjects.length) {
+        out = { code: w.code, message: w.message };
+      } else {
+        const shown = w.subjects.slice(0, MAX_SUBJECTS_IN_WARNING).join(', ');
+        const more = w.subjects.length > MAX_SUBJECTS_IN_WARNING ? ' and ' + (w.subjects.length - MAX_SUBJECTS_IN_WARNING) + ' more' : '';
+        out = { code: w.code, message: w.message + ' (' + shown + more + ')' };
+      }
+      if (w.details !== undefined) out.details = w.details;
+      return out;
     });
   }
 }
@@ -252,6 +274,14 @@ class CheckRun {
       timeoutMs: o.mongoTimeoutMs
     });
     this.dbInfoCache = new Map();
+    // Genotyping spec §5.6-§5.9: allele calls for a request with a genotyping block (gene and region modes only).
+    this.genotyping = request.genotyping && (this.mode === 'gene' || this.mode === 'region') ? request.genotyping : null;
+    this.geno = null;
+    this.genoReference = null;
+    this.genoSpecificity = null;
+    this.genoEntries = new Map();
+    this.genoMegablast = 0;
+    this.genoQuery = null;
     this.done = 0;
     this.total = 1 + (this.transcript ? 1 : 0) + this.genomes.length;
     this.results = null;
@@ -580,6 +610,7 @@ class CheckRun {
     };
     r.timings_ms.reference = Date.now() - t0;
     this.stats.reference = res.stats;
+    if (this.geno) await this.genotypeReference(ref, res.perPair, sels);
     this.done++;
     this.flush('reference', []);
   }
@@ -621,6 +652,7 @@ class CheckRun {
     const db = asm && asm.blastdb ? (target === 'cdna' ? asm.blastdb.cdna : asm.blastdb.dna) : null;
     if (!db || (asm && asm.error)) {
       const reason = this.resolveFailure(sys, asm);
+      if (this.geno) this.genoEntries.set(sys, require('./genotype').unavailableEntry(this.geno, info, 'db_unavailable'));
       return this.pairs.map(() => pangenome.unavailableEntry(Object.assign({ reason }, info)));
     }
     this.addAssemblyWarnings(asm);
@@ -631,6 +663,7 @@ class CheckRun {
       if (this.isAbort(e)) throw this.abortError();
       const err = e && e.blastStage ? publicError(e) : { code: 'CHECK_FAILED', message: 'analysis failed' };
       if (!(e && e.blastStage)) this.log.error('primers check ' + this.tag + ': pan-genome ' + sys + ' failed: ' + (e && e.stack ? e.stack : e));
+      if (this.geno) this.genoEntries.set(sys, require('./genotype').unavailableEntry(this.geno, info, e && e.blastStage ? 'blast_error' : 'call_failed'));
       return this.pairs.map(() => pangenome.errorEntry(Object.assign({ error: err }, info)));
     }
     this.stats.pangenome = this.stats.pangenome || {};
@@ -638,11 +671,13 @@ class CheckRun {
     this.checkAborted();
     if (target === 'genome') {
       await this.annotateGenome(asm, res.perPair.map((x) => ({ head: [], lists: [x.amplicons.length ? x.amplicons : x.unlikely.slice(0, 1)] })));
-      return res.perPair.map((x, pi) => {
+      // Ortholog flags first: the allele caller tests copies for annotated orthologs (genotyping spec §5.9).
+      for (const x of res.perPair) {
         pangenome.markOrthologs(x.amplicons, orth.ids);
         pangenome.markOrthologs(x.unlikely, orth.ids);
-        return pangenome.genomeEntry(Object.assign({ products: x.amplicons, unlikely: x.unlikely, referenceSize: this.refSizes[pi], truncated: x.truncated }, info));
-      });
+      }
+      if (this.geno) this.genoEntries.set(sys, await this.genotypeGenome(asm, res.perPair, info));
+      return res.perPair.map((x, pi) => pangenome.genomeEntry(Object.assign({ products: x.amplicons, unlikely: x.unlikely, referenceSize: this.refSizes[pi], truncated: x.truncated }, info)));
     }
     const grouped = await this.groupCdna(asm, res.perPair);
     return res.perPair.map((x, pi) => {
@@ -702,6 +737,7 @@ class CheckRun {
           pb.summary = pangenome.summarize(pb.genomes);
         });
         this.done++;
+        if (this.geno) this.writeGenotyping();
         this.flush('pangenome', Array.from(running));
       }
     };
@@ -718,6 +754,169 @@ class CheckRun {
     if (this.external && this.external.aborted) throw this.abortError();
     if (failure) throw failureIsAbort ? this.abortError() : failure;
     for (const s of settled) if (s.status === 'rejected') throw s.reason;
+  }
+
+  // ---- genotyping (genotyping spec §5.6-§5.9) -------------------------------------------------------
+
+  // Before the reference stage: prepare() re-derived from the stored request over this job's FASTA access, the sequences
+  // past the submit-time window filled in, and results.genotyping added after pangenome.
+  async genotypeStart(ref) {
+    const genotype = require('./genotype');
+    const fasta = ref.fasta && ref.fasta.dna ? ref.fasta.dna : null;
+    const prepared = await genotype.validateSets(this.genotyping, this.pairs, ref, {
+      cfg: this.cfg,
+      sequence: {
+        regionLength: (fastaPath, region) => this.regionLength(fastaPath, region),
+        fetch: (fastaPath, region, start, end, strand) => this.fetchWindow(fastaPath, region, start, end, strand)
+      }
+    });
+    await genotype.fillSequences(prepared, (region, start, end) => this.fetchWindow(fasta, region, start, end, 1));
+    this.checkAborted();
+    this.geno = prepared;
+    const results = {};
+    for (const k of Object.keys(this.results)) {
+      results[k] = this.results[k];
+      if (k === 'pangenome') results.genotyping = genotype.emptyResults(prepared);
+    }
+    this.results = results;
+  }
+
+  // Per set, the REF and ALT pairs' products of one task.
+  genotypeProducts(perPair) {
+    const byId = new Map();
+    this.pairs.forEach((p, i) => byId.set(p.id, perPair[i]));
+    const side = (x) => (x ? { amplicons: x.amplicons, unlikely: x.unlikely } : null);
+    return this.geno.sets.map((s) => ({ ref: side(byId.get(s.ref_pair)), alt: side(byId.get(s.alt_pair)) }));
+  }
+
+  // The allele call and set predictions of one genome with a genome target. A caller exception makes the genome unavailable
+  // (call_failed, warning GENOTYPE_FAILED); an abort propagates. stats.genotype[system_name] records the stage's cost.
+  async genotypeGenome(asm, perPair, info) {
+    const genotype = require('./genotype');
+    const t0 = Date.now();
+    const cpu0 = process.cpuUsage();
+    const fasta = asm && asm.fasta && asm.fasta.dna ? asm.fasta.dna : null;
+    let out = null;
+    let entry;
+    try {
+      out = await genotype.callGenome({
+        prepared: this.geno,
+        system_name: info.system_name,
+        display_name: info.display_name,
+        is_reference: info.is_reference === true,
+        products: this.genotypeProducts(perPair),
+        cfg: this.ccfg,
+        params: this.params
+      }, {
+        fetch: (region, start, end) => (fasta ? this.fetchWindow(fasta, region, start, end, 1) : Promise.reject(codedError('NO_SEQUENCE', 'no genome FASTA'))),
+        regionLength: (region) => (fasta ? this.regionLength(fasta, region) : Promise.resolve(undefined)),
+        megablast: () => this.genotypeMegablast(asm, info.system_name)
+      });
+      entry = { genome: out.genome, sets: out.sets };
+    } catch (e) {
+      if (this.isAbort(e)) throw this.abortError();
+      this.log.error('primers check ' + this.tag + ': allele caller failed for ' + info.system_name + ': ' + (e && e.stack ? e.stack : e));
+      this.warnings.add('GENOTYPE_FAILED', 'the allele caller failed; these genomes are unavailable', info.system_name);
+      entry = genotype.unavailableEntry(this.geno, info, 'call_failed');
+    }
+    this.checkAborted();
+    const cpu = process.cpuUsage(cpu0);
+    this.stats.genotype = this.stats.genotype || {};
+    this.stats.genotype[info.system_name] = {
+      ms: Date.now() - t0,
+      cpu_ms: Math.round((cpu.user + cpu.system) / 1000),
+      anchors: out ? out.anchors : null,
+      failed_reads: out ? out.failed_reads : null,
+      megablast: out ? out.megablast : null
+    };
+    return entry;
+  }
+
+  // §5.8 reference control: the reference's own call, its per-set verdicts and REFERENCE_CONTROL_FAILED.
+  async genotypeReference(ref, perPair, sels) {
+    const index = new Map(this.pairs.map((p, i) => [p.id, i]));
+    this.genoSpecificity = this.geno.sets.map((s) => {
+      const a = sels[index.get(s.ref_pair)];
+      const b = sels[index.get(s.alt_pair)];
+      const off = new Set(a.off.concat(b.off).map((x) => x.region + ':' + x.start + ':' + x.end + ':' + x.orientation));
+      return { ref_verdict: a.verdict, alt_verdict: b.verdict, off_target_count: off.size };
+    });
+    const sys = ref.system_name || this.request.system_name;
+    this.genoReference = await this.genotypeGenome(ref, perPair, { system_name: sys, display_name: ref.display_name || sys, is_reference: true });
+    this.writeGenotyping();
+    const failed = this.results.genotyping.sets.filter((s) => s.control && s.control.status === 'fail').map((s) => s.id);
+    if (failed.length) {
+      const allele = this.genoReference.genome.allele;
+      this.warnings.add('REFERENCE_CONTROL_FAILED', 'the reference control failed for ' + (failed.length > 1 ? 'sets ' : 'set ') + failed.join(', ') +
+        ': the reference ' + sys + ' must be called ref (it is ' + allele + ') and every set must predict ref on it', null, { allele, sets: failed });
+    }
+  }
+
+  // §5.6 step 8: one megablast of the reference segment around the variant against asm's genome DB, within the per-job
+  // budget, without retry. → {status: 'ok', rows, query} | {status: 'budget'} | {status: 'failed'}
+  async genotypeMegablast(asm, sys) {
+    const max = Number.isInteger(this.ccfg.genotype_max_megablast) && this.ccfg.genotype_max_megablast >= 0 ? this.ccfg.genotype_max_megablast : GENOTYPE_MAX_MEGABLAST;
+    if (this.genoMegablast >= max) {
+      this.warnings.add('GENOTYPE_FALLBACK_BUDGET', 'the per-job megablast fallback budget (' + max + ') was reached; these genomes are missing', sys);
+      return { status: 'budget' };
+    }
+    this.genoMegablast++;
+    const failed = (message) => {
+      this.log.warn('primers check ' + this.tag + ': megablast fallback for ' + sys + ' failed: ' + message);
+      this.warnings.add('GENOTYPE_FALLBACK_FAILED', 'the megablast fallback of the allele caller failed; these genomes are missing', sys);
+      return { status: 'failed' };
+    };
+    try {
+      const query = await this.genotypeQuery();
+      const args = blast.buildMegablastArgs({ db: asm && asm.blastdb ? asm.blastdb.dna : null, threads: 1 });
+      const rows = [];
+      let bad = 0;
+      const res = await this.spawnLines(this.blastn, args, {
+        stdin: blast.megablastQueryFasta(query.sequence),
+        timeoutMs: posInt(this.ccfg.genotype_megablast_timeout_ms, GENOTYPE_MEGABLAST_TIMEOUT_MS),
+        signal: this.signal,
+        cwd: await this.privateCwd(),
+        onLine: (line) => {
+          let row = null;
+          try {
+            row = blast.parseMegablastLine(line);
+          } catch (e) {
+            bad++;
+          }
+          if (row && rows.length < GENOTYPE_MAX_HSP_ROWS) rows.push(row);
+        }
+      });
+      if (res.aborted || this.signal.aborted) throw this.abortError();
+      if (res.timedOut) return failed('megablast timed out');
+      if (res.code !== 0) return failed(publicError(Object.assign(new Error('blastn exited with code ' + res.code), { stderrTail: res.stderrTail })).message);
+      if (bad > 0) return failed(bad + ' unparseable megablast line(s)');
+      return { status: 'ok', rows, query };
+    } catch (e) {
+      if (this.isAbort(e)) throw this.abortError();
+      return failed(publicError(e).message);
+    }
+  }
+
+  // The megablast query {region, start, end, sequence}, read once per job from the reference FASTA.
+  genotypeQuery() {
+    if (!this.genoQuery) {
+      const q = require('./genotype').megablastQuery(this.geno);
+      const ref = this.assemblies[this.request.system_name];
+      this.genoQuery = Promise.resolve()
+        .then(() => this.fetchWindow(ref.fasta.dna, q.region, q.start, q.end, 1))
+        .then((seq) => Object.assign({ sequence: String(seq).toUpperCase() }, q));
+      this.genoQuery.catch(() => { this.genoQuery = null; });
+    }
+    return this.genoQuery;
+  }
+
+  // results.genotyping for the next flush: the reference, then the finished pan-genome genomes in request order.
+  writeGenotyping() {
+    require('./genotype').writeResults(this.results.genotyping, {
+      reference: this.genoReference,
+      specificity: this.genoSpecificity,
+      genomes: this.genomes.map((sys) => this.genoEntries.get(sys)).filter(Boolean)
+    });
   }
 
   async execute() {
@@ -758,6 +957,7 @@ class CheckRun {
         timings_ms: {}
       };
       this.addAssemblyWarnings(ref);
+      if (this.genotyping) await this.genotypeStart(ref);
       try {
         await this.referenceStage(ref);
         if (this.transcript) await this.transcriptomeStage(ref);

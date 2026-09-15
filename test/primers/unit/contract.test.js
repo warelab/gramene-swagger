@@ -836,3 +836,87 @@ test('check-genotyping-*.json request fixtures pass the genotyping rules of chec
     }
     t.diagnostic('genotyping check fixtures: ' + files.map(function (f) { return path.basename(f); }).join(', '));
   });
+
+// Genotyping spec §2.12, §2.13 and §7.7 (M8): PrimerCheckResults.genotyping and its definitions, in step with check/genotype.js,
+// and every field the allele caller writes documented. Responses are not validated by sway, which also ignores x-nullable, so the
+// walk below checks declared properties, types, enums and nulls itself.
+const GENOTYPING_RESULT_DEFINITIONS = ['PrimerCheckGenotypingResults', 'PrimerGenotypeVariantInfo', 'PrimerGenotypeCopy', 'PrimerGenotypeGenome',
+  'PrimerGenotypePrimerCall', 'PrimerGenotypeSetGenome', 'PrimerGenotypeSetSummary', 'PrimerGenotypePairSpecificity', 'PrimerGenotypeReferenceControl',
+  'PrimerGenotypeSetResult', 'PrimerGenotypeSummary'];
+
+// Pushes one message per undeclared property, wrong type, value outside an enum, or null without x-nullable.
+function undocumentedFields(value, schema, where, errors) {
+  let s = schema;
+  while (s && s.$ref) s = definitions()[s.$ref.replace('#/definitions/', '')];
+  if (value === null) {
+    if (s['x-nullable'] !== true) errors.push(where + ': null without x-nullable');
+    return errors;
+  }
+  if (s.enum && s.enum.indexOf(value) < 0) errors.push(where + ': ' + JSON.stringify(value) + ' is not in the enum');
+  const types = {
+    integer: Number.isInteger(value), number: typeof value === 'number', string: typeof value === 'string', boolean: typeof value === 'boolean',
+    array: Array.isArray(value), object: value !== null && typeof value === 'object' && !Array.isArray(value)
+  };
+  if (s.type && !types[s.type]) errors.push(where + ': not ' + s.type);
+  if (s.type === 'array' && Array.isArray(value) && s.items) value.forEach(function (x, i) { undocumentedFields(x, s.items, where + '[' + i + ']', errors); });
+  if (s.type === 'object' && types.object && s.properties) {
+    Object.keys(value).forEach(function (k) {
+      if (!s.properties[k]) errors.push(where + '.' + k + ': not declared');
+      else undocumentedFields(value[k], s.properties[k], where + '.' + k, errors);
+    });
+  }
+  return errors;
+}
+
+test('PrimerCheckResults.genotyping references the §2.12 definitions; their enums are check/genotype.js\'s', function () {
+  const d = definitions();
+  const genotype = require(path.join(ROOT, 'api/helpers/primers/check/genotype'));
+  d.PrimerCheckResults.properties.genotyping.should.eql({ $ref: '#/definitions/PrimerCheckGenotypingResults' });
+  GENOTYPING_RESULT_DEFINITIONS.forEach(function (name) {
+    should.exist(d[name], name);
+    should.exist(d[name].properties, name + ' has properties');
+  });
+  api.validate().warnings.filter(function (w) { return w.code === 'UNUSED_DEFINITION' && /^Primer/.test(String((w.path || [])[1])); }).should.eql([]);
+  d.PrimerGenotypeGenome.properties.allele.enum.should.eql(genotype.ALLELES);
+  d.PrimerGenotypeReferenceControl.properties.allele.enum.should.eql(genotype.ALLELES);
+  d.PrimerGenotypeGenome.properties.reason.enum.should.eql(genotype.GENOME_REASONS);
+  d.PrimerGenotypeCopy.properties.call.enum.should.eql(genotype.COPY_CALLS);
+  d.PrimerGenotypePrimerCall.properties.status.enum.slice().sort().should.eql(genotype.STATUSES.slice().sort());
+  d.PrimerGenotypeSetGenome.properties.predicted.enum.should.eql(genotype.PREDICTIONS);
+  d.PrimerGenotypeSetGenome.properties.reasons.items.enum.should.eql(genotype.SET_REASONS);
+  d.PrimerGenotypeReferenceControl.properties.status.enum.should.eql(genotype.CONTROL_STATUSES);
+});
+
+test('results.genotyping as documented: the §2.13 example and blocks written by check/genotype.js use only declared fields, types, enums and nulls', async function () {
+  const genotype = require(path.join(ROOT, 'api/helpers/primers/check/genotype'));
+  const blast = require(path.join(ROOT, 'api/helpers/primers/check/blast'));
+  const classify = require(path.join(ROOT, 'api/helpers/primers/check/classify'));
+  const fixtures = path.join(ROOT, 'test/primers/fixtures/check_core/genotype');
+  const stubs = require(path.join(fixtures, 'stubs'));
+  const P = require(path.join(fixtures, 'products'));
+  const schema = { $ref: '#/definitions/PrimerCheckGenotypingResults' };
+  undocumentedFields(require(path.join(fixtures, 'results_2_13.json')), schema, 'example', []).should.eql([]);
+
+  const cfg = stubs.makeCfg();
+  const prepared = P.prepared(stubs.BODY_2_11, cfg);
+  // emptyResults' null specificity, control and reference never reach a client: run.js fills them in before the first flush
+  const block = genotype.emptyResults(prepared);
+  const reference = P.genome('1', stubs.bases(9000, 15500), 9000);
+  const input = function (name, products) {
+    return { prepared: prepared, system_name: name, display_name: name, is_reference: name === 'sorghum_bicolor', products: products, cfg: cfg.check, params: classify.DEFAULT_PARAMS };
+  };
+  const rows = fs.readFileSync(path.join(fixtures, 'megablast_rs871475760.tsv'), 'utf8').split('\n')
+    .filter(function (l) { return /^sorghum_pi180348\t/.test(l); }).map(function (l) { return blast.parseMegablastLine(l.slice(l.indexOf('\t') + 1)); });
+  genotype.writeResults(block, {
+    reference: await genotype.callGenome(input('sorghum_bicolor', prepared.sets.map(function (set) { return P.productsForSet(reference, set, 1); })), P.fetchFrom([reference])),
+    genomes: [
+      await genotype.callGenome(input('sorghum_pi180348', []), { megablast: async function () { return { status: 'ok', rows: rows, query: genotype.megablastQuery(prepared) }; } }),
+      await genotype.callGenome(input('sorghum_is36143', []), { megablast: async function () { return { status: 'budget' }; } }),
+      genotype.unavailableEntry(prepared, { system_name: 'sorghum_rio', display_name: 'Rio' }, 'db_unavailable')
+    ],
+    specificity: prepared.sets.map(function () { return { ref_verdict: 'specific', alt_verdict: 'on_target_missing', off_target_count: 0 }; })
+  });
+  block.genomes.map(function (x) { return x.allele; }).should.eql(['ref', 'alt', 'missing', 'unavailable']);
+  undocumentedFields(block, schema, 'written', []).should.eql([]);
+  undocumentedFields({ genotyping: block }, { $ref: '#/definitions/PrimerCheckResults' }, 'results', []).should.eql([]);
+});

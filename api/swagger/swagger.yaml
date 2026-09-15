@@ -3183,6 +3183,141 @@ definitions:
         description: "{target, pairs: [{id, reference_size, max_size, summary {genomes_total, single_perfect, single_mismatch, multiple, no_amplicon, db_unavailable, error, amplifies, truncated}, genomes: [{system_name, display_name, status, ortholog_annotated, truncated, primary, other_amplicons, others, nearest, reason?, error?}]}]}. The status counts add up to genomes_total and amplifies = single_perfect + single_mismatch + multiple; truncated counts genomes whose search hit a cap (not a status: such a genome's status is a lower bound). nearest (no_amplicon) is the best unlikely product and may be approximate."
       warnings: { type: array, items: { $ref: "#/definitions/PrimerWarning" } }
       timings_ms: { type: object }
+      genotyping: { $ref: "#/definitions/PrimerCheckGenotypingResults" }
+  PrimerGenotypeVariantInfo:
+    type: object
+    properties:
+      key: { type: string }
+      region: { type: string }
+      position: { type: integer }
+      ref: { type: string }
+      alt: { type: string }
+      shift: { type: integer, description: "with shift > 0 the indel has the shift tract [position + 1, position + len(ref) - 1 + shift] of the left-aligned variant (section 3.5)" }
+      zone: { type: object, properties: { start: { type: integer }, end: { type: integer } } }
+      flank: { type: integer, description: "K = max(15, zone length + max(len(ref), len(alt))), the flank on each side of the core" }
+      core: { type: object, properties: { ref: { type: string }, alt: { type: string } }, description: "the reference span [position - 1, position + len(ref) - 1 + shift + 1], i.e. the left-aligned VCF span with its anchor base, extended right by shift, plus one base on each side (not the shift tract), read on each haplotype (the ALT core carries the inserted bases or lacks the deleted ones); a genome is called ref or alt only on an exact match (section 5.6)" }
+      haplotypes: { type: object, properties: { ref: { type: string }, alt: { type: string } }, description: "core plus K reference bases of flank on each side" }
+  PrimerGenotypeCopy:
+    type: object
+    properties:
+      region: { type: string }
+      start: { type: integer, description: "envelope of the merged anchor amplicons, or the megablast HSP" }
+      end: { type: integer }
+      strand: { type: integer, enum: [1, -1] }
+      variant_position: { type: integer, x-nullable: true, description: "genome coordinate aligned to vcf.position" }
+      identity: { type: number, description: "percent identity over the longest anchor alignment (the anchor amplicon +-50 bp with the most alignment columns): 100 x (columns - edits) / columns, 2 decimals" }
+      gap_compressed_identity: { type: number, description: "the same alignment with each gap run counted as one edit and one column; used for the ortholog test" }
+      aligned_length: { type: integer, description: "columns of that longest anchor alignment, gap columns included" }
+      observed: { type: string, x-nullable: true, description: "the genome's core sequence, always reported, including when the call is other" }
+      flank_edits: { type: integer, x-nullable: true, description: "edits outside the core; confidence only, never part of the call" }
+      call: { type: string, enum: [ref, alt, other, missing] }
+      anchors: { type: integer, description: "products merged into this copy; 0 for a megablast copy" }
+      ortholog: { type: boolean, x-nullable: true, description: "annotation-based in gene mode; null in region mode" }
+      source: { type: string, enum: [amplicon, megablast] }
+  PrimerGenotypeGenome:
+    type: object
+    properties:
+      system_name: { type: string }
+      display_name: { type: string }
+      is_reference: { type: boolean }
+      allele: { type: string, enum: [ref, alt, other, ambiguous, missing, unavailable] }
+      observed: { type: string, x-nullable: true, description: "core shared by all orthologous copies; null when they differ" }
+      source: { type: string, enum: [amplicon, megablast], x-nullable: true }
+      copies: { type: array, items: { $ref: "#/definitions/PrimerGenotypeCopy" }, description: "the orthologous copies the call used (at most check.genotype_max_copies); paralogs are only counted" }
+      orthologous_copies: { type: integer }
+      paralog_copies: { type: integer, description: "copies that fail the ortholog test yet align to the reference segment with at least 80 % gap-compressed identity; less similar products are unrelated off-targets and are not counted" }
+      reason:
+        type: string
+        x-nullable: true
+        enum: [variant_not_covered, no_orthologous_copy, fallback_failed, fallback_budget, db_unavailable, blast_error, call_failed]
+  PrimerGenotypePrimerCall:
+    type: object
+    description: "status is the best over the primer's on-locus products and copies (section 5.7); likelihood, mm_pos and residual_mm_pos all come from the one product that supplied that status, and are null with no_product"
+    properties:
+      status: { type: string, enum: [match, weak, terminal_mismatch, uncertain, blocked, no_product, unknown] }
+      likelihood: { type: string, enum: [likely, likely_weak, unlikely], x-nullable: true, description: "classify likelihood of that product; for common_primer, the product of either pair whose common site gave status, the better likelihood first when several tie" }
+      mm_pos: { type: array, items: { type: integer }, x-nullable: true, description: "this primer's site alignment in that product; null with no_product or an approximate alignment" }
+      residual_mm_pos: { type: array, items: { type: integer }, x-nullable: true, description: "mm_pos with the set's declared deliberate-mismatch positions removed; the prediction reads this" }
+  PrimerGenotypeSetGenome:
+    type: object
+    description: "ref_primer and alt_primer come from their own pair's on-locus product; common_primer comes from the common primer's own site at the called locus, the better of its two alignments in the pairs' on-locus products. A deliberate mismatch on an allele-specific primer never changes common_primer. Each call reports the likelihood and mm_pos of the product that supplied its status (section 5.7)."
+    properties:
+      system_name: { type: string }
+      ref_primer: { $ref: "#/definitions/PrimerGenotypePrimerCall" }
+      alt_primer: { $ref: "#/definitions/PrimerGenotypePrimerCall" }
+      common_primer: { $ref: "#/definitions/PrimerGenotypePrimerCall" }
+      predicted: { type: string, enum: [ref, alt, both, none, no_call, unknown] }
+      strength: { type: string, enum: [normal, weak], x-nullable: true, description: "weak when the amplifying side, or the common primer, has a residual mismatch at distance 2-3" }
+      agrees: { type: boolean, x-nullable: true }
+      reasons:
+        type: array
+        items:
+          type: string
+          enum: [common_primer_3p_mismatch, common_primer_weak, ref_signal_off_locus, alt_signal_off_locus, shift_tract_uncertain, approx_alignment, no_orthologous_copy, third_allele]
+      off_locus_products: { type: integer }
+  PrimerGenotypeSetSummary:
+    type: object
+    properties:
+      genomes_total: { type: integer }
+      predicted_ref: { type: integer }
+      predicted_alt: { type: integer }
+      both: { type: integer }
+      none: { type: integer }
+      no_call: { type: integer }
+      unknown: { type: integer }
+      weak: { type: integer }
+      agree: { type: integer }
+      disagree: { type: integer }
+      not_comparable: { type: integer }
+  PrimerGenotypePairSpecificity:
+    type: object
+    properties:
+      verdict: { type: string }
+      consistent_with_allele: { type: boolean, description: "true when a blocked (or absent) allele-specific primer on the reference goes with verdict on_target_missing, or any other status with specific or off_targets (section 5.5)" }
+  PrimerGenotypeReferenceControl:
+    type: object
+    properties:
+      status: { type: string, enum: [pass, warn, fail] }
+      allele: { type: string, enum: [ref, alt, other, ambiguous, missing, unavailable] }
+      reasons: { type: array, items: { type: string }, description: "allele_not_ref and prediction_not_ref (fail), weak and off_locus_products (warn), then the reference call's own reasons" }
+  PrimerGenotypeSetResult:
+    type: object
+    properties:
+      id: { type: string }
+      ref_pair: { type: string }
+      alt_pair: { type: string }
+      orientation: { type: string, enum: [forward, reverse], description: "derived at submit from the shared primer, not taken from the client" }
+      deliberate_mismatch_positions: { type: array, items: { type: integer }, description: "positions accepted at submit on each allele-specific primer (2 or 3), removed before prediction" }
+      specificity:
+        type: object
+        properties:
+          ref_pair: { $ref: "#/definitions/PrimerGenotypePairSpecificity" }
+          alt_pair: { $ref: "#/definitions/PrimerGenotypePairSpecificity" }
+          off_target_count: { type: integer, description: "distinct reference off-target products of the two pairs" }
+      control: { $ref: "#/definitions/PrimerGenotypeReferenceControl" }
+      reference: { $ref: "#/definitions/PrimerGenotypeSetGenome" }
+      summary: { $ref: "#/definitions/PrimerGenotypeSetSummary" }
+      genomes: { type: array, items: { $ref: "#/definitions/PrimerGenotypeSetGenome" } }
+  PrimerGenotypeSummary:
+    type: object
+    description: "pan-genome genomes only; the counts add up to genomes_total"
+    properties:
+      genomes_total: { type: integer }
+      ref: { type: integer }
+      alt: { type: integer }
+      other: { type: integer }
+      ambiguous: { type: integer }
+      missing: { type: integer }
+      unavailable: { type: integer }
+  PrimerCheckGenotypingResults:
+    type: object
+    description: "present only for requests that carried a genotyping block; absent (not null) otherwise"
+    properties:
+      algorithm_version: { type: string, description: "caller and prediction version, currently 'g1'" }
+      variant: { $ref: "#/definitions/PrimerGenotypeVariantInfo" }
+      summary: { $ref: "#/definitions/PrimerGenotypeSummary" }
+      genomes: { type: array, items: { $ref: "#/definitions/PrimerGenotypeGenome" }, description: "reference control first, then finished pan-genome genomes in request order" }
+      sets: { type: array, items: { $ref: "#/definitions/PrimerGenotypeSetResult" } }
 
 parameters:
   q:
