@@ -687,6 +687,7 @@ primer lengths, and it adds the pan-genome sentence only when a pan-genome searc
                      "likelihood": "likely_weak", "left_mm": 1, "left_mm_pos": [1], "mismatch_in_3p_window": true,
                      "terminal_mismatch": true, "genes": [ { "id": "353.004G093500" } ], "ortholog": true },
         "other_amplicons": 0, "others": [], "nearest": null } ] } ] },
+  "genotyping": { "…": "…" },   // only for a request with a genotyping block: see "Results: results.genotyping"
   "warnings": [ { "code": "…", "message": "…" } ],
   "timings_ms": { "reference": 11000, "sorghum_353": 1500, "total": 18000 }
 }
@@ -700,7 +701,8 @@ Result warnings: `NO_FASTA_FOR_REALIGN` (mismatch counts are lower bounds, `appr
 (mongo was unreachable: `genes: null`, `ortholog: null`; the worker instead fails the attempt with `MONGO_UNAVAILABLE`
 and retries it after a restart, so a finished job carries this warning only when run outside the worker),
 `TRANSCRIPT_GENE_UNMAPPED`, `PANGENOME_TRANSCRIPT_MODELS_ONLY`,
-and assembly warnings. Submit warnings: `EXPECTED_IGNORED`, `MAX_PRODUCT_SIZE_RAISED`, `GENOMES_IGNORED`, and the
+and assembly warnings; genotyping jobs can add the
+[genotyping results warnings](#results-warnings). Submit warnings: `EXPECTED_IGNORED`, `MAX_PRODUCT_SIZE_RAISED`, `GENOMES_IGNORED`, and the
 reference assembly's `ASSEMBLY_MISMATCH` / `AMBIGUOUS_ASSEMBLY` prefixed with its system name.
 
 ---
@@ -2251,7 +2253,8 @@ Every rejection has `details {set_id, reason, pair_ids}` plus the members listed
 | 14 distinct primers, all 119 | 6,221 | 6,245 → `422 JOB_TOO_LARGE` |
 | 2 sets (6 primers), 3 genomes | 95 | 95 |
 
-The UI mirrors this term for display.
+The UI mirrors this term for display. A real job's measured CPU, and the allele caller's own cost, are under
+[Measured cost](#measured-cost).
 
 #### Example
 
@@ -2289,16 +2292,20 @@ The `check.request` of the rs871475760 design above, unchanged:
 }
 ```
 
-**Response `202`.** This one is illustrative: no job was submitted for this document. The `job_id`, `queue_position` and
-`created_at` values are invented. `estimate` and `progress.total` are what `check/cost.js` gives this request: 6 primers
-over the reference and the 119 other assemblies.
+**Response `202`.** Recorded on 2026-09-15 from the dev API and its worker on 127.0.0.1:50112 (worktree HEAD 228a76b). The
+request was the one above with `genomes` added, listing the 11 research assemblies:
+`sorghum_bicolorv5`, `sorghum_austrcf317961`, `sorghum_pi565121`, `sorghum_pi655972`, `sorghum_pi180348`,
+`sorghum_pi276837`, `sorghum_pi656027`, `sorghum_pi510757`, `sorghum_rio`, `sorghum_pi329250`, `sorghum_s3691`.
+- `progress.total` is 12 genome tasks: the reference and the 11 assemblies.
+- The same pairs without `genotyping` estimate 270 CPU-s.
+- The job's results are [documented below](#example-rs871475760-sets-s1-and-s2-over-11-assemblies).
 
-<!-- example: response POST /primers/check 202 illustrative -->
+<!-- example: response POST /primers/check 202 capture=capture-check-genotyping-submit.json#/response -->
 ```json
 {
-  "job_id": "5d0c3b9e2a7f41c68e1f9a2b7c4d6e80", "status": "queued", "kind": "pangenome", "queue_position": 0,
-  "progress": { "done": 0, "total": 120, "stage": "queued", "running": [] }, "estimate": { "cpu_s": 2690 },
-  "created_at": "2026-09-15T12:00:00.000Z", "warnings": []
+  "job_id": "8e9160d598f602137d94efa9fc409264", "status": "queued", "kind": "pangenome", "queue_position": 0,
+  "progress": { "done": 0, "total": 12, "stage": "queued", "running": [] }, "estimate": { "cpu_s": 273 },
+  "created_at": "2026-09-15T22:54:34.441Z", "warnings": []
 }
 ```
 
@@ -2402,14 +2409,522 @@ records dropped; an id is never a reason); `REF_MISMATCHES {count}`; `VARIANTS_T
 
 In `sets[].warnings`, `TAILED_STRUCTURE` and `MISMATCH_STRUCTURE` details also carry the `severity`.
 
+**Check, results level** (`results.warnings` of a genotyping job): `REFERENCE_CONTROL_FAILED`, `WEAK_OFF_TARGETS`,
+`GENOTYPE_FALLBACK_FAILED`, `GENOTYPE_FALLBACK_BUDGET` and `GENOTYPE_FAILED`, described under
+[Results warnings](#results-warnings).
+
 ### Results: `results.genotyping`
 
-Present in the results of `GET /primers/check/{job_id}` only for jobs whose request carried a `genotyping` block. For the
-reference genome (a control) and each pan-genome assembly it gives the allele found at the variant; for each set, the
-predicted signal of its REF, ALT and common primers and the predicted genotype. The definitions are in spec §2.12
-(`docs/genotyping_design_spec.md`).
+Present in the `results` of `GET /primers/check/{job_id}` only for jobs whose request carried a `genotyping` block. Other
+jobs have no `genotyping` key at all (not `null`), so their results are exactly what they were before genotyping existed.
+For the reference genome, which serves as a control, and for each pan-genome assembly, it reports the allele found at the
+variant. For each set, it reports the predicted signal of the REF, ALT and common primers, and so the genotype an assay
+would show. The definitions are `PrimerCheckGenotypingResults` and its members in `api/swagger/swagger.yaml` (spec §2.12).
+Where the spec differs, this subsection describes the implementation.
 
-To be completed when the worker-side caller lands (M8).
+**`specificity` and `pangenome` are unchanged.** A genotyping job computes them exactly as any other check does, and they
+still list every off-target product, including the ones that do not change an allele prediction (see
+[off-locus products](#off-locus-products-and-weak_off_targets)). On their own they cannot answer allele questions. In the
+[example](#example-rs871475760-sets-s1-and-s2-over-11-assemblies), both S1 pairs amplify in all 11 assemblies
+(`pangenome.pairs[].summary.amplifies: 11`), because a primer with a single 3′-terminal mismatch still gives a
+`likely_weak` product. Which allele an assembly carries, and which primer would give signal there, is answered **only** by
+`results.genotyping`.
+
+| Member | Contents |
+| --- | --- |
+| `algorithm_version` | `"g1"`, the version of the allele caller and the prediction rules. Genotyping jobs hash with algorithm `"2+g1"`, so a new caller version changes the ids of genotyping jobs only |
+| `variant` | The left-aligned variant `{key, region, position, ref, alt, shift, zone}`, plus: `flank` (K, the flank on each side of the core: `max(check.genotype_flank_min, zone length + the longer allele's length)`); `core {ref, alt}` (the reference span `[position − 1, position + len(ref) + shift]` read on each haplotype; an assembly is `ref` or `alt` only when its core is exactly one of them); and `haplotypes {ref, alt}` (the core plus K bases on each side) |
+| `summary` | Allele counts over the **pan-genome genomes only** (the reference is not counted): `ref`, `alt`, `other`, `ambiguous`, `missing` and `unavailable`, which add up to `genomes_total`, the same total as `pangenome.pairs[].summary.genomes_total` |
+| `genomes[]` | One entry per genome: the reference first (`is_reference: true`), then the finished pan-genome genomes in the order of the job's normalized `request.genomes`. That order is sorted by `system_name`, as in `pangenome.pairs[].genomes` |
+| `sets[]` | One per request set, in request order: `id`, `ref_pair`, `alt_pair`, `orientation` (derived at submit), `deliberate_mismatch_positions` (the mismatches accepted at submit, `[]` for KASP), `specificity`, `control`, `reference` (the prediction on the reference), `summary` and `genomes[]` (one prediction per pan-genome genome, in the order of `genomes[]` without the reference) |
+
+#### Allele calls per genome
+
+Each `genomes[]` entry is `{system_name, display_name, is_reference, allele, observed, source, copies, orthologous_copies,
+paralog_copies, reason}`.
+
+| `allele` | Meaning | `observed` | `source` | `reason` |
+| --- | --- | --- | --- | --- |
+| `ref` | Every orthologous copy that covers the variant reads exactly `variant.core.ref` | the core | `amplicon` or `megablast` | `null` |
+| `alt` | Every such copy reads exactly `variant.core.alt` | the core | `amplicon` or `megablast` | `null` |
+| `other` | Every such copy reads a core that is neither: a third allele, such as another repeat length or a third base | the core, or `null` when the copies read different ones | `amplicon` or `megablast` | `null` |
+| `ambiguous` | The copies disagree, e.g. one `ref` copy and one `alt` copy | `null` | `amplicon` or `megablast` | `null` |
+| `missing` | No copy covers the variant | `null` | `null` | a missing reason (below) |
+| `unavailable` | The assembly could not be searched, or the caller failed. Every prediction is `unknown` | `null` | `null` | `db_unavailable` (no usable BLAST DB), `blast_error` (its BLAST failed) or `call_failed` (the caller threw; warning `GENOTYPE_FAILED`) |
+
+How a genome is called (spec §5.6, as implemented):
+
+1. **Anchors.** The caller uses every product of the set's two pairs with orientation `LR` or `RL`: first the amplifying
+   ones, then the `unlikely` ones, because a blocked allele-specific primer's product is still a good place to read the
+   allele. Products are de-duplicated by position, at most `check.genotype_max_anchors` (50) per set.
+   - `LL`/`RR` products are never anchors.
+   - Approximate products (`approx: true`) are never anchors either: their ends were extrapolated.
+2. **Alignment.** Each anchor's genome window is its product ± 2 × `check.genotype_amplicon_pad` (± 100 bp),
+   reverse-complemented for `RL`. The set's reference segment, `expected` ± `check.genotype_amplicon_pad` (50 bp), is
+   aligned to that window semi-globally:
+   - the whole segment is aligned, and the genome ends are free;
+   - every edit costs 1;
+   - an indel stays one gap run.
+3. **The call.** The two end bases of `variant.core` are mapped through the alignment. An end that falls on a gap moves
+   outward to the nearest aligned base.
+   - The genome bases between the two ends are the copy's `observed` core.
+   - The copy's `call` is `ref` or `alt` only on an exact match, and otherwise `other`.
+   - An end outside the aligned span gives `call: "missing"`: the copy does not cover the variant.
+   - Edits outside the core are counted in `flank_edits` and never change the call.
+4. **Copies.** Anchors on the same region and strand whose aligned variant coordinates are within the zone length of each
+   other form one copy. This merges the products of both pairs, and of every set, at that locus.
+   - `start`/`end` is the envelope of the products, and `anchors` is their number.
+   - `identity`, `gap_compressed_identity`, `aligned_length`, `observed`, `flank_edits` and `call` come from the copy's
+     alignment with the most columns. `variant_position` is the genome coordinate aligned to `variant.position`.
+   - A product of the wrong size (step 5) that lies at the locus of a right-sized copy is left out: it is another product
+     of one of the primers there.
+5. **Orthologs and paralogs.** A copy is orthologous in either of these cases:
+   - it is annotated as an ortholog (`ortholog: true`, gene mode);
+   - its gap-compressed identity (each gap run counts as one edit and one column) is at least
+     `check.genotype_ortholog_min_identity` (95), and every one of its products is within
+     ± `check.genotype_ortholog_size_tolerance` (20 %) of its set's reference product.
+
+   Gap compression keeps a true ortholog that carries one long indel. A 35 bp deletion gives 94.9 % raw identity but
+   99.85 % gap-compressed. The pi536008 copy on scaffold2100, whose alignment runs off the scaffold end, has 88.02 % raw
+   identity and 98.83 % gap-compressed.
+   - `copies` lists the orthologous copies (at most `check.genotype_max_copies`, 10), and `orthologous_copies` counts them.
+   - `paralog_copies` counts the other copies that still align at ≥ 80 % gap-compressed identity, such as pi180348's copy
+     at 1:72.9 Mb (90 %). Less similar products are unrelated off-targets and are not counted: a real check finds 11–16
+     per assembly at rs871475760, all at 66–77 %. Paralogs never vote.
+6. **The genome's allele.** Copies whose call is `missing` do not vote. When the orthologous copies that cover the variant
+   agree, their call is the allele (`source: "amplicon"`); when they disagree, the allele is `ambiguous`.
+7. **Megablast fallback.** When no orthologous copy covers the variant, the worker runs one megablast of the reference
+   `[zone.start − 200 − K, zone.end + 200 + K]` against the assembly's BLAST database.
+   - Limits: single thread, no retry, a `check.genotype_megablast_timeout_ms` (20 s) timeout, and at most
+     `check.genotype_max_megablast` (30) fallbacks per job.
+   - An HSP is kept when its bitscore is ≥ `check.genotype_megablast_min_bitscore_frac` (0.9) × the best, its identity is
+     ≥ `check.genotype_megablast_min_identity` (95 %), its query cover is ≥ `check.genotype_megablast_min_query_cover`
+     (0.8), and it covers the core.
+   - Kept HSPs are read with the same exact-core rule and merged into copies (`source: "megablast"`, `anchors: 0`).
+     Megablast copies count as orthologous.
+   - The query-cover filter misses a locus at a scaffold end. pi536008's scaffold2100 ends 176 bp past the variant, so its
+     HSP covers 272 of the 431 query bases; the fallback alone would call that genome `missing`. Its amplicons call it
+     `alt`.
+8. **Missing reasons.** The megablast failure and budget reasons take precedence over the other two.
+
+   | `reason` | When |
+   | --- | --- |
+   | `no_orthologous_copy` | No orthologous copy, and megablast kept no HSP |
+   | `variant_not_covered` | An orthologous copy exists, or megablast kept an HSP, but none covers the core |
+   | `fallback_failed` | Megablast failed or timed out (results warning `GENOTYPE_FALLBACK_FAILED`) |
+   | `fallback_budget` | The job had already run `check.genotype_max_megablast` fallbacks (results warning `GENOTYPE_FALLBACK_BUDGET`) |
+
+#### Amplification prediction
+
+Each `sets[].reference` and `sets[].genomes[]` item is `{system_name, ref_primer, alt_primer, common_primer, predicted,
+strength, agrees, reasons, off_locus_products}`.
+
+**On-locus and off-locus products.** An `LR`/`RL` product of either pair is on-locus when it overlaps one of the genome's
+orthologous `copies`; every other `LR`/`RL` product is off-locus. `LL`/`RR` products are not read.
+
+**Primer calls** are `{status, likelihood, mm_pos, residual_mm_pos}`.
+- `mm_pos` lists the primer's mismatch positions in the product, as distances from the 3′ end (1 is the 3′ base).
+- `residual_mm_pos` is `mm_pos` without the primer's own declared deliberate mismatch, and the prediction reads it.
+
+| `status` | Allele-specific primer (`ref_primer`, `alt_primer`): its own pair's on-locus products | Common primer (`common_primer`): its own site in the on-locus products of either pair |
+| --- | --- | --- |
+| `no_product` | The pair has no on-locus product; `likelihood`, `mm_pos` and `residual_mm_pos` are `null` | Neither pair has one |
+| `blocked` | The product is `unlikely` | The site alone is ignored, over `max_amplifying_mismatches`, or 3′-blocked |
+| `unknown` | `mm_pos` is `null` (an approximate alignment) | Same rule |
+| `uncertain` | A residual mismatch at position 1, while the primer's 3′ base lies in the indel's shift tract | Not used |
+| `terminal_mismatch` | A residual mismatch at position 1 | A mismatch at position 1 |
+| `weak` | A residual mismatch at 2 or 3, and none at 1 | Same rule |
+| `match` | Anything else: mismatches further from the 3′ end do not count | Same rule |
+
+A primer's status is the best over its products, in the order `match`, `weak`, `terminal_mismatch`, `uncertain`,
+`unknown`, `blocked`, `no_product`. Its `likelihood` and positions come from the product that gave that status; on ties
+the better likelihood wins.
+
+The common primer's status never comes from a pair's likelihood, and no deliberate mismatch is ever subtracted from it.
+An AS-PCR set's deliberate mismatch therefore never makes the common primer look mismatched. In the example, s3691's S2
+common primer has a mismatch at position 13 and is still `match`.
+
+**`predicted`**: the first row that applies.
+
+| # | Situation | `predicted` | `strength` | `reasons` |
+| --- | --- | --- | --- | --- |
+| 1 | The genome is `unavailable` | `unknown` | `null` | none; every primer call is `unknown` |
+| 2 | Neither pair has an on-locus product | `none` | `null` | `no_orthologous_copy` when the allele is `missing` |
+| 3 | The common primer is `terminal_mismatch` or `blocked`: it is in both pairs, so neither allele can give signal | `no_call` | `null` | `common_primer_3p_mismatch` |
+| 4 | A primer is `unknown` or `uncertain` | `unknown` | `null` | `approx_alignment`, `shift_tract_uncertain` |
+| 5 | The REF primer amplifies (`match` or `weak`) and the ALT primer does not | `ref` | `weak` when the amplifying primer or the common primer is `weak`, else `normal` | `common_primer_weak` when the common primer is `weak` |
+| 6 | The ALT primer amplifies and the REF primer does not | `alt` | as in row 5 | as in row 5 |
+| 7 | Both amplify | `both` | as in row 5 | as in row 5, plus `third_allele` when the allele is `other` |
+| 8 | Neither amplifies | `none` | `null` | |
+
+**`agrees`** compares the prediction with the genome's allele:
+- `true` for `ref` predicted on a `ref` genome, `alt` on `alt`, and `none` on an `other` or `missing` genome;
+- `null` when the allele is `ambiguous` or `unavailable`, the prediction is `unknown` or `no_call`, or a primer is
+  `uncertain`;
+- `false` otherwise.
+
+#### Off-locus products and `WEAK_OFF_TARGETS`
+
+An off-locus product can still give signal, for example a paralog elsewhere in the genome that one allele-specific primer
+and the common primer amplify. It **counts** when all of these hold:
+1. it amplifies (`likely` or `likely_weak`);
+2. its allele-specific primer has a known alignment with no residual mismatch at position 1;
+3. its common-primer site alone is `match` or `weak`;
+4. **each primer has at most `check.genotype_offlocus_max_mismatches` mismatches** (default 2). The allele-specific
+   primer's declared deliberate mismatch is not counted.
+
+Each counted product adds 1 to `off_locus_products`, with the reason `ref_signal_off_locus` (a REF-pair product) or
+`alt_signal_off_locus` (an ALT-pair product). It changes the prediction only by adding the signal that is missing:
+- a counted REF-pair product turns `alt` into `both`, and an ALT-pair product turns `ref` into `both`;
+- on a genome predicted `none` or `no_call`, the off-locus products alone decide (`ref`, `alt` or `both`), and `strength`
+  stays `null`;
+- a product of the pair that already amplifies (a same-allele paralog) leaves `predicted` unchanged;
+- `unknown` never changes.
+
+The reference control uses the same rule.
+
+**`WEAK_OFF_TARGETS`.** A product that meets conditions 1–3 but has more mismatches in a primer is left out of
+`off_locus_products`. It is reported instead in one job-level results warning, `WEAK_OFF_TARGETS {count, max_mismatches,
+examples}`:
+- `count` is the number of such products over the whole job, in every genome, set and pair.
+- `max_mismatches` is the threshold.
+- `examples` holds at most 5 of them, as `{system_name, set_id, pair_id, allele, region, start, end, size, orientation,
+  left_mm, right_mm}`. They are ordered by genome (the reference first, then `request.genomes`), then set, REF before ALT,
+  region and start. `left_mm` and `right_mm` count mismatches the way the rule does.
+- The message names the genomes that have such products: the first 10, then "and N more".
+
+These products **still appear** in `specificity.pairs[].off_targets` and in the pan-genome results. The threshold only
+decides which of them change an allele prediction.
+
+**Why 2.** The user chose the threshold on 2026-09-15 from the real rs871475760 data; see the M8 deviations at the end of
+`docs/genotyping_design_spec.md`.
+- **Products it leaves out.** S1_REF, and an AS-PCR set on the same common primer, each have three off-target products in
+  the reference. Each product has 2–3 mismatches in each primer. The same products recur in other assemblies: S1_REF's
+  9:14931544–14931612 product, for example, has a counterpart in 10 of the 11 (on chromosome 10 in pi329250). When they
+  were counted, they turned all five ALT assemblies into `both`.
+- **The product it keeps.** pi180348's paralog at 1:72907129–72907210 has 1 mismatch in S2's REF primer and 2 in the
+  common primer. It still counts, so S2 predicts `both` on pi180348.
+- **Size does not help.** Every amplifying off-target measured is 65–82 bp, as large as the on-target products (65 and
+  92 bp), so a size limit cannot separate the two cases.
+
+#### Reference control, pair verdicts and summaries
+
+- **`sets[].reference`** is the set's prediction on the reference genome, computed like any other genome.
+- **`sets[].control`** is `{status, allele, reasons}`:
+  - `pass`: the reference is called `ref`, and the set predicts `ref` on it;
+  - `warn`: the same, but the prediction is `weak` (reason `weak`), or it has counted off-locus products (reason
+    `off_locus_products`);
+  - `fail`: the reference is not `ref` (`allele_not_ref`), or the set does not predict `ref` on it (`prediction_not_ref`).
+    An ALT-pair off-locus product on the reference fails the control this way, through `both`.
+
+  `reasons` lists the control's own codes, followed by the reasons of the reference prediction. Any `fail` adds the
+  results warning `REFERENCE_CONTROL_FAILED {allele, sets}`, where `sets` are the failing set ids. Treat that set's
+  predictions on the other genomes as unreliable.
+- **`sets[].specificity`** is `{ref_pair, alt_pair, off_target_count}`. It restates the reference verdicts of
+  `results.specificity` for the set's two pairs.
+  - `consistent_with_allele` is `true` when the verdict is what allele specificity leads you to expect: `specific` or
+    `off_targets` for an allele-specific primer with signal on the reference, and `on_target_missing` for one that is
+    `blocked` or has no product.
+  - `off_target_count` is the number of distinct reference off-target products of the two pairs.
+  - In the example, S1_REF's verdict is `off_targets` with 3 products, which is consistent with the allele. The control
+    still passes, because none of those products counts under the off-locus rule.
+- **Summaries.**
+  - `genotyping.summary` counts alleles over the pan-genome genomes.
+  - Each `sets[].summary` counts that set's pan-genome predictions:
+    `predicted_ref + predicted_alt + both + none + no_call + unknown = genomes_total`, and
+    `agree + disagree + not_comparable = genomes_total` (`agrees` true, false or null). `weak` counts the predictions
+    with `strength: "weak"`.
+  - The reference is never counted.
+- **Specificity-only jobs** (`checks: ["specificity"]`) carry the reference entry alone, with its controls and
+  predictions, and zero summaries.
+- **Partial results.** `results.genotyping` first appears in the partial results written after the reference stage. These
+  hold the reference entry and every set's `reference`, `control` and `specificity`.
+  - Each later flush adds the pan-genome genomes finished so far, in `request.genomes` order, and recomputes the summaries.
+  - `genomes` therefore grows along with `pangenome.pairs[].genomes`. The example job showed 1, 2, 9 and 10 genome entries
+    while it ran, and 12 when it was done.
+
+#### Results warnings
+
+| Code | When | `details` |
+| --- | --- | --- |
+| `REFERENCE_CONTROL_FAILED` | A set's reference control is `fail` | `{allele, sets}` |
+| `WEAK_OFF_TARGETS` | Off-locus products were left out of the predictions by `check.genotype_offlocus_max_mismatches` | `{count, max_mismatches, examples}` (above) |
+| `GENOTYPE_FALLBACK_FAILED` | A megablast fallback failed or timed out; those genomes are `missing` (`fallback_failed`) | none; the message names the genomes |
+| `GENOTYPE_FALLBACK_BUDGET` | The job's megablast budget was used up; later genomes are `missing` (`fallback_budget`) | none; the message names the genomes |
+| `GENOTYPE_FAILED` | The allele caller threw for a genome; that genome is `unavailable` (`call_failed`), and the job goes on | none; the message names the genomes |
+
+#### Caller configuration
+
+The allele caller reads these `primers.check` keys; their defaults are in `config.js` and `config/default.yaml`. Config is
+not part of the job id, so a finished job keeps the results it was computed with until it expires.
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `check.genotype_cpu_s_per_genome` | 0.2 | CPU-s added to the submit-time estimate per genome task (the reference plus each pan-genome genome) |
+| `check.genotype_flank_min` | 15 | The smallest K, the flank of `variant.haplotypes` |
+| `check.genotype_amplicon_pad` | 50 | The reference segment aligned for a set is `expected` ± this many bases; an anchor's genome window is its product ± twice this |
+| `check.genotype_ortholog_min_identity` | 95 | The lowest gap-compressed identity (%) of an orthologous copy |
+| `check.genotype_ortholog_size_tolerance` | 0.2 | How far (as a fraction) an orthologous copy's products may differ in size from the set's reference product |
+| `check.genotype_max_copies` | 10 | The most copies listed per genome; `orthologous_copies` still counts them all |
+| `check.genotype_max_anchors` | 50 | The most products per set used as anchors in one genome |
+| `check.genotype_max_megablast` | 30 | Megablast fallbacks per job; past it, a genome is `missing` with `fallback_budget` |
+| `check.genotype_megablast_timeout_ms` | 20000 | Timeout of one megablast (no retry) |
+| `check.genotype_megablast_min_identity` | 95 | The lowest percent identity of a kept HSP |
+| `check.genotype_megablast_min_query_cover` | 0.8 | The smallest fraction of the query a kept HSP covers |
+| `check.genotype_megablast_min_bitscore_frac` | 0.9 | A kept HSP's bitscore is at least this fraction of the best one |
+| `check.genotype_offlocus_max_mismatches` | 2 | An off-locus product changes a prediction only when each primer has at most this many mismatches; the others go to `WEAK_OFF_TARGETS` |
+
+These values are fixed in code: the 80 % identity floor of `paralog_copies`, the 200 bp megablast flank, the ± 2 pads of
+an anchor window, and the 5 `WEAK_OFF_TARGETS` examples.
+
+#### Measured cost
+
+The estimate adds `check.genotype_cpu_s_per_genome` (0.2 CPU-s) per genome task
+([above](#post-primerscheck-the-genotyping-block)). Measured on squam on 2026-09-15:
+- **The allele caller** used 0.03–0.10 CPU-s per genome (mean 0.07) and one megablast fallback 0.09–0.13 CPU-s. This was
+  for sets S1, S2 and an AS-PCR set, over the reference and the 11 research assemblies, with each call replayed in process.
+  0.2 CPU-s therefore covers a call plus a fallback.
+- **The whole example job** was estimated at 273 CPU-s (270 without `genotyping`). The worker and its BLAST
+  processes used 176.8 CPU-s, read from `/proc`, over 36.5 s. The estimate therefore runs about **1.5×** the measured
+  CPU. It is conservative, as the [cost guard](#cost-guard) intends.
+
+#### Example: rs871475760, sets S1 and S2 over 11 assemblies
+
+**The job.** The `check.request` of the rs871475760 KASP design ([above](#post-primerscheck-the-genotyping-block)), with
+`genomes` set to the 11 research assemblies. It was submitted on 2026-09-15 to the dev API and its worker on
+127.0.0.1:50112 (worktree HEAD 228a76b). The 202 response is shown with the request.
+
+**What the excerpt leaves out** (each omission is marked `…`):
+- from `results`: `engine`, `params`, `reference`, `sensitivity_note`, `primers` and `transcriptome`;
+- from `request`: `params`, `pairs` and `genotyping`;
+- in the lists: 10 of the 12 `genotyping.genomes` entries and most per-set genome entries.
+
+<!-- example: request GET /primers/check/{job_id} capture=capture-check-genotyping-result.json#/request/path -->
+```http
+GET /sorghum_v11/primers/check/8e9160d598f602137d94efa9fc409264
+```
+
+<!-- example: response GET /primers/check/{job_id} 200 capture=capture-check-genotyping-result.json#/response -->
+```json
+{
+  "job_id": "8e9160d598f602137d94efa9fc409264", "status": "done", "kind": "pangenome", "partial": false,
+  "queue_position": null, "progress": { "done": 12, "total": 12, "stage": "done", "running": [] },
+  "created_at": "2026-09-15T22:54:34.441Z", "started_at": "2026-09-15T22:54:34.640Z",
+  "finished_at": "2026-09-15T22:55:11.207Z", "attempts": 1,
+  "request": {
+    "system_name": "sorghum_bicolor", "mode": "region", "checks": ["pangenome", "specificity"],
+    "genomes": [
+      "sorghum_austrcf317961", "sorghum_bicolorv5", "sorghum_pi180348", "sorghum_pi276837", "sorghum_pi329250",
+      "sorghum_pi510757", "sorghum_pi565121", "sorghum_pi655972", "sorghum_pi656027", "sorghum_rio", "sorghum_s3691"
+    ],
+    "…": "…"
+  },
+  "warnings": [], "estimate": { "cpu_s": 273 },
+  "results": {
+    "specificity": {
+      "target": "genome",
+      "pairs": [
+        { "id": "S1_REF", "verdict": "off_targets", "off_target_count": 3, "…": "…" },
+        { "id": "S1_ALT", "verdict": "specific", "off_target_count": 0, "…": "…" },
+        { "id": "S2_REF", "verdict": "specific", "off_target_count": 0, "…": "…" },
+        { "id": "S2_ALT", "verdict": "specific", "off_target_count": 0, "…": "…" }
+      ]
+    },
+    "pangenome": {
+      "target": "genome",
+      "pairs": [
+        {
+          "id": "S1_REF",
+          "summary": {
+            "genomes_total": 11, "single_perfect": 0, "single_mismatch": 0, "multiple": 11, "no_amplicon": 0,
+            "db_unavailable": 0, "error": 0, "amplifies": 11, "truncated": 0
+          },
+          "…": "…"
+        },
+        {
+          "id": "S1_ALT",
+          "summary": {
+            "genomes_total": 11, "single_perfect": 1, "single_mismatch": 6, "multiple": 4, "no_amplicon": 0,
+            "db_unavailable": 0, "error": 0, "amplifies": 11, "truncated": 0
+          },
+          "…": "…"
+        },
+        "…"
+      ]
+    },
+    "genotyping": {
+      "algorithm_version": "g1",
+      "variant": {
+        "key": "1:11109:C:A", "region": "1", "position": 11109, "ref": "C", "alt": "A", "shift": 0,
+        "zone": { "start": 11109, "end": 11109 }, "flank": 15, "core": { "ref": "TCT", "alt": "TAT" },
+        "haplotypes": { "ref": "ATAGTCATACTCTATTCTGAATTTCTCGCTAGT", "alt": "ATAGTCATACTCTATTATGAATTTCTCGCTAGT" }
+      },
+      "summary": {
+        "genomes_total": 11, "ref": 6, "alt": 5, "other": 0, "ambiguous": 0, "missing": 0, "unavailable": 0
+      },
+      "genomes": [
+        {
+          "system_name": "sorghum_bicolor", "display_name": "Sb bicolor BTx623 v3", "is_reference": true,
+          "allele": "ref", "observed": "TCT", "source": "amplicon",
+          "copies": [
+            {
+              "region": "1", "start": 11068, "end": 11172, "strand": 1, "variant_position": 11109, "identity": 100,
+              "gap_compressed_identity": 100, "aligned_length": 192, "observed": "TCT", "flank_edits": 0,
+              "call": "ref", "anchors": 2, "ortholog": null, "source": "amplicon"
+            }
+          ],
+          "orthologous_copies": 1, "paralog_copies": 0, "reason": null
+        },
+        {
+          "system_name": "sorghum_pi180348", "display_name": "Sb bicolor PI180348 Juar (IS 12876)",
+          "is_reference": false, "allele": "alt", "observed": "TAT", "source": "amplicon",
+          "copies": [
+            {
+              "region": "1", "start": 15028, "end": 15132, "strand": -1, "variant_position": 15091, "identity": 98.44,
+              "gap_compressed_identity": 98.44, "aligned_length": 192, "observed": "TAT", "flank_edits": 2,
+              "call": "alt", "anchors": 2, "ortholog": null, "source": "amplicon"
+            },
+            {
+              "region": "1", "start": 38342, "end": 38446, "strand": 1, "variant_position": 38383, "identity": 98.45,
+              "gap_compressed_identity": 98.45, "aligned_length": 193, "observed": "TAT", "flank_edits": 2,
+              "call": "alt", "anchors": 2, "ortholog": null, "source": "amplicon"
+            }
+          ],
+          "orthologous_copies": 2, "paralog_copies": 1, "reason": null
+        },
+        "…"
+      ],
+      "sets": [
+        {
+          "id": "S1", "ref_pair": "S1_REF", "alt_pair": "S1_ALT", "orientation": "reverse",
+          "deliberate_mismatch_positions": [],
+          "specificity": {
+            "ref_pair": { "verdict": "off_targets", "consistent_with_allele": true },
+            "alt_pair": { "verdict": "specific", "consistent_with_allele": true }, "off_target_count": 3
+          },
+          "control": { "status": "pass", "allele": "ref", "reasons": [] },
+          "reference": {
+            "system_name": "sorghum_bicolor",
+            "ref_primer": { "status": "match", "likelihood": "likely", "mm_pos": [], "residual_mm_pos": [] },
+            "alt_primer": {
+              "status": "terminal_mismatch", "likelihood": "likely_weak", "mm_pos": [1], "residual_mm_pos": [1]
+            },
+            "common_primer": { "status": "match", "likelihood": "likely", "mm_pos": [], "residual_mm_pos": [] },
+            "predicted": "ref", "strength": "normal", "agrees": true, "reasons": [], "off_locus_products": 0
+          },
+          "summary": {
+            "genomes_total": 11, "predicted_ref": 6, "predicted_alt": 5, "both": 0, "none": 0, "no_call": 0,
+            "unknown": 0, "weak": 0, "agree": 11, "disagree": 0, "not_comparable": 0
+          },
+          "genomes": [
+            {
+              "system_name": "sorghum_pi180348",
+              "ref_primer": {
+                "status": "terminal_mismatch", "likelihood": "likely_weak", "mm_pos": [1], "residual_mm_pos": [1]
+              },
+              "alt_primer": { "status": "match", "likelihood": "likely", "mm_pos": [], "residual_mm_pos": [] },
+              "common_primer": { "status": "match", "likelihood": "likely", "mm_pos": [], "residual_mm_pos": [] },
+              "predicted": "alt", "strength": "normal", "agrees": true, "reasons": [], "off_locus_products": 0
+            },
+            "…"
+          ]
+        },
+        {
+          "id": "S2", "ref_pair": "S2_REF", "alt_pair": "S2_ALT", "orientation": "forward",
+          "deliberate_mismatch_positions": [],
+          "specificity": {
+            "ref_pair": { "verdict": "specific", "consistent_with_allele": true },
+            "alt_pair": { "verdict": "specific", "consistent_with_allele": true }, "off_target_count": 0
+          },
+          "control": { "status": "pass", "allele": "ref", "reasons": [] },
+          "reference": {
+            "system_name": "sorghum_bicolor",
+            "ref_primer": { "status": "match", "likelihood": "likely", "mm_pos": [], "residual_mm_pos": [] },
+            "alt_primer": {
+              "status": "terminal_mismatch", "likelihood": "likely_weak", "mm_pos": [1], "residual_mm_pos": [1]
+            },
+            "common_primer": { "status": "match", "likelihood": "likely", "mm_pos": [], "residual_mm_pos": [] },
+            "predicted": "ref", "strength": "normal", "agrees": true, "reasons": [], "off_locus_products": 0
+          },
+          "summary": {
+            "genomes_total": 11, "predicted_ref": 6, "predicted_alt": 4, "both": 1, "none": 0, "no_call": 0,
+            "unknown": 0, "weak": 0, "agree": 10, "disagree": 1, "not_comparable": 0
+          },
+          "genomes": [
+            {
+              "system_name": "sorghum_pi180348",
+              "ref_primer": {
+                "status": "terminal_mismatch", "likelihood": "likely_weak", "mm_pos": [1], "residual_mm_pos": [1]
+              },
+              "alt_primer": { "status": "match", "likelihood": "likely", "mm_pos": [], "residual_mm_pos": [] },
+              "common_primer": { "status": "match", "likelihood": "likely", "mm_pos": [], "residual_mm_pos": [] },
+              "predicted": "both", "strength": "normal", "agrees": false, "reasons": ["ref_signal_off_locus"],
+              "off_locus_products": 1
+            },
+            {
+              "system_name": "sorghum_s3691",
+              "ref_primer": { "status": "match", "likelihood": "likely", "mm_pos": [], "residual_mm_pos": [] },
+              "alt_primer": {
+                "status": "terminal_mismatch", "likelihood": "likely_weak", "mm_pos": [1], "residual_mm_pos": [1]
+              },
+              "common_primer": { "status": "match", "likelihood": "likely", "mm_pos": [13], "residual_mm_pos": [13] },
+              "predicted": "ref", "strength": "normal", "agrees": true, "reasons": [], "off_locus_products": 0
+            },
+            "…"
+          ]
+        }
+      ]
+    },
+    "warnings": [
+      {
+        "code": "WEAK_OFF_TARGETS",
+        "message": "off-target products with more than 2 mismatches in a primer do not change the allele predictions; the specificity and pan-genome results still list them (sorghum_bicolor, sorghum_s3691, …, sorghum_pi510757 and 2 more)",
+        "details": {
+          "count": 28, "max_mismatches": 2,
+          "examples": [
+            {
+              "system_name": "sorghum_bicolor", "set_id": "S1", "pair_id": "S1_REF", "allele": "ref", "region": "1",
+              "start": 372590, "end": 372654, "size": 65, "orientation": "RL", "left_mm": 3, "right_mm": 3
+            },
+            {
+              "system_name": "sorghum_bicolor", "set_id": "S1", "pair_id": "S1_REF", "allele": "ref", "region": "4",
+              "start": 46360759, "end": 46360823, "size": 65, "orientation": "RL", "left_mm": 3, "right_mm": 3
+            },
+            "…"
+          ]
+        }
+      }
+    ],
+    "timings_ms": {
+      "reference": 10764, "sorghum_s3691": 11324, "sorghum_bicolorv5": 12905, "sorghum_rio": 12979,
+      "sorghum_austrcf317961": 13010, "sorghum_pi276837": 14132, "sorghum_pi565121": 14164, "sorghum_pi656027": 14181,
+      "sorghum_pi180348": 14195, "sorghum_pi510757": 12365, "sorghum_pi329250": 12366, "sorghum_pi655972": 12639,
+      "total": 36542
+    },
+    "…": "…"
+  },
+  "error": null
+}
+```
+
+- **Alleles.** 6 assemblies carry C (`ref`) and 5 carry A (`alt`), all called from their amplicons.
+  - pi180348 has two orthologous copies, 1:15028–15132 on the minus strand and 1:38342–38446 on the plus strand (an inverted
+    duplication), both `alt`. It also has one paralog, the 1:72.9 Mb copy (`paralog_copies: 1`).
+  - pi276837, pi656027 and rio also have two copies each.
+- **Pan-genome versus genotyping.** `pangenome` reports that both S1 pairs amplify in all 11 assemblies. `genotyping` says
+  that S1's REF primer gives signal in the 6 `ref` assemblies and its ALT primer in the 5 `alt` ones.
+- **S1 agrees on 11 of 11.** Its REF pair has three reference off-targets (`specificity`: `off_targets`, 3), each with
+  3 mismatches in both primers.
+  - They change no prediction, and the control passes.
+  - `WEAK_OFF_TARGETS` reports 28 such products over the 12 genomes, all of them from S1_REF.
+- **S2 agrees on 10 of 11.** On pi180348, S2's REF pair also amplifies the 1:72.9 Mb paralog, which carries C, with 1 and
+  2 mismatches. The prediction there is `both`, with `reasons: ["ref_signal_off_locus"]`, `off_locus_products: 1` and
+  `agrees: false`. For this panel, S1 is the better set.
+- **Spec §2.13 against this run.**
+  - In the spec, S1's `specificity` (`specific`, no off-targets) and pi180348's `paralog_copies` (0) were illustrative;
+    the real values are above.
+  - The copies, identities, observed cores, calls and primer calls of §2.13 reproduce exactly.
+  - Only the S2 prediction on pi180348 differs from §2.13.
 
 ---
 
@@ -2591,6 +3106,12 @@ PRIMERS_IT_BASE=http://127.0.0.1:50111/sorghum_v11 node --test --test-concurrenc
   `PRIMERS_IT_EXPECT_JOB_TOO_LARGE=1` enables the cost-guard test, only against an API started with a limit well below
   the ~8,900 CPU-s of its request (already over the default 6,000), e.g. `NODE_CONFIG='{"primers":{"check":{"max_job_cpu_s":1000}}}'`. Against a
   default API that request would be queued.
+- `check_genotyping.test.js` also needs `PRIMERS_IT_WORKER=1`. It submits one genotyping check job to a dev API that has
+  its own worker: the `check.request` of a live rs871475760 KASP design, over the 11 research assemblies (real BLAST,
+  about 40 s). It then compares `results.genotyping` with the real-data expectations.
+  - The job must be new, so delete the site's Redis keys before a re-run.
+  - With `PRIMERS_IT_CAPTURE_DIR` set, it also writes the two captures that the
+    [results example](#example-rs871475760-sets-s1-and-s2-over-11-assemblies) cites.
 - `contract.test.js` also runs every fixture through the handlers' own request rules (`check/normalize.js` up to the
   catalog lookup, `design.normalize`), and requires the check fixtures together to send every check param.
 - `docs_examples.test.js` checks every example of [Genotyping primers](#genotyping-primers-kasp--allele-specific-pcr): requests validate with sway and the

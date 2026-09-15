@@ -3,7 +3,7 @@
 > the `genotyping` branch of gramene-swagger, milestones M0–M12; section numbers quoted elsewhere (§2.9, §5.3, …) refer
 > to it. It is not updated as the code changes. **`docs/primer_design_api.md` is authoritative for behaviour**: where
 > the two differ, the API document describes what is implemented. The known differences are listed in the final
-> section, [Implementation deviations (M3–M7)](#implementation-deviations-m3m7).
+> section, [Implementation deviations](#implementation-deviations).
 
 # Genotyping primer design (KASP and allele-specific PCR): implementation spec
 
@@ -3802,11 +3802,11 @@ The fix agent's checks are re-run from copies in `scratch-fix2/fx/`. `score_sets
 
 ---
 
-## Implementation deviations (M3–M7)
+## Implementation deviations
 
-This section was added when the spec was copied into `docs/` (milestone M9a). It lists where the implementation on the
-`genotyping` branch departs from the spec above, milestone by milestone, as recorded when each milestone was built.
-`docs/primer_design_api.md` documents the implemented behaviour.
+This section was added when the spec was copied into `docs/` (milestone M9a), and M9b added the worker side (M8 and
+M8b). It lists where the implementation on the `genotyping` branch departs from the spec above, milestone by milestone, as
+recorded when each milestone was built. `docs/primer_design_api.md` documents the implemented behaviour.
 
 ### M3 — variant normalization (`variation/normalize.js`)
 
@@ -3861,17 +3861,99 @@ This section was added when the spec was copied into `docs/` (milestone M9a). It
 | Beyond the read | §2.14: `VARIANT_TOO_REPETITIVE {region, position, shift, max}`. | Sliding past the ±1,700 bp read gives `VARIANT_TOO_REPETITIVE` with `shift: null`. |
 | Where the prepared sets live | Not specified. | `check/genotype.js prepare()`'s output is stored in the job document at `resolved.genotyping`. |
 
-### Found while documenting (M9a)
+### M8 — check, worker side (`check/genotype.js` caller, `run.js`)
+
+This covers commits `abaf202` (M8) and `228a76b` (M8b). M8b added the off-locus threshold, a user decision taken after the
+real-data run. The table lists where the caller departs from §2.12–§2.13 and §5.5–§5.9. After it come the evidence for
+M8b, the §2.13 comparison, pi536008, and the measured cost.
 
 | Topic | The spec said | What was built |
 | --- | --- | --- |
-| Manual design with variation disabled | §3.8: `NO_VARIATION_DATA` for a design on a genome without variation data. | With `PRIMERS_VARIATION_ENABLED=0`, a manual design on `sorghum_bicolor` also gets `neighbours.data: "none"` and warning `NO_VARIATION_DATA`, whose message says the genome has no known-variant data. |
-| `PrimerVariant.requested_id` | §2.6: "lookup and design responses only". | Only design responses carry it on the variant; the lookup response has it at the top level. Swagger describes the implemented behaviour. |
-| `THERMO_UNAVAILABLE` | §2.14: `{binary, retry_after_s}`. | `retry_after_s` is 60 for a missing or non-executable binary and 5 when the process could not be started. |
-| Lookup errors in swagger | §2.5: `GET /primers/variants/{variant_id}` 422 lists `NO_VARIATION_DATA`, `AMBIGUOUS_VARIANT_MAPPING`, `VARIANT_NOT_ON_ASSEMBLY`. | The handler can also answer `422 NO_SEQUENCE` and `AMBIGUOUS_ASSEMBLY`, and `503 MONGO_UNAVAILABLE`, which the swagger descriptions of that operation do not list. |
+| Anchor windows | §5.6 step 2: fetch `[min − 50, max + 50]` around the anchors. | Each anchor's window is its product ± 2 × `genotype_amplicon_pad` (± 100 bp). The genome ends are free, so the extra bases add no edit. An indel inside a ± 50 bp pad, by contrast, would cut `R_s` short: the plus copy of pi180348 has a 1 bp insertion at 1:11050, inside the left pad of set S2. |
+| Approximate products | §5.6 step 1: every `LR`/`RL` product of `amplicons ∪ unlikely`. | Products with `approx: true` are not anchors. Their extrapolated ends can span a secondary site of one primer beside the locus (S1 1:11068–11173 in the reference, next to the real 1:11068–11132). |
+| Wrong-size anchors | §5.6 steps 5–6: merge anchors by aligned coordinate, then test every anchor's size. | An anchor outside the size tolerance that lies at the locus of a right-sized copy is dropped: it is another product of one of its primers there. Elsewhere it forms a copy of its own, which the size test keeps out of the orthologs. |
+| Traceback | §5.6 step 2: unit costs, traceback diagonal-first. | The traceback is diagonal-first, but it stays in a gap run while that is still optimal, so one indel counts as one run for `gap_compressed_identity`. One 35 bp deletion scores 99.85 % gap-compressed (94.9 % raw) instead of being split into many runs. |
+| `paralog_copies` | §2.12: a count, with no rule; §2.13 gives 0 for every genome. | It counts the copies that fail the ortholog test yet align at ≥ 80 % gap-compressed identity (the constant `PARALOG_MIN_IDENTITY`). Below that, an anchor is an unrelated off-target product: a real check yields 11–16 of those per assembly at rs871475760, all at 66–77 %. pi180348's 1:72.9 Mb paralog aligns at 90 %, so a real run gives pi180348 `paralog_copies: 1`. |
+| `copies` | §2.12: the genome's copies. | Only orthologous copies are listed, at most `genotype_max_copies`; paralogs are only counted. |
+| Voting | §5.6 step 7: when all orthologous copies agree, that is the allele. §5.6 step 8: megablast runs when there is no orthologous copy. | Copies whose call is `missing` (they do not cover the variant) do not vote. The megablast fallback also runs when orthologous copies exist but none covers the variant. |
+| Megablast copies | §5.6 step 8: HSP filters, then the exact-core rule. | A megablast copy counts as orthologous and has `anchors: 0`. At most 1,000 HSP rows are read, and an unparseable output line fails the fallback (`fallback_failed`). |
+| `missing` reasons | §2.12 lists `variant_not_covered` and `no_orthologous_copy` without rules. | `variant_not_covered` applies when an orthologous copy exists, or megablast kept an HSP, but none covers the core; otherwise the reason is `no_orthologous_copy`. `fallback_failed` and `fallback_budget` take precedence. |
+| Deliberate mismatches | §5.7: `residual_mm_pos` is `mm_pos` minus the positions in `deliberate_mismatch_positions`. | Each allele-specific primer subtracts only its own declared position, once. |
+| `LL`/`RR` products | §5.7: every product that is not on-locus is off-locus. | Only `LR`/`RL` products are read, whether as anchors or as on- or off-locus products; `LL`/`RR` products are ignored. |
+| `off_target_count` | §2.12: `sets[].specificity.off_target_count`, not defined. | The number of distinct reference off-target products of the two pairs, by region, start, end and orientation. |
+| A `missing` genome's prediction | §5.7 row 2: `none`, with no reason. | `none`, with reason `no_orthologous_copy`. |
+| Control reasons | §2.12: `control.reasons` is a string list. §5.8: the control also fails when the allele-specific pairs have off-target products that contradict the prediction. §2.15: `REFERENCE_CONTROL_FAILED` has no details. | `reasons` are `allele_not_ref` or `prediction_not_ref` (fail), or `weak` and `off_locus_products` (warn), followed by the reference call's own reasons. A contradicting off-target product fails the control through the prediction: it becomes `both`, hence `prediction_not_ref`. `REFERENCE_CONTROL_FAILED` carries `details {allele, sets}`, as §5.8 says. |
+| Genome order | §5.8: pan-genome genomes in request order. | The order of the stored, normalized `request.genomes`, which submit sorts by `system_name`; `pangenome.pairs[].genomes` uses the same order. Partial results hold the finished genomes in that order. |
+| Off-locus products (M8b) | §5.7: an off-locus product counts when it amplifies, its allele-specific residual lacks 1, and its common site alone is `match` or `weak`. | It also needs at most `check.genotype_offlocus_max_mismatches` (default 2) mismatches in each primer; an allele-specific primer's declared deliberate mismatch is not counted. The reference control uses the same rule. |
+| `WEAK_OFF_TARGETS` (M8b) | Not in §2.15, and §3.1 has no such config key. | A new key, `check.genotype_offlocus_max_mismatches`. The products the threshold leaves out go into one job-level results warning, `WEAK_OFF_TARGETS {count, max_mismatches, examples}`, with at most 5 examples; its message names their genomes. `specificity` and `pangenome` are unchanged and still list those products. |
 
-### M8 — check, worker side
+**The off-locus rule (M8b): evidence and decision.** The real rs871475760 run used `PRIMERS_REALDATA=1`. It covered KASP
+sets S1 and S2, plus an AS-PCR set A1 on S1's common primer, over the reference and the 11 research assemblies. Under §5.7
+as written, it predicted `both` on all 5 ALT assemblies for S1 and for A1, and those two sets' reference controls warned.
+The M8 agent then measured every amplifying off-locus product (`scratchpad/m8-offlocus/`):
+- **Size does not separate them.** Every amplifying off-target is 65–82 bp, the same size as the on-target products (S1
+  and A1 65 bp, S2 92 bp). None of the size caps tried changed any prediction: 150, 300, 500 and 1,000 bp, no cap,
+  per-assay caps, and 1.5 × the on-target.
+- **S1_REF and A1_REF.** Each has 3 off-target products in the reference (verdict `off_targets`): S1_REF at 1:372590,
+  4:46360759 and 9:14931544, and A1_REF at 4:5431668, 1:14486256 and 1:21241308.
+  - The same products recur in other assemblies. S1_REF's chromosome 9 product, for example, has a counterpart in 10 of
+    the 11 (on chromosome 10 in pi329250).
+  - Each product carries 2–3 mismatches in each primer, 5–6 in all.
+  - The common primer's site is `weak` in every one, with a mismatch at −2.
+  - S1_ALT and A1_ALT have no amplifying off-target.
+- **The pi180348 paralog** at 1:72907129–72907210 (82 bp) carries 1 mismatch in the allele-specific primer and 2 in the
+  common primer. S2_REF classifies it `likely`, which gives `both`. S2_ALT classifies it `likely_weak`: the terminal
+  mismatch means it does not count.
+- **The threshold.** Counting an off-locus product only when each primer has at most 2 mismatches drops every S1 and A1
+  off-target and keeps the pi180348 paralog. The user chose this rule on 2026-09-15, with weaker products reported in a
+  warning and specificity results unchanged.
+- **After M8b:**
+  - S1 and A1 agree on 11 of 11 assemblies, and S2 agrees on 10 of 11 (pi180348 is `both`, with `ref_signal_off_locus`).
+  - Every reference control passes.
+  - `WEAK_OFF_TARGETS` counts 52 products over the 12 genomes.
+  - The M10b job on 50112 (S1 and S2 only) gives the same predictions, with 28 products, all from S1_REF. That job is the
+    example in `docs/primer_design_api.md`.
 
-<!-- M8 deviations: to be added by M9b once the worker-side allele caller (results.genotyping, §2.12–§2.13, §5.6–§5.9) lands. -->
+**§2.13 against a real run.** The M10b job (`test/primers/fixtures/docs/capture-check-genotyping-result.json`) differs
+from §2.13 in three places:
+- **S1 `specificity.ref_pair`** is `off_targets` with `off_target_count: 3`, not `specific` with 0. `consistent_with_allele`
+  is still `true`, and the control still passes. §2.13 marked that block illustrative.
+- **pi180348 `paralog_copies`** is 1, not 0. The extra copy is the 1:72.9 Mb paralog, which the megablast loci behind §2.13
+  did not include.
+- **S2 on pi180348** predicts `both`, not `alt`: `agrees: false`, `reasons: ["ref_signal_off_locus"]`,
+  `off_locus_products: 1`. S2's summary is therefore agree 10, disagree 1 and both 1 over 11 genomes.
 
-To be completed when the worker-side caller lands (M8).
+Everything else in the §2.13 entries reproduces exactly: the copies, identities, observed cores, calls, and every S1 and
+S2 primer call. When a run adds the AS-PCR set, each copy gains one anchor.
+
+**pi536008.** §7.5 expected it to reach the megablast fallback [U]. It is instead called `alt` from its amplicons, so
+megablast never runs.
+- It has one orthologous copy, on scaffold2100: raw identity 88.02 %, but gap-compressed identity 98.83 % (`flank_edits`
+  22). The 78.2 % in §7.5 was the research's amplicon-window identity.
+- The fallback alone would not resolve it. scaffold2100 ends 176 bp past the variant, so the HSP there covers query bases
+  160–431 (272 of 431). That is under the 0.8 minimum query cover, so no HSP is kept.
+- The megablast cover filter therefore misses loci at scaffold ends.
+
+**Cost of the genotype stage.** §5.4 charges 0.2 CPU-s per genome task. It assumed < 0.01 CPU-s for the anchor fetch and
+alignment, plus 0.10–0.15 CPU-s for a megablast. Measured with `PRIMERS_REALDATA=1` (3 sets, the reference and 11
+assemblies, each genome's call replayed in process):
+- the caller takes **0.03–0.10 CPU-s per genome** (mean 0.07; 0.079 in M8's first run), more than assumed;
+- one megablast takes 0.09–0.13 CPU-s;
+- the coefficient still covers a call plus a fallback.
+
+The whole M10b job (2 sets, 11 assemblies) was estimated at 273 CPU-s. It used 176.8 CPU-s, counting the worker and its
+BLAST processes as read from `/proc`, so the estimate runs about 1.5× the measured CPU.
+
+### Found while documenting (M9a)
+
+Where the M9a documentation found code, swagger and spec disagreeing, the API document describes what the code does. Two
+of these six items were fixed afterwards.
+
+| # | Topic | The spec said | What was built | Status |
+| --- | --- | --- | --- | --- |
+| 1 | Lookup entries | §2.4: one entry per designable alt. | A lookup returns every entry of the id, including the non-designable ones, with their issues (also listed under M4). | As built |
+| 2 | Variation disabled | §3.8: `NO_VARIATION_DATA` for a design on a genome without variation data. The spec says nothing about `PRIMERS_VARIATION_ENABLED=0`. | With variation disabled, a design by id on a genome listed in `variation.species` answers `503 FEATURE_DISABLED`. A manual design on `sorghum_bicolor` gets `neighbours.data: "none"` and warning `NO_VARIATION_DATA`, whose message said the genome had no known-variant data. | **Fixed** in `fb28025`: the message now says that known-variant lookups are disabled on this server. The code is still `NO_VARIATION_DATA`. |
+| 3 | `PrimerVariant.requested_id` | §2.6: "lookup and design responses only". | Only design responses carry it on the variant; the lookup response has it at the top level. | As built; swagger describes it |
+| 4 | `THERMO_UNAVAILABLE` | §2.14: `{binary, retry_after_s}`, with no value. | `retry_after_s` is 60 for a missing or non-executable binary, and 5 when the process could not be started. | As built |
+| 5 | Lookup errors in swagger | §2.5: the 422 of `GET /primers/variants/{variant_id}` lists `NO_VARIATION_DATA`, `AMBIGUOUS_VARIANT_MAPPING` and `VARIANT_NOT_ON_ASSEMBLY`. | The handler can also answer `422 NO_SEQUENCE`, `422 AMBIGUOUS_ASSEMBLY` and `503 MONGO_UNAVAILABLE`, which the swagger descriptions did not list. | **Fixed** in `09accac`: the swagger descriptions list them (no behaviour change) |
+| 6 | `template_only` response | §4.1: `variant`, `template`, `neighbours`, `settings`, `engine` and `warnings`, with `sets: []`, `orientations: null` and `check: null`. | The response also has `assay`: the request's assay, with `ems_target` and `kasp_mix` added. | As built |

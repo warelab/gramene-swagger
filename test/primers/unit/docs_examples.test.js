@@ -48,13 +48,15 @@ const grequest = require(path.join(ROOT, 'api/helpers/primers/genotyping/request
 const checkNormalize = require(path.join(ROOT, 'api/helpers/primers/check/normalize'));
 const checkGenotype = require(path.join(ROOT, 'api/helpers/primers/check/genotype'));
 
-// Each endpoint the section documents has at least one request and one response example.
+// Each endpoint the section documents has at least one request and one response example. GET /primers/check/{job_id} is the
+// recorded genotyping check job of the "Results: results.genotyping" subsection.
 const ENDPOINTS = [
   ['GET', '/primers/genomes'],
   ['GET', '/primers/variants'],
   ['GET', '/primers/variants/{variant_id}'],
   ['POST', '/primers/genotyping/design'],
-  ['POST', '/primers/check']
+  ['POST', '/primers/check'],
+  ['GET', '/primers/check/{job_id}']
 ];
 
 let api = null;
@@ -332,6 +334,15 @@ test('the genotyping section tags every json and http block as an example, for e
     e.info.should.equal(e.kind === 'request' && e.method === 'GET' ? 'http' : 'json', where(e) + ': fence type');
   });
   section.lines.indexOf(RESULTS_HEADING).should.be.aboveOrEqual(0, 'the section has a "' + RESULTS_HEADING + '" subsection');
+  // the results subsection shows a real job: a recorded GET /primers/check/{job_id} 200 with results.genotyping
+  const resultsLine = section.offset + section.lines.indexOf(RESULTS_HEADING) + 1;
+  const job = section.examples.find(function (e) {
+    return e.kind === 'response' && e.method === 'GET' && e.path === '/primers/check/{job_id}' && e.status === 200 && e.capture !== null &&
+      e.line > resultsLine;
+  });
+  should.exist(job, 'the "' + RESULTS_HEADING + '" subsection has a GET /primers/check/{job_id} 200 example that cites a capture');
+  const shown = JSON.parse(job.body);
+  should.exist(shown.results && shown.results.genotyping, where(job) + ': the example shows results.genotyping');
   t.diagnostic(section.examples.length + ' examples: ' + section.examples.filter(function (e) { return e.kind === 'request'; }).length + ' requests');
 });
 
