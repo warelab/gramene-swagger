@@ -1162,11 +1162,11 @@ paths:
           schema:
             $ref: "#/definitions/PrimerError"
         422:
-          description: "NO_VARIATION_DATA, AMBIGUOUS_VARIANT_MAPPING, VARIANT_NOT_ON_ASSEMBLY"
+          description: "NO_VARIATION_DATA, NO_SEQUENCE, AMBIGUOUS_ASSEMBLY, AMBIGUOUS_VARIANT_MAPPING, VARIANT_NOT_ON_ASSEMBLY"
           schema:
             $ref: "#/definitions/PrimerError"
         503:
-          description: "VARIATION_SOURCE_UNAVAILABLE, FEATURE_DISABLED; details.retry_after_s and a Retry-After header"
+          description: "VARIATION_SOURCE_UNAVAILABLE, FEATURE_DISABLED, MONGO_UNAVAILABLE; details.retry_after_s and a Retry-After header"
           schema:
             $ref: "#/definitions/PrimerError"
 

@@ -478,8 +478,8 @@ async function listVariants(query, deps) {
 
 // lookupVariant({system_name, variant_id}, deps) -> §2.4 body. Every entry of the id is returned, the
 // non-designable ones with their issues (as in a listing).
-// Errors: 400 INVALID_REQUEST; 404 UNKNOWN_VARIANT, UNKNOWN_GENOME; 422 NO_VARIATION_DATA, NO_SEQUENCE,
-// AMBIGUOUS_VARIANT_MAPPING, VARIANT_NOT_ON_ASSEMBLY; 503 VARIATION_SOURCE_UNAVAILABLE, FEATURE_DISABLED.
+// Errors: 400 INVALID_REQUEST; 404 UNKNOWN_VARIANT, UNKNOWN_GENOME; 422 NO_VARIATION_DATA, NO_SEQUENCE, AMBIGUOUS_ASSEMBLY,
+// AMBIGUOUS_VARIANT_MAPPING, VARIANT_NOT_ON_ASSEMBLY; 503 VARIATION_SOURCE_UNAVAILABLE, FEATURE_DISABLED, MONGO_UNAVAILABLE.
 async function lookupVariant(query, deps) {
   deps = deps || {};
   query = query || {};
