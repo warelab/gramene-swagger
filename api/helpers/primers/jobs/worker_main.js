@@ -61,16 +61,18 @@ async function main(opts) {
     ', global_prefix ' + cfg.check.global_prefix + ', local_max_jobs ' + cfg.check.local_max_jobs);
 
   function idle(reason) {
-    errorLog(log, 'primers worker: ' + reason + '; idling (no jobs will run)');
     const timer = setInterval(function () {}, 1 << 30);
     const stopIdle = function () {
       clearInterval(timer);
       exit(EXIT_OK);
     };
+    // Handlers go in before the log line: "idling" is the readiness signal, and a SIGTERM that
+    // arrived between the two would kill the process by default action instead of exiting 0.
     if (signals) {
       process.once('SIGTERM', stopIdle);
       process.once('SIGINT', stopIdle);
     }
+    errorLog(log, 'primers worker: ' + reason + '; idling (no jobs will run)');
     return { idle: true, stop: stopIdle };
   }
 

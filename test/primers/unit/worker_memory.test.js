@@ -887,7 +887,7 @@ test('node worker_main.js from cwd / derives site_key sorghum_v11:sorghum11 from
     const t0 = Date.now();
     child.kill('SIGTERM');
     const ex = await exited;
-    ex.code.should.equal(0);
+    ({ code: ex.code, signal: ex.signal }).should.eql({ code: 0, signal: null });
     (ex.at - t0).should.be.below(1000);
   } finally {
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
