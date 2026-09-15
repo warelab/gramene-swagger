@@ -284,7 +284,8 @@ async function sameSpecies(systemName, deps) {
 
 // ---- GET /primers/genomes -----------------------------------------------------------------------
 
-function genomeEntry(genome, outcome, isQuery, log) {
+// variationFor(system_name, resolved) -> {available, source, release} (variation/index.js variationInfo)
+function genomeEntry(genome, outcome, isQuery, log, variationFor) {
   const entry = {
     system_name: genome.system_name,
     display_name: genome.display_name,
@@ -294,6 +295,7 @@ function genomeEntry(genome, outcome, isQuery, log) {
     has_sequence: false,
     has_blastdb: false,
     has_cdna_blastdb: false,
+    has_variation: false,
     repeat_masking: 'absent',
     total_bases: null,
     warnings: []
@@ -303,6 +305,7 @@ function genomeEntry(genome, outcome, isQuery, log) {
     entry.has_sequence = !!(resolved.fasta && resolved.fasta.dna);
     entry.has_blastdb = !!(resolved.blastdb && resolved.blastdb.dna);
     entry.has_cdna_blastdb = !!(resolved.blastdb && resolved.blastdb.cdna);
+    entry.has_variation = variationFor(genome.system_name, resolved).available;
     entry.repeat_masking = resolved.repeat_masking || 'absent';
     entry.total_bases = typeof resolved.total_bases === 'number' ? resolved.total_bases : null;
     entry.warnings = (resolved.warnings || []).map(function (w) {
@@ -323,12 +326,15 @@ function genomeEntry(genome, outcome, isQuery, log) {
   return entry;
 }
 
-// genomesResponse(system_name, deps) -> A.2.2 body
-//   {system_name, species {taxon_id, name}|null, counts {total, with_blastdb, with_cdna_blastdb},
+// genomesResponse(system_name, deps) -> A.2.2 body, plus the genotyping spec §2.2 variation fields
+//   {system_name, species {taxon_id, name}|null, variation {available, source 'ensembl'|null, release|null},
+//    counts {total, with_blastdb, with_cdna_blastdb},
 //    genomes [{system_name, display_name, taxon_id, map_id, is_query, has_sequence, has_blastdb,
-//              has_cdna_blastdb, repeat_masking, total_bases, warnings[{code, message}]}]}
+//              has_cdna_blastdb, has_variation, repeat_masking, total_bases, warnings[{code, message}]}]}
 // Query genome first, then the rest of its species by display_name. Never contains filesystem paths.
-// deps: everything getCatalog/assemblies.resolveMany accept, plus {assemblies} to stub the resolver.
+// `variation` describes the query genome and is never null; has_variation needs primers.variation to be enabled,
+// to list the genome's species and the assembly to resolve with a FASTA (§3.2). No Ensembl call is made.
+// deps: everything getCatalog/assemblies.resolveMany accept (cfg included), plus {assemblies} to stub the resolver.
 async function genomesResponse(systemName, deps) {
   deps = deps || {};
   if (!isValidSystemName(systemName)) throw unknownGenomeError(systemName);
@@ -341,10 +347,14 @@ async function genomesResponse(systemName, deps) {
   const outcomes = await assemblies.resolveMany(ordered.map(function (g) { return g.system_name; }),
     Object.assign({}, deps, { catalog: catalog }));
   const log = deps.log || console;
-  const list = ordered.map(function (genome, i) { return genomeEntry(genome, outcomes[i], genome === query, log); });
+  const cfg = deps.cfg || require('./config').get();
+  const variation = require('./variation'); // lazily: variation/index.js reaches assemblies.js, which requires this module
+  const variationFor = function (name, resolved) { return variation.variationInfo(name, resolved, cfg); };
+  const list = ordered.map(function (genome, i) { return genomeEntry(genome, outcomes[i], genome === query, log, variationFor); });
   return {
     system_name: systemName,
     species: query.species ? { taxon_id: query.species.taxon_id, name: query.species.name } : null,
+    variation: variationFor(systemName, outcomes[0] && outcomes[0].resolved),
     counts: {
       total: list.length,
       with_blastdb: list.filter(function (g) { return g.has_blastdb; }).length,

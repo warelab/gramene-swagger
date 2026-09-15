@@ -15,8 +15,9 @@ const FIXTURES = path.join(__dirname, '..', 'fixtures', 'catalog');
 const V11_MAPS = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'maps_sorghum_v11.json'), 'utf8'));
 const V11_TAXONOMY = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'taxonomy_sorghum_v11.json'), 'utf8'));
 const SILENT = { warn: function () {}, error: function () {}, log: function () {} };
-const ENTRY_KEYS = ['display_name', 'has_blastdb', 'has_cdna_blastdb', 'has_sequence', 'is_query', 'map_id',
+const ENTRY_KEYS = ['display_name', 'has_blastdb', 'has_cdna_blastdb', 'has_sequence', 'has_variation', 'is_query', 'map_id',
   'repeat_masking', 'system_name', 'taxon_id', 'total_bases', 'warnings'];
+const NO_VARIATION = { available: false, source: null, release: null };
 
 async function rejectsWith(promise, status, code) {
   let caught = null;
@@ -120,9 +121,10 @@ test('genomes body: query first, then its species by display_name; flags, counts
   const fixture = buildFixture(root);
   const body = await genomes.genomesResponse('sorghum_rio', depsFor(root, fixture.catalog));
 
-  Object.keys(body).sort().should.eql(['counts', 'genomes', 'species', 'system_name']);
+  Object.keys(body).sort().should.eql(['counts', 'genomes', 'species', 'system_name', 'variation']);
   body.system_name.should.equal('sorghum_rio');
   body.species.should.eql({ taxon_id: 4558, name: 'Sorghum bicolor' });
+  body.variation.should.eql(NO_VARIATION); // this cfg has no primers.variation block
   body.genomes.length.should.equal(120);
   body.genomes[0].system_name.should.equal('sorghum_rio');
   body.genomes[0].is_query.should.be.true();
@@ -136,12 +138,12 @@ test('genomes body: query first, then its species by display_name; flags, counts
   body.genomes.forEach(function (g) { by[g.system_name] = g; });
   by.sorghum_rio.should.eql({
     system_name: 'sorghum_rio', display_name: 'Sb bicolor PI651496 Rio', taxon_id: 4558116, map_id: 'GCA_015952705.1',
-    is_query: true, has_sequence: true, has_blastdb: true, has_cdna_blastdb: false, repeat_masking: 'soft_masked',
+    is_query: true, has_sequence: true, has_blastdb: true, has_cdna_blastdb: false, has_variation: false, repeat_masking: 'soft_masked',
     total_bases: fixture.sizes.rio, warnings: []
   });
   by.sorghum_bicolor.should.eql({
     system_name: 'sorghum_bicolor', display_name: 'Sb bicolor BTx623 v3', taxon_id: 4558006, map_id: 'GCA_000003195.3',
-    is_query: false, has_sequence: true, has_blastdb: true, has_cdna_blastdb: true, repeat_masking: 'unmasked_copy',
+    is_query: false, has_sequence: true, has_blastdb: true, has_cdna_blastdb: true, has_variation: false, repeat_masking: 'unmasked_copy',
     total_bases: fixture.sizes.bicolor, warnings: []
   });
   by.sorghum_pi534133.should.have.properties({
@@ -180,6 +182,46 @@ test('a different query genome is listed first and the rest keep display_name or
   zea.species.should.eql({ taxon_id: 4577, name: zeaSpecies.name });
   zea.genomes.map(function (g) { return g.system_name; }).should.eql(['zea_maysb73']);
   zea.counts.should.eql({ total: 1, with_blastdb: 1, with_cdna_blastdb: 1 });
+});
+
+// Genotyping spec §2.2 and §3.2: has_variation needs primers.variation enabled, the genome's species segment and an
+// assembly with a FASTA; the top-level variation block describes the query genome and is never null. No Ensembl call.
+test('has_variation per genome and the response-level variation block; never an Ensembl call', async function (t) {
+  const root = fx.makeRoot('genomes');
+  t.after(function () { fx.removeRoot(root); });
+  const fixture = buildFixture(root);
+  const savedFetch = globalThis.fetch;
+  globalThis.fetch = function () { throw new Error('the genomes response must not call out'); };
+  t.after(function () { globalThis.fetch = savedFetch; });
+  const variationCfg = function (enabled) {
+    return {
+      variation: {
+        enabled: enabled, release: '115',
+        // sorghum_353 is AMBIGUOUS_ASSEMBLY and sorghum_tx436pac has no files: listed, but without data
+        species: { sorghum_bicolor: 'sorghum_bicolor', sorghum_353: 'sorghum_353', sorghum_tx436pac: 'sorghum_tx436pac' }
+      }
+    };
+  };
+  const flags = function (body) {
+    const out = {};
+    body.genomes.forEach(function (g) { if (g.has_variation) out[g.system_name] = true; });
+    return out;
+  };
+  const cfg = { fasta_root: root, assembly_overrides: {}, repeat_masking_overrides: {} };
+
+  const rio = await genomes.genomesResponse('sorghum_rio', depsFor(root, fixture.catalog, { cfg: Object.assign({}, cfg, variationCfg(true)) }));
+  rio.variation.should.eql(NO_VARIATION);
+  flags(rio).should.eql({ sorghum_bicolor: true });
+  rio.genomes.forEach(function (g) { Object.keys(g).sort().should.eql(ENTRY_KEYS); });
+
+  const bicolor = await genomes.genomesResponse('sorghum_bicolor', depsFor(root, fixture.catalog, { cfg: Object.assign({}, cfg, variationCfg(true)) }));
+  bicolor.variation.should.eql({ available: true, source: 'ensembl', release: '115' });
+  bicolor.genomes[0].should.have.properties({ system_name: 'sorghum_bicolor', is_query: true, has_variation: true });
+  Object.keys(bicolor).should.eql(['system_name', 'species', 'variation', 'counts', 'genomes']);
+
+  const off = await genomes.genomesResponse('sorghum_bicolor', depsFor(root, fixture.catalog, { cfg: Object.assign({}, cfg, variationCfg(false)) }));
+  off.variation.should.eql(NO_VARIATION);
+  flags(off).should.eql({});
 });
 
 test('unknown or invalid system_name is 404 UNKNOWN_GENOME; invalid names never reach mongo or the filesystem', async function (t) {

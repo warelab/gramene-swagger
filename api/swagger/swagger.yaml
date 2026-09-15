@@ -1040,6 +1040,136 @@ paths:
           schema:
             $ref: "#/definitions/PrimerError"
 
+  # Genotyping primers (docs/genotyping_design_spec.md §2.3-§2.6). Also before /{collection}.
+  /primers/variants:
+    x-swagger-router-controller: primers
+    get:
+      summary: "Known variants (Ensembl REST) in a genomic window, normalized to left-aligned VCF keys and verified against this site's genome"
+      description: "One entry per designable biallelic key; Ensembl records describing the same event are merged. Only genomes with variation data (GET /primers/genomes has_variation) can be queried. Cache-Control: no-store."
+      operationId: listPrimerVariants
+      tags:
+        - "Primer design"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: query
+          name: system_name
+          description: "genome with variation data, e.g. sorghum_bicolor"
+          required: true
+          type: string
+          pattern: "^[a-z0-9_]+$"
+          maxLength: 128
+        - in: query
+          name: region
+          description: "sequence name of the assembly, e.g. 1"
+          required: true
+          type: string
+          maxLength: 255
+        - in: query
+          name: start
+          description: "1-based window start"
+          required: true
+          type: integer
+          minimum: 1
+        - in: query
+          name: end
+          description: "1-based inclusive window end; end - start + 1 <= 50000"
+          required: true
+          type: integer
+          minimum: 1
+        - in: query
+          name: types
+          description: "comma-separated variant kinds; default all"
+          required: false
+          type: array
+          collectionFormat: csv
+          items:
+            type: string
+            enum: [snv, mnv, insertion, deletion, complex]
+        - in: query
+          name: include_ems
+          description: "default true; false drops entries all of whose records are EMS"
+          required: false
+          type: boolean
+        - in: query
+          name: limit
+          description: "default 2000; truncated is true when more matched"
+          required: false
+          type: integer
+          minimum: 1
+          maximum: 5000
+      responses:
+        200:
+          description: "variants in the window"
+          schema:
+            $ref: "#/definitions/PrimerVariantList"
+        400:
+          description: "validator errors, VARIANT_WINDOW_TOO_LONG, REGION_OUT_OF_BOUNDS"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        404:
+          description: "UNKNOWN_GENOME, UNKNOWN_REGION"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        422:
+          description: "NO_VARIATION_DATA, NO_SEQUENCE, AMBIGUOUS_ASSEMBLY"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        503:
+          description: "VARIATION_SOURCE_UNAVAILABLE, FEATURE_DISABLED, MONGO_UNAVAILABLE; details.retry_after_s and a Retry-After header"
+          schema:
+            $ref: "#/definitions/PrimerError"
+
+  /primers/variants/{variant_id}:
+    x-swagger-router-controller: primers
+    get:
+      summary: "Resolve one Ensembl variation id to normalized variant entries (one per designable alt)"
+      description: "The id may contain ',' and '*' and must be URL-encoded. Every Ensembl id describing the same event is merged into the entry (warning DUPLICATE_VARIANT_IDS). Cache-Control: no-store."
+      operationId: getPrimerVariant
+      tags:
+        - "Primer design"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: path
+          name: variant_id
+          description: "Ensembl variation id, e.g. rs871475760 or tmp_1_11502_C_CGT"
+          required: true
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9_.:,*-]{0,254}$"
+        - in: query
+          name: system_name
+          description: "genome with variation data, e.g. sorghum_bicolor"
+          required: true
+          type: string
+          pattern: "^[a-z0-9_]+$"
+          maxLength: 128
+      responses:
+        200:
+          description: "the variant"
+          schema:
+            $ref: "#/definitions/PrimerVariantLookup"
+        400:
+          description: "validator errors"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        404:
+          description: "UNKNOWN_VARIANT, UNKNOWN_GENOME"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        422:
+          description: "NO_VARIATION_DATA, AMBIGUOUS_VARIANT_MAPPING, VARIANT_NOT_ON_ASSEMBLY"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        503:
+          description: "VARIATION_SOURCE_UNAVAILABLE, FEATURE_DISABLED; details.retry_after_s and a Retry-After header"
+          schema:
+            $ref: "#/definitions/PrimerError"
+
   /{collection}:
     x-swagger-router-controller: mongo
     get:
@@ -2210,6 +2340,7 @@ definitions:
     properties:
       code: { type: string }
       message: { type: string }
+      details: { type: object, description: "code-specific; present on every genotyping and variants warning" }
   PrimerBlock:
     type: object
     properties:
@@ -2317,6 +2448,13 @@ definitions:
         properties:
           taxon_id: { type: integer }
           name: { type: string }
+      variation:
+        type: object
+        description: "known-variant data for the query genome; {available: false, source: null, release: null} without data, never null"
+        properties:
+          available: { type: boolean }
+          source: { type: string, enum: [ensembl], x-nullable: true }
+          release: { type: string, x-nullable: true }
       counts:
         type: object
         properties:
@@ -2336,9 +2474,113 @@ definitions:
             has_sequence: { type: boolean }
             has_blastdb: { type: boolean }
             has_cdna_blastdb: { type: boolean }
+            has_variation:
+              type: boolean
+              description: "known-variant data (Ensembl) is available for this genome; only sorghum_bicolor on sorghum_v11"
             repeat_masking: { type: string, enum: [soft_masked, unmasked_copy, absent] }
             total_bases: { type: integer, x-nullable: true }
             warnings: { type: array, items: { $ref: "#/definitions/PrimerWarning" } }
+  PrimerVariantRecord:
+    type: object
+    properties:
+      id: { type: string, description: "Ensembl id as reported; may contain ',' or '*' and may be up to 255 characters" }
+      source: { type: string, x-nullable: true, description: "Ensembl overlap source code, e.g. EVA, EMS_PMID38100514_Jiao, SAP_PMID35653240_Boatwri (truncated to 100 characters)" }
+      ems: { type: boolean, description: "source matches primers.variation.ems_source_pattern (^EMS_)" }
+  PrimerVariantIssue:
+    type: object
+    properties:
+      code: { type: string, enum: [REF_MISMATCH, STAR_ALLELE, ALLELE_TOO_LONG, UNSUPPORTED_ALLELE, REPEAT_TOO_LONG] }
+      message: { type: string }
+      details: { type: object }
+  PrimerAlleleSite:
+    type: object
+    properties:
+      position: { type: integer, description: "plus-strand coordinate of the allele-specific primer's 3' base" }
+      ref_base: { type: string }
+      alt_base: { type: string }
+      alt_maps_to: { type: integer, x-nullable: true, description: "reference coordinate of the ALT haplotype base at this index; null for an inserted base" }
+  PrimerVariantZone:
+    type: object
+    x-nullable: true
+    description: "the guarded span: VCF span, both discriminating positions and both ALT 3' anchor mappings; null with issue REPEAT_TOO_LONG"
+    properties:
+      start: { type: integer }
+      end: { type: integer }
+  PrimerVariantVcf:
+    type: object
+    properties:
+      position: { type: integer }
+      ref: { type: string }
+      alt: { type: string }
+  PrimerVariantMinimal:
+    type: object
+    properties:
+      start: { type: integer }
+      end: { type: integer }
+      ref: { type: string, description: "'-' for an insertion" }
+      alt: { type: string, description: "'-' for a deletion" }
+  PrimerVariantMultiallelic:
+    type: object
+    x-nullable: true
+    properties:
+      alleles: { type: array, items: { type: string } }
+      other_alts: { type: array, items: { type: string } }
+  PrimerVariant:
+    type: object
+    properties:
+      key: { type: string, description: "region:position:REF:ALT, left-aligned VCF with anchor base for indels; canonical identity" }
+      ids: { type: array, items: { type: string }, description: "Ensembl ids with this key: requested id first, then rs ids, then the rest alphabetically" }
+      synonyms: { type: array, items: { type: string }, description: "id lookup only; '.' dropped" }
+      label: { type: string }
+      kind: { type: string, enum: [snv, mnv, insertion, deletion, complex] }
+      region: { type: string }
+      vcf: { $ref: "#/definitions/PrimerVariantVcf" }
+      minimal: { $ref: "#/definitions/PrimerVariantMinimal" }
+      alleles: { type: array, items: { type: string }, description: "all alleles of the site as reported, reference first ('-' and '*' kept)" }
+      multiallelic: { $ref: "#/definitions/PrimerVariantMultiallelic" }
+      shift: { type: integer, minimum: 0 }
+      zone: { $ref: "#/definitions/PrimerVariantZone" }
+      discriminating:
+        type: object
+        x-nullable: true
+        description: "null with issue REPEAT_TOO_LONG"
+        properties:
+          forward: { $ref: "#/definitions/PrimerAlleleSite" }
+          reverse: { $ref: "#/definitions/PrimerAlleleSite" }
+      records: { type: array, items: { $ref: "#/definitions/PrimerVariantRecord" } }
+      ems: { type: boolean, description: "every merged record is EMS" }
+      consequence: { type: string, x-nullable: true }
+      ref_verified: { type: boolean }
+      designable: { type: boolean }
+      issues: { type: array, items: { $ref: "#/definitions/PrimerVariantIssue" } }
+      requested_id: { type: string, x-nullable: true, description: "design responses only (the lookup response carries it at the top level)" }
+      submission_sequence: { type: string, description: "design response only: 50 bp flanks with [REF/ALT] (minimal alleles, '' for '-'), non-EMS biallelic SNV neighbours as IUPAC codes" }
+  PrimerVariantSource:
+    type: object
+    properties:
+      name: { type: string, enum: [ensembl] }
+      release: { type: string }
+  PrimerVariantList:
+    type: object
+    properties:
+      system_name: { type: string }
+      region: { type: string }
+      start: { type: integer }
+      end: { type: integer }
+      source: { $ref: "#/definitions/PrimerVariantSource" }
+      total: { type: integer }
+      returned: { type: integer }
+      truncated: { type: boolean }
+      variants: { type: array, items: { $ref: "#/definitions/PrimerVariant" } }
+      warnings: { type: array, items: { $ref: "#/definitions/PrimerWarning" } }
+  PrimerVariantLookup:
+    type: object
+    properties:
+      requested_id: { type: string }
+      system_name: { type: string }
+      source: { $ref: "#/definitions/PrimerVariantSource" }
+      variants: { type: array, items: { $ref: "#/definitions/PrimerVariant" } }
+      warnings: { type: array, items: { $ref: "#/definitions/PrimerWarning" } }
   PrimerCheckJob:
     description: "POST returns job_id, status, kind, queue_position, progress, estimate, created_at and warnings; GET adds partial, started_at, finished_at, attempts, request, results and error"
     type: object

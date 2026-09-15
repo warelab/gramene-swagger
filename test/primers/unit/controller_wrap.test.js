@@ -51,6 +51,11 @@ function buildApp(ctrl, extra) {
   app.get(base + '/genomes', swagger({ system_name: (r) => r.query.system_name }), function (req, res) { ctrl.primerGenomes(req, res, function () {}); });
   app.post(base + '/check', swagger({ body: (r) => r.body }), function (req, res) { ctrl.submitPrimerCheck(req, res, function () {}); });
   app.get(base + '/check/:job_id', swagger({ job_id: (r) => r.params.job_id }), function (req, res) { ctrl.getPrimerCheck(req, res, function () {}); });
+  const listParams = {};
+  ['system_name', 'region', 'start', 'end', 'types', 'include_ems', 'limit'].forEach(function (k) { listParams[k] = (r) => r.query[k]; });
+  app.get(base + '/variants', swagger(listParams), function (req, res) { ctrl.listPrimerVariants(req, res, function () {}); });
+  app.get(base + '/variants/:variant_id', swagger({ variant_id: (r) => r.params.variant_id, system_name: (r) => r.query.system_name }),
+    function (req, res) { ctrl.getPrimerVariant(req, res, function () {}); });
   // swagger-node-runner's 405 for a path that is defined but lacks the method
   app.all(base + '/check/:job_id', function (req, res, next) {
     const err = new Error('Path [/primers/check/{job_id}] defined in Swagger, but ' + req.method + ' operation is not.');
@@ -100,12 +105,15 @@ function watchUnhandled(t) {
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-test('loading the controller exports the four operations and the app.js middleware without loading heavy helpers', function () {
+test('loading the controller exports the operations and the app.js middleware without loading heavy helpers', function () {
   const ctrl = require(CONTROLLER);
-  ['designPrimers', 'primerGenomes', 'submitPrimerCheck', 'getPrimerCheck', 'noStore', 'notFound', 'errorHandler', 'startup', 'createController']
+  ['designPrimers', 'primerGenomes', 'submitPrimerCheck', 'getPrimerCheck', 'listPrimerVariants', 'getPrimerVariant',
+    'noStore', 'notFound', 'errorHandler', 'startup', 'createController']
     .forEach(function (k) { ctrl[k].should.be.a.Function(); });
+  ctrl.listPrimerVariants.name.should.equal('listPrimerVariants');
+  ctrl.getPrimerVariant.name.should.equal('getPrimerVariant');
   const loaded = Object.keys(require.cache);
-  ['design.js', 'jobs/index.js', 'genomes.js', 'assemblies.js', 'redis_store.js'].forEach(function (f) {
+  ['design.js', 'jobs/index.js', 'genomes.js', 'assemblies.js', 'redis_store.js', 'variation/index.js', 'variation/client.js'].forEach(function (f) {
     loaded.some(function (p) { return p.endsWith('/api/helpers/primers/' + f); }).should.equal(false, f + ' loaded eagerly');
   });
 });
@@ -164,7 +172,9 @@ test('PrimerHttpError status, code and details pass through; 503 adds Retry-Afte
   const errs = {
     design: new PrimerHttpError(404, 'UNKNOWN_GENE', 'unknown gene NOPE', { gene_id: 'NOPE' }),
     check: new PrimerHttpError(503, 'JOB_STORE_UNAVAILABLE', 'the job store is unavailable', { retry_after_s: 5 }),
-    status: new PrimerHttpError(404, 'UNKNOWN_JOB', 'unknown job', { job_id: '0123456789abcdef0123456789abcdef' })
+    status: new PrimerHttpError(404, 'UNKNOWN_JOB', 'unknown job', { job_id: '0123456789abcdef0123456789abcdef' }),
+    variants: new PrimerHttpError(503, 'VARIATION_SOURCE_UNAVAILABLE', 'the Ensembl variation service is temporarily unavailable', { retry_after_s: 30, reason: 'timeout' }),
+    variant: new PrimerHttpError(404, 'UNKNOWN_VARIANT', 'unknown variant rs0000000001 for sorghum_bicolor', { id: 'rs0000000001', system_name: 'sorghum_bicolor' })
   };
   const ctrl = require(CONTROLLER).createController({
     log: quietLog(),
@@ -173,6 +183,10 @@ test('PrimerHttpError status, code and details pass through; 503 adds Retry-Afte
     jobs: {
       submit: async function () { throw errs.check; },
       status: async function () { throw errs.status; }
+    },
+    variation: {
+      listVariants: async function () { throw errs.variants; },
+      lookupVariant: async function () { throw errs.variant; }
     }
   });
   await withServer(buildApp(ctrl), async function (base) {
@@ -188,10 +202,19 @@ test('PrimerHttpError status, code and details pass through; 503 adds Retry-Afte
     r = await call(base + '/primers/check/0123456789abcdef0123456789abcdef');
     r.status.should.equal(404);
     r.body.code.should.equal('UNKNOWN_JOB');
+    r = await call(base + '/primers/variants?system_name=sorghum_bicolor&region=1&start=11180&end=11290');
+    r.status.should.equal(503);
+    r.body.should.eql({ message: 'the Ensembl variation service is temporarily unavailable', code: 'VARIATION_SOURCE_UNAVAILABLE', details: { retry_after_s: 30, reason: 'timeout' } });
+    r.headers.get('retry-after').should.equal('30');
+    r.headers.get('cache-control').should.equal('no-store');
+    r = await call(base + '/primers/variants/rs0000000001?system_name=sorghum_bicolor');
+    r.status.should.equal(404);
+    r.body.should.eql({ message: 'unknown variant rs0000000001 for sorghum_bicolor', code: 'UNKNOWN_VARIANT', details: { id: 'rs0000000001', system_name: 'sorghum_bicolor' } });
+    r.headers.get('cache-control').should.equal('no-store');
   });
 });
 
-test('success paths: design 200, genomes 200, check 202 when created and 200 when existing (created dropped), status 200', async function () {
+test('success paths: design 200, genomes 200, check 202 when created and 200 when existing (created dropped), status 200, variants 200', async function () {
   const seen = {};
   let created = true;
   const ctrl = require(CONTROLLER).createController({
@@ -199,6 +222,10 @@ test('success paths: design 200, genomes 200, check 202 when created and 200 whe
     config: fakeConfig(),
     design: { design: async function (body, deps) { seen.design = { body: body, signal: deps.signal }; return { pairs: [], warnings: [] }; } },
     genomes: { genomesResponse: async function (sys) { seen.genomes = sys; return { system_name: sys, genomes: [] }; } },
+    variation: {
+      listVariants: async function (query, deps) { seen.list = { query: query, signal: deps.signal }; return { variants: [], warnings: [] }; },
+      lookupVariant: async function (query, deps) { seen.lookup = { query: query, signal: deps.signal }; return { requested_id: query.variant_id, variants: [], warnings: [] }; }
+    },
     jobs: {
       submit: async function (body) {
         seen.submit = body;
@@ -233,6 +260,22 @@ test('success paths: design 200, genomes 200, check 202 when created and 200 whe
     r = await call(base + '/primers/check/' + 'b'.repeat(32));
     r.status.should.equal(200);
     seen.status.should.equal('b'.repeat(32));
+
+    // only the parameters the client sent are passed on; the id arrives decoded
+    r = await call(base + '/primers/variants?system_name=sorghum_bicolor&region=1&start=11180&end=11290&types=snv,deletion');
+    r.status.should.equal(200);
+    r.body.should.eql({ variants: [], warnings: [] });
+    r.headers.get('cache-control').should.equal('no-store');
+    seen.list.query.should.eql({ system_name: 'sorghum_bicolor', region: '1', start: '11180', end: '11290', types: 'snv,deletion' });
+    seen.list.signal.should.be.instanceOf(AbortSignal);
+    seen.list.signal.aborted.should.equal(false);
+
+    r = await call(base + '/primers/variants/tmp_1_13549_TTA_T%2C%2A?system_name=sorghum_bicolor');
+    r.status.should.equal(200);
+    r.body.requested_id.should.equal('tmp_1_13549_TTA_T,*');
+    r.headers.get('cache-control').should.equal('no-store');
+    seen.lookup.query.should.eql({ variant_id: 'tmp_1_13549_TTA_T,*', system_name: 'sorghum_bicolor' });
+    seen.lookup.signal.aborted.should.equal(false);
   });
 });
 
@@ -242,14 +285,17 @@ test('FEATURE_DISABLED (503, retry_after_s 300) on every endpoint when primers a
     config: fakeConfig({ enabled: false }),
     design: { design: async function () { throw new Error('must not be called'); } },
     genomes: { genomesResponse: async function () { throw new Error('must not be called'); } },
-    jobs: { submit: async function () { throw new Error('must not be called'); }, status: async function () { throw new Error('must not be called'); } }
+    jobs: { submit: async function () { throw new Error('must not be called'); }, status: async function () { throw new Error('must not be called'); } },
+    variation: { listVariants: async function () { throw new Error('must not be called'); }, lookupVariant: async function () { throw new Error('must not be called'); } }
   });
   await withServer(buildApp(ctrl), async function (base) {
     const rs = [
       await postJson(base + '/primers/design', {}),
       await call(base + '/primers/genomes?system_name=x'),
       await postJson(base + '/primers/check', {}),
-      await call(base + '/primers/check/' + 'c'.repeat(32))
+      await call(base + '/primers/check/' + 'c'.repeat(32)),
+      await call(base + '/primers/variants?system_name=x&region=1&start=1&end=2'),
+      await call(base + '/primers/variants/rs871475760?system_name=x')
     ];
     rs.forEach(function (r) {
       r.status.should.equal(503);
@@ -290,6 +336,41 @@ test('a client that disconnects aborts the design signal and nothing is sent or 
   });
   should.exist(abortedWith);
   abortedWith.code.should.equal('CLIENT_CLOSED_REQUEST');
+  await tick();
+  unhandled.should.have.length(0);
+});
+
+test('a client that disconnects aborts the variants signal (list and lookup); nothing is sent or thrown', async function (t) {
+  const unhandled = watchUnhandled(t);
+  const aborted = {};
+  const started = {};
+  const waiter = function (name) {
+    return function (query, deps) {
+      started[name]();
+      return new Promise(function (resolve, reject) {
+        deps.signal.addEventListener('abort', function () { aborted[name] = deps.signal.reason; reject(deps.signal.reason); });
+      });
+    };
+  };
+  const ctrl = require(CONTROLLER).createController({
+    log: quietLog(),
+    config: fakeConfig(),
+    variation: { listVariants: waiter('list'), lookupVariant: waiter('lookup') }
+  });
+  await withServer(buildApp(ctrl), async function (base) {
+    for (const [name, url] of [['list', '/primers/variants?system_name=sorghum_bicolor&region=1&start=1&end=50000'],
+      ['lookup', '/primers/variants/rs871475760?system_name=sorghum_bicolor']]) {
+      const began = new Promise((resolve) => { started[name] = resolve; });
+      const ac = new AbortController();
+      const pending = fetch(base + url, { signal: ac.signal }).catch(function (e) { return e; });
+      await began;
+      ac.abort();
+      (await pending).name.should.equal('AbortError');
+      for (let i = 0; i < 50 && !aborted[name]; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+      should.exist(aborted[name], name);
+      aborted[name].code.should.equal('CLIENT_CLOSED_REQUEST');
+    }
+  });
   await tick();
   unhandled.should.have.length(0);
 });

@@ -6,6 +6,8 @@
 //   GET  /primers/genomes        primerGenomes      same-species genomes for a system_name
 //   POST /primers/check          submitPrimerCheck  queue (or find) a specificity / pan-genome check job
 //   GET  /primers/check/{job_id} getPrimerCheck     job status, progress and (partial) results
+//   GET  /primers/variants       listPrimerVariants known variants (Ensembl) in a window, normalized
+//   GET  /primers/variants/{variant_id} getPrimerVariant  one Ensembl variation id, normalized
 //
 // Every handler is promise-wrapped: a synchronous throw or a rejected promise becomes a JSON error
 // {message, code, details} via errors.sendError, never an unhandled rejection (Node 24 would crash the
@@ -48,7 +50,7 @@ function echoPath(req) {
 }
 
 // createController(deps) -> handlers and middleware.
-//   deps (tests): {config, design, genomes, jobs (module-like objects), log}
+//   deps (tests): {config, design, genomes, jobs, variation (module-like objects), log}
 function createController(deps) {
   deps = deps || {};
   const log = deps.log || console;
@@ -57,7 +59,8 @@ function createController(deps) {
     config: function () { return deps.config || require('../helpers/primers/config'); },
     design: function () { return deps.design || require('../helpers/primers/design'); },
     genomes: function () { return deps.genomes || require('../helpers/primers/genomes'); },
-    jobs: function () { return deps.jobs || require('../helpers/primers/jobs'); }
+    jobs: function () { return deps.jobs || require('../helpers/primers/jobs'); },
+    variation: function () { return deps.variation || require('../helpers/primers/variation'); }
   };
 
   function ensureEnabled() {
@@ -143,6 +146,50 @@ function createController(deps) {
     sendJson(res, 200, result);
   });
 
+  // The abort-on-close pattern of designPrimers as a helper: a client that disconnects before the response is
+  // written aborts `signal` (reason 400 CLIENT_CLOSED_REQUEST); dispose() removes the listener.
+  function clientAbort(res) {
+    const ac = new AbortController();
+    const onClose = function () {
+      if (!res.writableFinished) {
+        ac.abort(new PrimerHttpError(400, 'CLIENT_CLOSED_REQUEST', 'the client closed the connection', {}));
+      }
+    };
+    res.once('close', onClose);
+    return { signal: ac.signal, dispose: function () { res.removeListener('close', onClose); } };
+  }
+
+  // Ensembl waits end when the client goes away; the shared outbound request and its cache entry do not (§3.3).
+  const listPrimerVariants = wrap('listPrimerVariants', async function (req, res) {
+    ensureEnabled();
+    const query = {};
+    ['system_name', 'region', 'start', 'end', 'types', 'include_ems', 'limit'].forEach(function (name) {
+      const value = paramValue(req, name, 'query');
+      if (value !== undefined) query[name] = value;
+    });
+    const abort = clientAbort(res);
+    try {
+      const result = await modules.variation().listVariants(query, { signal: abort.signal, log: log });
+      if (abort.signal.aborted) return;
+      sendJson(res, 200, result);
+    } finally {
+      abort.dispose();
+    }
+  });
+
+  const getPrimerVariant = wrap('getPrimerVariant', async function (req, res) {
+    ensureEnabled();
+    const query = { variant_id: paramValue(req, 'variant_id', 'path'), system_name: paramValue(req, 'system_name', 'query') };
+    const abort = clientAbort(res);
+    try {
+      const result = await modules.variation().lookupVariant(query, { signal: abort.signal, log: log });
+      if (abort.signal.aborted) return;
+      sendJson(res, 200, result);
+    } finally {
+      abort.dispose();
+    }
+  });
+
   // Before register: every /primers response (validator 400s and body-parser 413s included) is no-store.
   function noStore(req, res, next) {
     setNoStore(res);
@@ -202,6 +249,8 @@ function createController(deps) {
     primerGenomes: primerGenomes,
     submitPrimerCheck: submitPrimerCheck,
     getPrimerCheck: getPrimerCheck,
+    listPrimerVariants: listPrimerVariants,
+    getPrimerVariant: getPrimerVariant,
     noStore: noStore,
     notFound: notFound,
     errorHandler: errorHandler,

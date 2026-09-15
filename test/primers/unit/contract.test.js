@@ -10,6 +10,7 @@
 // ("path" with or without the /sorghum_v11 basePath; method defaults to POST, expect to valid), or a bare
 // request body whose endpoint comes from the file name (design*.json -> POST /primers/design,
 // check*.json -> POST /primers/check) or, failing that, from its shape (a "pairs" array -> check, else design).
+// variants-*.json (GET /primers/variants[/{variant_id}]) must be wrappers {method, path, query}; their method defaults to GET.
 
 require('../../../api/helpers/primers/node_compat');
 
@@ -89,11 +90,12 @@ test('swagger.yaml validates with sway: no errors or warnings besides the pre-ex
   primersWarnings.should.eql([]);
 });
 
-test('the four /primers operations exist before /{collection}, tagged "Primer design", controller primers, JSON only', function () {
+test('the /primers operations exist before /{collection}, tagged "Primer design", controller primers, JSON only', function () {
   const paths = Object.keys(api.definition.paths);
   const coll = paths.indexOf('/{collection}');
   const expected = [['/primers/design', 'post', 'designPrimers'], ['/primers/genomes', 'get', 'primerGenomes'],
-    ['/primers/check', 'post', 'submitPrimerCheck'], ['/primers/check/{job_id}', 'get', 'getPrimerCheck']];
+    ['/primers/check', 'post', 'submitPrimerCheck'], ['/primers/check/{job_id}', 'get', 'getPrimerCheck'],
+    ['/primers/variants', 'get', 'listPrimerVariants'], ['/primers/variants/{variant_id}', 'get', 'getPrimerVariant']];
   expected.forEach(function (row) {
     const idx = paths.indexOf(row[0]);
     idx.should.be.aboveOrEqual(0, row[0]);
@@ -113,6 +115,8 @@ test('the four /primers operations exist before /{collection}, tagged "Primer de
   // sway resolves concrete urls to the primers paths, not to /{collection}
   api.getPath({ url: basePath + '/primers/design' }).path.should.equal('/primers/design');
   api.getPath({ url: basePath + '/primers/check/0123456789abcdef0123456789abcdef' }).path.should.equal('/primers/check/{job_id}');
+  api.getPath({ url: basePath + '/primers/variants' }).path.should.equal('/primers/variants');
+  api.getPath({ url: basePath + '/primers/variants/tmp_1_13549_TTA_T%2C%2A' }).path.should.equal('/primers/variants/{variant_id}');
 });
 
 test('request definitions are strict (additionalProperties false); response definitions are documented', function () {
@@ -126,9 +130,31 @@ test('request definitions are strict (additionalProperties false); response defi
   d.PrimerCheckRequest.properties.params.additionalProperties.should.equal(false);
   d.PrimerCheckRequest.properties.pairs.items.additionalProperties.should.equal(false);
   d.PrimerCheckRequest.properties.pairs.items.properties.expected.additionalProperties.should.equal(false);
-  ['PrimerError', 'PrimerDesignResponse', 'PrimerGenomesResponse', 'PrimerCheckJob', 'PrimerCheckResults'].forEach(function (name) {
+  ['PrimerError', 'PrimerDesignResponse', 'PrimerGenomesResponse', 'PrimerCheckJob', 'PrimerCheckResults',
+    'PrimerVariantList', 'PrimerVariantLookup', 'PrimerVariant'].forEach(function (name) {
     should.exist(d[name], name);
   });
+});
+
+// Genotyping spec §2.2, §2.6 and §7.7: every new definition is referenced (no UNUSED_DEFINITION), and the additive
+// response fields are documented.
+test('variants definitions (§2.6) are all present and referenced; PrimerWarning.details and the genomes variation fields (§2.2)', function () {
+  const r = api.validate();
+  r.warnings.filter(function (w) { return w.code === 'UNUSED_DEFINITION' && /^Primer/.test(String((w.path || [])[1])); }).should.eql([]);
+  const d = definitions();
+  ['PrimerVariantRecord', 'PrimerVariantIssue', 'PrimerAlleleSite', 'PrimerVariantZone', 'PrimerVariantVcf', 'PrimerVariantMinimal',
+    'PrimerVariantMultiallelic', 'PrimerVariant', 'PrimerVariantSource', 'PrimerVariantList', 'PrimerVariantLookup'].forEach(function (name) {
+    should.exist(d[name], name);
+    should.exist(d[name].properties, name + ' has properties');
+  });
+  d.PrimerWarning.properties.details.type.should.equal('object');
+  d.PrimerGenomesResponse.properties.variation.properties.should.have.keys('available', 'source', 'release');
+  d.PrimerGenomesResponse.properties.variation.properties.source.enum.should.eql(['ensembl']);
+  d.PrimerGenomesResponse.properties.genomes.items.properties.has_variation.type.should.equal('boolean');
+  d.PrimerVariantIssue.properties.code.enum.should.eql(['REF_MISMATCH', 'STAR_ALLELE', 'ALLELE_TOO_LONG', 'UNSUPPORTED_ALLELE', 'REPEAT_TOO_LONG']);
+  // the places M3's normalizer can put a null
+  [d.PrimerAlleleSite.properties.alt_maps_to, d.PrimerVariantZone, d.PrimerVariantMultiallelic, d.PrimerVariant.properties.discriminating,
+    d.PrimerVariant.properties.consequence, d.PrimerVariantRecord.properties.source].forEach(function (s) { s['x-nullable'].should.equal(true); });
 });
 
 // ---- documented bodies -----------------------------------------------------------------------------
@@ -308,6 +334,45 @@ test('POST without Content-Type: application/json is INVALID_CONTENT_TYPE; path 
   invalid('GET', '/primers/check/0123', undefined, 'PATTERN', { headers: {} });
 });
 
+// Genotyping spec §2.3-§2.5 and §7.6: the variant id pattern accepts every real id shape (',' '*' ':' '.', 255
+// characters) once URL-decoded, and rejects '/', a leading '.' or '-', and 256 characters.
+test('GET /primers/variants and /primers/variants/{variant_id}: query and path parameters as documented', function () {
+  const opts = { headers: {} };
+  const list = '/primers/variants?system_name=sorghum_bicolor&region=1&start=11180&end=11290';
+  valid('GET', list, undefined, opts);
+  valid('GET', list + '&types=snv,deletion&include_ems=false&limit=5000', undefined, opts);
+  valid('GET', '/primers/variants', undefined, { headers: {}, query: { system_name: 'sorghum_bicolor', region: '1', start: '11180', end: '11290', types: 'insertion' } });
+  invalid('GET', '/primers/variants?system_name=sorghum_bicolor&region=1&start=11180', undefined, 'REQUIRED', opts);
+  invalid('GET', '/primers/variants?region=1&start=1&end=2', undefined, 'REQUIRED', opts);
+  invalid('GET', list.replace('start=11180', 'start=0'), undefined, 'MINIMUM', opts);
+  invalid('GET', list.replace('start=11180', 'start=abc'), undefined, 'INVALID_TYPE', opts);
+  invalid('GET', list + '&limit=5001', undefined, 'MAXIMUM', opts);
+  invalid('GET', list + '&limit=0', undefined, 'MINIMUM', opts);
+  invalid('GET', list + '&types=snp', undefined, 'ENUM_MISMATCH', opts);
+  invalid('GET', list + '&include_ems=maybe', undefined, 'INVALID_TYPE', opts);
+  invalid('GET', list.replace('sorghum_bicolor', '../etc'), undefined, 'PATTERN', opts);
+  invalid('GET', list.replace('region=1', 'region=' + 'r'.repeat(256)), undefined, 'MAX_LENGTH', opts);
+
+  const lookup = function (id) { return '/primers/variants/' + id + '?system_name=sorghum_bicolor'; };
+  ['rs871475760', 'tmp_1_11502_C_CGT', 'tmp_1_13549_TTA_T%2C%2A', 'tmp_1_13549_TTA_T,*', 'a'.repeat(255), 'X.1:2-3'].forEach(function (id) {
+    valid('GET', lookup(id), undefined, opts);
+  });
+  const op = api.getOperation({ url: basePath + lookup('tmp_1_13549_TTA_T%2C%2A'), method: 'get' });
+  op.getParameter('variant_id').getValue({ url: basePath + lookup('tmp_1_13549_TTA_T%2C%2A') }).value.should.equal('tmp_1_13549_TTA_T,*');
+  ['a%2Fb', '.hidden', '-x', 'a'.repeat(256), 'a%20b'].forEach(function (id) { invalid('GET', lookup(id), undefined, 'PATTERN', opts); });
+  invalid('GET', '/primers/variants/rs871475760', undefined, 'REQUIRED', { headers: {}, query: {} });
+});
+
+test('the variants parameters match variation/index.js and config: kinds, limit, id pattern', function () {
+  const variation = require(path.join(ROOT, 'api/helpers/primers/variation'));
+  const param = function (p, name) { return api.definition.paths[p].get.parameters.find(function (x) { return x.name === name; }); };
+  param('/primers/variants', 'types').items.enum.should.eql(variation.KINDS.slice());
+  definitions().PrimerVariant.properties.kind.enum.should.eql(variation.KINDS.slice());
+  param('/primers/variants', 'limit').maximum.should.equal(config.DEFAULTS.variation.list_limit_max);
+  param('/primers/variants/{variant_id}', 'variant_id').pattern.should.equal(variation.ID_PATTERN);
+  param('/primers/variants', 'system_name').should.match({ pattern: '^[a-z0-9_]+$', maxLength: 128, required: true });
+});
+
 // ---- the swagger definitions and the handlers accept the same closed sets ------------------------------
 
 function cfgForTests() {
@@ -400,15 +465,17 @@ function listJson(dir) {
 
 function fixtureCase(file, json) {
   const name = path.basename(file);
+  const variants = /^variants-/i.test(name);
   if (json && typeof json === 'object' && !Array.isArray(json) && typeof json.path === 'string') {
     return {
-      method: String(json.method || 'POST').toUpperCase(),
+      method: String(json.method || (variants ? 'GET' : 'POST')).toUpperCase(),
       url: json.path.indexOf(basePath) === 0 ? json.path.slice(basePath.length) : json.path,
       body: json.body,
       query: json.query,
       expect: json.expect === 'invalid' ? 'invalid' : 'valid'
     };
   }
+  if (variants) throw new Error(file + ': variants-*.json fixtures must be {method, path, query} wrappers (GET requests have no body)');
   let url = null;
   if (/^design/i.test(name)) url = '/primers/design';
   else if (/^check/i.test(name)) url = '/primers/check';
