@@ -1,0 +1,469 @@
+{
+  "about": "Genotyping spec §7.2 C2: design.normalize(body, built-in config) of each design-*.json request fixture that predates the feature. Recorded by test/primers/tools/record_compat.js; re-record only deliberately.",
+  "normalized": {
+    "design-gene-id-only.json": {
+      "mode": "gene",
+      "gene_id": "SORBI_3001G000700",
+      "transcript_id": null,
+      "system_name": null,
+      "region": null,
+      "sequence": null,
+      "flank_up": 0,
+      "flank_down": 0,
+      "target": null,
+      "included": null,
+      "excluded": [],
+      "avoid_repeats": false,
+      "repeat_mask_mode": null,
+      "junction_spanning": false,
+      "template_only": false,
+      "preset": "pcr",
+      "params": {
+        "opt_size": 20,
+        "min_size": 18,
+        "max_size": 25,
+        "opt_tm": 60,
+        "min_tm": 57,
+        "max_tm": 63,
+        "min_gc": 30,
+        "max_gc": 70,
+        "max_tm_diff": 3,
+        "max_poly_x": 4,
+        "product_size_ranges": [
+          [
+            100,
+            1000
+          ]
+        ],
+        "num_return": 5
+      }
+    },
+    "design-gene-overlay-intervals.json": {
+      "mode": "gene",
+      "gene_id": "SORBI_3004G087700",
+      "transcript_id": "SORBI_3004G087700.3",
+      "system_name": "sorghum_bicolor",
+      "region": null,
+      "sequence": null,
+      "flank_up": 1000,
+      "flank_down": 500,
+      "target": [
+        2000,
+        300
+      ],
+      "included": [
+        1000,
+        4000
+      ],
+      "excluded": [
+        [
+          2500,
+          40
+        ],
+        [
+          3000,
+          20
+        ]
+      ],
+      "avoid_repeats": true,
+      "repeat_mask_mode": "three_prime",
+      "junction_spanning": false,
+      "template_only": false,
+      "preset": "pcr",
+      "params": {
+        "opt_size": 20,
+        "min_size": 18,
+        "max_size": 25,
+        "opt_tm": 61,
+        "min_tm": 57,
+        "max_tm": 64,
+        "min_gc": 30,
+        "max_gc": 70,
+        "max_tm_diff": 3,
+        "max_poly_x": 4,
+        "product_size_ranges": [
+          [
+            100,
+            1000
+          ]
+        ],
+        "num_return": 10
+      }
+    },
+    "design-gene.json": {
+      "mode": "gene",
+      "gene_id": "SORBI_3001G000200",
+      "transcript_id": null,
+      "system_name": "sorghum_bicolor",
+      "region": null,
+      "sequence": null,
+      "flank_up": 200,
+      "flank_down": 100,
+      "target": null,
+      "included": null,
+      "excluded": [],
+      "avoid_repeats": false,
+      "repeat_mask_mode": null,
+      "junction_spanning": false,
+      "template_only": false,
+      "preset": "pcr",
+      "params": {
+        "opt_size": 20,
+        "min_size": 18,
+        "max_size": 25,
+        "opt_tm": 60,
+        "min_tm": 57,
+        "max_tm": 63,
+        "min_gc": 30,
+        "max_gc": 70,
+        "max_tm_diff": 3,
+        "max_poly_x": 4,
+        "product_size_ranges": [
+          [
+            300,
+            800
+          ]
+        ],
+        "num_return": 5
+      }
+    },
+    "design-region-softmask.json": {
+      "mode": "region",
+      "gene_id": null,
+      "transcript_id": null,
+      "system_name": "sorghum_tx436pac",
+      "region": {
+        "region": "4",
+        "start": 7547610,
+        "end": 7564601,
+        "strand": 1
+      },
+      "sequence": null,
+      "flank_up": 0,
+      "flank_down": 0,
+      "target": null,
+      "included": null,
+      "excluded": [],
+      "avoid_repeats": true,
+      "repeat_mask_mode": "n_mask",
+      "junction_spanning": false,
+      "template_only": false,
+      "preset": "pcr",
+      "params": {
+        "opt_size": 20,
+        "min_size": 18,
+        "max_size": 25,
+        "opt_tm": 60,
+        "min_tm": 57,
+        "max_tm": 63,
+        "min_gc": 30,
+        "max_gc": 70,
+        "max_tm_diff": 3,
+        "max_poly_x": 4,
+        "product_size_ranges": [
+          [
+            100,
+            1000
+          ]
+        ],
+        "num_return": 5,
+        "max_ns": 0
+      }
+    },
+    "design-region.json": {
+      "mode": "region",
+      "gene_id": null,
+      "transcript_id": null,
+      "system_name": "sorghum_bicolor",
+      "region": {
+        "region": "1",
+        "start": 11080,
+        "end": 15099,
+        "strand": -1
+      },
+      "sequence": null,
+      "flank_up": 0,
+      "flank_down": 0,
+      "target": [
+        499,
+        50
+      ],
+      "included": [
+        100,
+        3000
+      ],
+      "excluded": [
+        [
+          1000,
+          40
+        ]
+      ],
+      "avoid_repeats": false,
+      "repeat_mask_mode": null,
+      "junction_spanning": false,
+      "template_only": false,
+      "preset": "pcr",
+      "params": {
+        "opt_size": 20,
+        "min_size": 19,
+        "max_size": 22,
+        "opt_tm": 60,
+        "min_tm": 58,
+        "max_tm": 61,
+        "min_gc": 40,
+        "max_gc": 60,
+        "max_tm_diff": 2,
+        "max_poly_x": 4,
+        "product_size_ranges": [
+          [
+            200,
+            300
+          ]
+        ],
+        "num_return": 5
+      }
+    },
+    "design-sequence-template-only.json": {
+      "mode": "sequence",
+      "gene_id": null,
+      "transcript_id": null,
+      "system_name": null,
+      "region": null,
+      "sequence": "acgtacgtacCACAGCAGTCAGTTGGGGTGGAAAACCAGCTTCAGCATCTTGCTTCTATCATTCAGGTGCTTGATCCAAAGTTGCATGGCCACCTAGAAACACTTGGCGGGGGTGACTATCTCTTTGCATTCCGCATGTTCATGGTATTGTTCCGGCGAGAACTATCATTTGGGGATTCCTTGTACCTTTGGGAGATGAT",
+      "flank_up": 0,
+      "flank_down": 0,
+      "target": null,
+      "included": null,
+      "excluded": [],
+      "avoid_repeats": true,
+      "repeat_mask_mode": "three_prime",
+      "junction_spanning": false,
+      "template_only": true,
+      "preset": "pcr",
+      "params": {
+        "opt_size": 20,
+        "min_size": 18,
+        "max_size": 25,
+        "opt_tm": 60,
+        "min_tm": 57,
+        "max_tm": 63,
+        "min_gc": 30,
+        "max_gc": 70,
+        "max_tm_diff": 3,
+        "max_poly_x": 4,
+        "product_size_ranges": [
+          [
+            100,
+            1000
+          ]
+        ],
+        "num_return": 5
+      }
+    },
+    "design-sequence.json": {
+      "mode": "sequence",
+      "gene_id": null,
+      "transcript_id": null,
+      "system_name": "sorghum_bicolor",
+      "region": null,
+      "sequence": ">amp\nATCAAGGATCCATTGGTATTACTGGAGGCTACTTCAGACACGCAAGGTACTTCTACCACCACCACCACCAATGGCAGCAGTGGAAATGGAATTGATGTTGATAACAACTCCATGAACCTTRYCTTGGATAAACAAATCATTGGCTGGAAGCTTACATTACATCAAATAGGCCTTGATGTTCTGCGCACTGACCGCACCATGGTATTTTACGAGAACAAAGATAATCTTTCAAAGTTGTGGGATATTCTTGCTGTCTATGCATGGATCGACAAAGAAGTTGGTTATTGTCAAGGGATGAGTGATTTATGTTCACCCATGATAGTGCTACTCAACGATGAAGCAGATGCATTTTGGTGCTTTGAGAGATTGATGCGTAGGCTGCGAGGCAATTTCAGATGTA\n",
+      "flank_up": 0,
+      "flank_down": 0,
+      "target": null,
+      "included": null,
+      "excluded": [],
+      "avoid_repeats": false,
+      "repeat_mask_mode": null,
+      "junction_spanning": false,
+      "template_only": false,
+      "preset": "pcr",
+      "params": {
+        "opt_size": 20,
+        "min_size": 18,
+        "max_size": 25,
+        "opt_tm": 60,
+        "min_tm": 57,
+        "max_tm": 63,
+        "min_gc": 30,
+        "max_gc": 70,
+        "max_tm_diff": 3,
+        "max_poly_x": 4,
+        "product_size_ranges": [
+          [
+            100,
+            1000
+          ]
+        ],
+        "num_return": 5
+      }
+    },
+    "design-transcript-all-params.json": {
+      "mode": "transcript",
+      "gene_id": "SORBI_3004G087700",
+      "transcript_id": "SORBI_3004G087700.3",
+      "system_name": null,
+      "region": null,
+      "sequence": null,
+      "flank_up": 0,
+      "flank_down": 0,
+      "target": null,
+      "included": null,
+      "excluded": [],
+      "avoid_repeats": false,
+      "repeat_mask_mode": null,
+      "junction_spanning": true,
+      "template_only": false,
+      "preset": "qpcr",
+      "params": {
+        "opt_size": 21,
+        "min_size": 19,
+        "max_size": 26,
+        "opt_tm": 61,
+        "min_tm": 59,
+        "max_tm": 63,
+        "min_gc": 40,
+        "max_gc": 60,
+        "max_tm_diff": 1.5,
+        "max_poly_x": 3,
+        "product_size_ranges": [
+          [
+            80,
+            120
+          ],
+          [
+            120,
+            200
+          ]
+        ],
+        "num_return": 20,
+        "min_3_prime_overlap_of_junction": 5,
+        "min_5_prime_overlap_of_junction": 8,
+        "opt_gc": 50,
+        "gc_clamp": 1,
+        "max_end_stability": 9,
+        "max_ns": 1,
+        "salt_monovalent": 50,
+        "salt_divalent": 3,
+        "dntp_conc": 0.8,
+        "dna_conc": 250
+      }
+    },
+    "design-transcript-pcr-preset.json": {
+      "mode": "transcript",
+      "gene_id": "SORBI_3001G000700",
+      "transcript_id": "SORBI_3001G000700.1",
+      "system_name": null,
+      "region": null,
+      "sequence": null,
+      "flank_up": 0,
+      "flank_down": 0,
+      "target": null,
+      "included": null,
+      "excluded": [],
+      "avoid_repeats": false,
+      "repeat_mask_mode": null,
+      "junction_spanning": true,
+      "template_only": false,
+      "preset": "qpcr",
+      "params": {
+        "opt_size": 20,
+        "min_size": 18,
+        "max_size": 25,
+        "opt_tm": 60,
+        "min_tm": 57,
+        "max_tm": 63,
+        "min_gc": 30,
+        "max_gc": 70,
+        "max_tm_diff": 3,
+        "max_poly_x": 4,
+        "product_size_ranges": [
+          [
+            100,
+            1000
+          ]
+        ],
+        "num_return": 5,
+        "min_3_prime_overlap_of_junction": 4,
+        "min_5_prime_overlap_of_junction": 7
+      }
+    },
+    "design-transcript-single-exon.json": {
+      "mode": "transcript",
+      "gene_id": "SORBI_3001G046200",
+      "transcript_id": "SORBI_3001G046200.2",
+      "system_name": null,
+      "region": null,
+      "sequence": null,
+      "flank_up": 0,
+      "flank_down": 0,
+      "target": null,
+      "included": null,
+      "excluded": [],
+      "avoid_repeats": false,
+      "repeat_mask_mode": null,
+      "junction_spanning": false,
+      "template_only": false,
+      "preset": "qpcr",
+      "params": {
+        "opt_size": 20,
+        "min_size": 18,
+        "max_size": 24,
+        "opt_tm": 60,
+        "min_tm": 58,
+        "max_tm": 62,
+        "min_gc": 35,
+        "max_gc": 65,
+        "max_tm_diff": 2,
+        "max_poly_x": 4,
+        "product_size_ranges": [
+          [
+            70,
+            150
+          ]
+        ],
+        "num_return": 5,
+        "min_3_prime_overlap_of_junction": 4,
+        "min_5_prime_overlap_of_junction": 7
+      }
+    },
+    "design-transcript.json": {
+      "mode": "transcript",
+      "gene_id": "SORBI_3001G000200",
+      "transcript_id": null,
+      "system_name": null,
+      "region": null,
+      "sequence": null,
+      "flank_up": 0,
+      "flank_down": 0,
+      "target": null,
+      "included": null,
+      "excluded": [],
+      "avoid_repeats": false,
+      "repeat_mask_mode": null,
+      "junction_spanning": true,
+      "template_only": false,
+      "preset": "qpcr",
+      "params": {
+        "opt_size": 20,
+        "min_size": 18,
+        "max_size": 24,
+        "opt_tm": 60,
+        "min_tm": 58,
+        "max_tm": 62,
+        "min_gc": 35,
+        "max_gc": 65,
+        "max_tm_diff": 2,
+        "max_poly_x": 4,
+        "product_size_ranges": [
+          [
+            70,
+            150
+          ]
+        ],
+        "num_return": 5,
+        "min_3_prime_overlap_of_junction": 4,
+        "min_5_prime_overlap_of_junction": 7
+      }
+    }
+  }
+}

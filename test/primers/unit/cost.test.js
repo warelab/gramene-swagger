@@ -161,3 +161,45 @@ test('word sizes come from config; an assembly without total_bases is charged 1 
   cost.estimate({ unique_primers: 2, mode: 'gene', reference: { total_bases: null }, cfg: CFG }).cpu_s.should.equal(12); // 2 x 1 Gb x 5.2 + 2 x 0.6
   cost.estimate({ unique_primers: 0, mode: 'gene', reference: BICOLOR, cfg: CFG }).cpu_s.should.equal(0);
 });
+
+// Compatibility C4 (genotyping spec §7.2, §5.4): every estimate above that is not already pinned in full (the
+// specificity-only test pins its own) is pinned here, so the genotyping term cannot move an existing number; without
+// genotyping, breakdown keeps exactly its four keys (breakdown.genotyping appears only when genotyping is requested).
+test('C4 compat: without genotyping every estimate above is unchanged and breakdown has exactly its four keys', function () {
+  const others = otherSorghum();
+  const pan3 = [{ total_bases: 7e8 }, { total_bases: 7e8 }, { total_bases: 7e8 }];
+  const synthetic = [];
+  for (let i = 0; i < 150; i++) synthetic.push({ system_name: 'big_' + i, total_bases: 2e9 });
+  const factor1 = makeCfg({ check: { pangenome_cpu_factor: 1 } });
+  // [case, estimate() options, cpu_s, total, breakdown [reference, transcriptome, pangenome, realign], word_sizes]
+  const rows = [
+    ['sequence mode, 10 primers', { unique_primers: 10, mode: 'sequence', reference: BICOLOR, cfg: CFG }, 43, 1, [36.9, 0, 0, 6]],
+    ['gene, 4 primers, 3 pan-genome genomes', { unique_primers: 4, mode: 'gene', reference: BICOLOR, pangenome: pan3, cfg: CFG }, 62, 4, [14.7, 0, 37, 9.6]],
+    ['the same with genotyping: false', { unique_primers: 4, mode: 'gene', reference: BICOLOR, pangenome: pan3, cfg: CFG, genotyping: false }, 62, 4, [14.7, 0, 37, 9.6]],
+    ['transcript, 4 primers, 3 pan-genome genomes', { unique_primers: 4, mode: 'transcript', reference: BICOLOR, pangenome: pan3, cfg: CFG }, 29, 5, [14.7, 3.1, 7.9, 2.4]],
+    ['re-alignment coefficient 0', { unique_primers: 10, mode: 'gene', reference: BICOLOR, cfg: makeCfg({ check: { realign_cpu_s_per_primer_task: 0 } }) }, 37, 1, [36.9, 0, 0, 0]],
+    ['re-alignment coefficient 1.5', { unique_primers: 10, mode: 'gene', reference: BICOLOR, cfg: makeCfg({ check: { realign_cpu_s_per_primer_task: 1.5 } }) }, 52, 1, [36.9, 0, 0, 15]],
+    ['pan-genome factor 1, 3 genomes', { unique_primers: 4, mode: 'gene', reference: BICOLOR, pangenome: pan3, cfg: factor1 }, 43, 4, [14.7, 0, 18.5, 9.6]],
+    ['pan-genome factor 5, specificity only', { unique_primers: 10, mode: 'gene', reference: BICOLOR, cfg: makeCfg({ check: { pangenome_cpu_factor: 5 } }) }, 43, 1, [36.9, 0, 0, 6]],
+    ['P3 (2 primers), full panel', { unique_primers: 2, mode: 'gene', reference: BICOLOR, pangenome: others, cfg: CFG }, 889, 120, [7.4, 0, 737.5, 144]],
+    ['P3 (2 primers), full panel, factor 1', { unique_primers: 2, mode: 'gene', reference: BICOLOR, pangenome: others, cfg: factor1 }, 521, 120, [7.4, 0, 368.7, 144]],
+    ['10 primers, full panel', { unique_primers: 10, mode: 'gene', reference: BICOLOR, pangenome: others, cfg: CFG }, 4445, 120, [36.9, 0, 3687.3, 720]],
+    ['20 primers, full panel, region mode', { unique_primers: 20, mode: 'region', reference: BICOLOR, pangenome: others, cfg: CFG }, 8889, 120, [73.7, 0, 7374.7, 1440]],
+    ['transcript, 10 primers, full panel, cDNA 0.1 Gb', { unique_primers: 10, mode: 'transcript', reference: BICOLOR, pangenome: others, cfg: CFG, cdna_gb: 0.1 }, 572, 121, [36.9, 5.2, 523.6, 6]],
+    ['transcript, 10 primers, full panel, API cDNA 0.15 Gb', { unique_primers: 10, mode: 'transcript', reference: BICOLOR, pangenome: others, cfg: CFG }, 837, 121, [36.9, 7.8, 785.4, 6]],
+    ['20 primers, 150 synthetic 2 Gb genomes', { unique_primers: 20, mode: 'gene', reference: BICOLOR, pangenome: synthetic, cfg: CFG }, 28286, 151, [73.7, 0, 26400, 1812]],
+    ['reference word size 7, 1 Gb', { unique_primers: 1, mode: 'gene', reference: { system_name: 'x', total_bases: 1e9 }, pangenome: [], cfg: makeCfg({ check: { reference_word_size: 7 } }) }, 2, 1, [1.2, 0, 0, 0.6], { reference: 7, pangenome: 6 }],
+    ['reference without total_bases', { unique_primers: 2, mode: 'gene', reference: { total_bases: null }, cfg: CFG }, 12, 1, [10.4, 0, 0, 1.2]],
+    ['no primers', { unique_primers: 0, mode: 'gene', reference: BICOLOR, cfg: CFG }, 0, 1, [0, 0, 0, 0]]
+  ];
+  rows.forEach(function (row) {
+    const est = cost.estimate(row[1]);
+    Object.keys(est.breakdown).sort().should.eql(['pangenome', 'realign', 'reference', 'transcriptome'], row[0]);
+    est.should.eql({
+      cpu_s: row[2],
+      total: row[3],
+      breakdown: { reference: row[4][0], transcriptome: row[4][1], pangenome: row[4][2], realign: row[4][3] },
+      word_sizes: row[5] || { reference: 5, pangenome: 6 }
+    }, row[0]);
+  });
+});
