@@ -462,24 +462,32 @@ describe('run(): stringency, identical primers, BLAST timeouts, private cwd and 
     should(mine.every((c) => c.cwd === dir)).be.true();
     should(fs.statSync(dir).mode & 0o777).equal(0o700);
 
-    // ctx.tmpdir() returning the world-writable system tmp: run() makes (and removes) its own private directory
-    runInternal.clearVersionCache();
-    const b = ctxOf({ tmpdir: () => os.tmpdir() });
-    const modes = [];
-    const spawn = b.ctx.spawnLines;
-    b.ctx.spawnLines = (cmd, args, o) => {
-      modes.push(fs.statSync(o.cwd).mode & 0o777);
-      return spawn(cmd, args, o);
-    };
-    before = world.calls.length;
-    await run(W.request({ mode: 'region', pairs: [pairP] }), b.ctx, { retryDelayMs: 0 });
-    const cwds = Array.from(new Set(world.calls.slice(before).map((c) => c.cwd)));
-    should(cwds).have.length(1);
-    should(cwds[0]).startWith(path.join(os.tmpdir(), 'primers-check-'));
-    should(modes.length).be.aboveOrEqual(2);
-    should(modes.every((m) => m === 0o700)).be.true();
-    should(fs.existsSync(cwds[0])).be.false();
-    should(runInternal.isPrivateDir(os.tmpdir())).be.false();
+    // ctx.tmpdir() returning a world-writable directory: run() makes (and removes) its own private one inside it.
+    // The directory is created and chmodded here rather than using os.tmpdir() itself, whose mode depends on TMPDIR:
+    // a private TMPDIR (mode 755) would make isPrivateDir true, so run() would reuse it and create nothing.
+    const shared = fs.mkdtempSync(path.join(os.tmpdir(), 'primers-shared-'));
+    fs.chmodSync(shared, 0o1777);
+    try {
+      runInternal.clearVersionCache();
+      const b = ctxOf({ tmpdir: () => shared });
+      const modes = [];
+      const spawn = b.ctx.spawnLines;
+      b.ctx.spawnLines = (cmd, args, o) => {
+        modes.push(fs.statSync(o.cwd).mode & 0o777);
+        return spawn(cmd, args, o);
+      };
+      before = world.calls.length;
+      await run(W.request({ mode: 'region', pairs: [pairP] }), b.ctx, { retryDelayMs: 0 });
+      const cwds = Array.from(new Set(world.calls.slice(before).map((c) => c.cwd)));
+      should(cwds).have.length(1);
+      should(cwds[0]).startWith(path.join(shared, 'primers-check-'));
+      should(modes.length).be.aboveOrEqual(2);
+      should(modes.every((m) => m === 0o700)).be.true();
+      should(fs.existsSync(cwds[0])).be.false();
+      should(runInternal.isPrivateDir(shared)).be.false();
+    } finally {
+      fs.rmSync(shared, { recursive: true, force: true });
+    }
   });
 
   it('bounded (not re-aligned) sites keep coordinates inside the sequence (chk-coords-below-one)', async () => {
