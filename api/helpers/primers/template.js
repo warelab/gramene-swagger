@@ -526,6 +526,8 @@ async function buildTemplate(req, deps) {
 
 module.exports = {
   buildTemplate,
+  buildRegionTemplate,
+  requireRegionLength,
   cleanSequence,
   fetchWindows,
   flankExtent,

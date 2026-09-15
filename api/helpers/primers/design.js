@@ -682,6 +682,7 @@ async function design(body, deps) {
 module.exports = {
   design,
   normalize,
+  parseParams,
   checkParams,
   validateAgainstTemplate,
   junctionList,

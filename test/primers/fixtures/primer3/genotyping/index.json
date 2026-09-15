@@ -1,0 +1,98 @@
+{
+ "generated_by": "test/primers/fixtures/primer3/genotyping/record_genotyping.js",
+ "primer3": "/home/olson/bin/primer3_core -strict_tags",
+ "primer3_version": "2.6.1",
+ "sequence": "test/primers/fixtures/design/sorghum_bicolor_1_10500-12100.plus.txt",
+ "cases": {
+  "rs871475760_kasp": [
+   "rs871475760_kasp_forward_L0",
+   "rs871475760_kasp_reverse_L0"
+  ],
+  "tmp_1_11193_C_T_kasp": [
+   "tmp_1_11193_C_T_kasp_forward_L0",
+   "tmp_1_11193_C_T_kasp_forward_L1",
+   "tmp_1_11193_C_T_kasp_reverse_L0",
+   "tmp_1_11193_C_T_kasp_reverse_L1"
+  ],
+  "rs5413864115_kasp": [
+   "rs5413864115_kasp_forward_L0",
+   "rs5413864115_kasp_forward_L1",
+   "rs5413864115_kasp_reverse_L0",
+   "rs5413864115_kasp_reverse_L1"
+  ],
+  "tmp_1_11502_C_CGT_kasp": [
+   "tmp_1_11502_C_CGT_kasp_reverse_L0"
+  ],
+  "rs871475760_as_pcr": [
+   "rs871475760_as_pcr_forward_L0",
+   "rs871475760_as_pcr_reverse_L0"
+  ]
+ },
+ "runs": {
+  "8a4b926d0ca29890b1ae0f7f6d8c5f26b367a73d29ec31c185012729122e2477": {
+   "name": "rs871475760_kasp_forward_L0",
+   "input": "rs871475760_kasp_forward_L0.input.txt",
+   "output": "rs871475760_kasp_forward_L0.output.txt"
+  },
+  "e9396ad16327c38293881bf9690171f6f374c89f2737d1153e15d1771d437918": {
+   "name": "rs871475760_kasp_reverse_L0",
+   "input": "rs871475760_kasp_reverse_L0.input.txt",
+   "output": "rs871475760_kasp_reverse_L0.output.txt"
+  },
+  "cd8968c2e901ac97b4012c7a03fb3fa8a0b788fea18ba3094f7a40226c1fcdef": {
+   "name": "tmp_1_11193_C_T_kasp_forward_L0",
+   "input": "tmp_1_11193_C_T_kasp_forward_L0.input.txt",
+   "output": "tmp_1_11193_C_T_kasp_forward_L0.output.txt"
+  },
+  "a79b5deae92d7047e43b1bc3af0d5e5779956c532e5f4a65392a572d0f4afbef": {
+   "name": "tmp_1_11193_C_T_kasp_forward_L1",
+   "input": "tmp_1_11193_C_T_kasp_forward_L1.input.txt",
+   "output": "tmp_1_11193_C_T_kasp_forward_L1.output.txt"
+  },
+  "703ef5057a7642ade0fd4542b68e9ccfc0525ec9889934593f71d81b0decb0c6": {
+   "name": "tmp_1_11193_C_T_kasp_reverse_L0",
+   "input": "tmp_1_11193_C_T_kasp_reverse_L0.input.txt",
+   "output": "tmp_1_11193_C_T_kasp_reverse_L0.output.txt"
+  },
+  "da7dfc8e0c9f60f95ff192f62449fb841023f7e35dc607192c2e83cc7e6acb4f": {
+   "name": "tmp_1_11193_C_T_kasp_reverse_L1",
+   "input": "tmp_1_11193_C_T_kasp_reverse_L1.input.txt",
+   "output": "tmp_1_11193_C_T_kasp_reverse_L1.output.txt"
+  },
+  "ec108e88573e52ad0748ce7f0ece3ef533ad727bc5b90c35596de51fcfbca2f8": {
+   "name": "rs5413864115_kasp_forward_L0",
+   "input": "rs5413864115_kasp_forward_L0.input.txt",
+   "output": "rs5413864115_kasp_forward_L0.output.txt"
+  },
+  "08402464831068e348fc65eacbcf2da05fdefd399609e5c2e644a2de603609ba": {
+   "name": "rs5413864115_kasp_forward_L1",
+   "input": "rs5413864115_kasp_forward_L1.input.txt",
+   "output": "rs5413864115_kasp_forward_L1.output.txt"
+  },
+  "35cb7075166e155a8c09396ef00e08896f11487a7412b4baaaa589694fe707a0": {
+   "name": "rs5413864115_kasp_reverse_L0",
+   "input": "rs5413864115_kasp_reverse_L0.input.txt",
+   "output": "rs5413864115_kasp_reverse_L0.output.txt"
+  },
+  "90ae9ca86164e63f83cc55ec96e61e67743d706b220118f52486c85c48bfbf25": {
+   "name": "rs5413864115_kasp_reverse_L1",
+   "input": "rs5413864115_kasp_reverse_L1.input.txt",
+   "output": "rs5413864115_kasp_reverse_L1.output.txt"
+  },
+  "aa677dbfae4a959cd9065914017c063c4cf57a716bd234a30688467952cddde1": {
+   "name": "tmp_1_11502_C_CGT_kasp_reverse_L0",
+   "input": "tmp_1_11502_C_CGT_kasp_reverse_L0.input.txt",
+   "output": "tmp_1_11502_C_CGT_kasp_reverse_L0.output.txt"
+  },
+  "7ea49382921dcaa4bb1e18a5c26bf901fea2a8b0e5d4fbef2ed2c9278731f184": {
+   "name": "rs871475760_as_pcr_forward_L0",
+   "input": "rs871475760_as_pcr_forward_L0.input.txt",
+   "output": "rs871475760_as_pcr_forward_L0.output.txt"
+  },
+  "1009cfe91103a5d9139c27b52ad4febd5405d0c98fa7bc0866ae85f4f3b5dd84": {
+   "name": "rs871475760_as_pcr_reverse_L0",
+   "input": "rs871475760_as_pcr_reverse_L0.input.txt",
+   "output": "rs871475760_as_pcr_reverse_L0.output.txt"
+  }
+ }
+}
