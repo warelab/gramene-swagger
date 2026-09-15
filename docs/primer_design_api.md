@@ -7,9 +7,13 @@ This documents the `/primers*` endpoints served by this gramene-swagger instance
 - **Base path:** `https://data.sorghumbase.org/sorghum_v11` (local dev: `http://localhost:50111/sorghum_v11`)
 - **Controller:** `api/controllers/primers.js`; helpers under `api/helpers/primers/` (check algorithm in `check/`,
   job store and worker in `jobs/`)
-- **Engines:** Primer3 2.6.1 (`primer3_core`, spawned per request) and BLAST+ 2.13.0 (`blastn`, `blastdbcmd`)
-- **Data:** bgzipped FASTA and BLAST databases under `/scratch/olson/fasta/<system_name>/`; gene models from mongo
+- **Engines:** Primer3 2.6.1 (`primer3_core`, spawned per request; `ntthal` for genotyping designs) and BLAST+ 2.13.0
+  (`blastn`, `blastdbcmd`)
+- **Data:** bgzipped FASTA and BLAST databases under `/scratch/olson/fasta/<system_name>/`; gene models from mongo; known
+  variants from Ensembl REST release 115
 - **Design spec:** `docs/primer_design_spec.md` (the approved plan's Overrides take precedence over it)
+- **Genotyping spec:** `docs/genotyping_design_spec.md`; where it differs, this document describes what is implemented
+  ([Genotyping primers](#genotyping-primers-kasp--allele-specific-pcr))
 
 | Endpoint | Purpose | Auth |
 | --- | --- | --- |
@@ -17,6 +21,9 @@ This documents the `/primers*` endpoints served by this gramene-swagger instance
 | `GET /primers/genomes?system_name=` | Same-species genomes and what each can do | none |
 | `POST /primers/check` | Queue a specificity / pan-genome check | none |
 | `GET /primers/check/{job_id}` | Poll a check: progress, partial and final results | none |
+| `GET /primers/variants?system_name=&region=&start=&end=` | Known variants (Ensembl) in a window, normalized | none |
+| `GET /primers/variants/{variant_id}?system_name=` | One Ensembl variation id | none |
+| `POST /primers/genotyping/design` | KASP / allele-specific PCR primer sets for one variant (synchronous, ≤ 45 s) | none |
 
 > **POST bodies must be JSON with `Content-Type: application/json`**, otherwise swagger rejects them with
 > `400` and `errors[].code` `INVALID_CONTENT_TYPE` before the handler runs. Bodies are limited to **100 kb** (`413`).
@@ -44,6 +51,10 @@ post /primers/check '{"system_name":"sorghum_bicolor","mode":"gene","gene_id":"S
   "pairs":[{"id":"P2","left":"GGACAGCTCCACAACATATCAG","right":"GGACATTTGAAGCCCATGGCC",
             "expected":{"region":"4","start":7423537,"end":7423746}}]}'                   # -> 202 {job_id,...}
 curl -s "$BASE/primers/check/<job_id>"                                                   # poll until done|error
+
+curl -s "$BASE/primers/variants?system_name=sorghum_bicolor&region=1&start=11180&end=11290"   # known variants (Ensembl)
+post /primers/genotyping/design '{"system_name":"sorghum_bicolor","variant":{"id":"rs871475760","alt":"A"},
+  "assay":{"type":"kasp","num_sets":2}}'                                                  # KASP sets + a check request
 ```
 
 ---
@@ -77,14 +88,16 @@ Inner codes you will meet: `INVALID_CONTENT_TYPE`, `OBJECT_ADDITIONAL_PROPERTIES
 
 | Status | Codes |
 | --- | --- |
-| 400 | validator errors; `INVALID_REQUEST` (`details.field`), `INVALID_PARAMS` (design: `details.param`; check: `details.field`), `INVALID_SEQUENCE`, `TEMPLATE_TOO_LONG`, `REGION_OUT_OF_BOUNDS`, `INTERVAL_OUT_OF_BOUNDS`, `SYSTEM_NAME_MISMATCH`, `PRIMER3_INPUT_ERROR` (`details.primer3_error`), `DUPLICATE_PAIR_ID`, `TOO_MANY_PRIMERS`, `PRODUCT_TOO_LONG_TO_CHECK`, `GENOME_NOT_CHECKABLE` |
-| 404 | `UNKNOWN_GENE`, `UNKNOWN_TRANSCRIPT`, `UNKNOWN_GENOME`, `UNKNOWN_REGION`, `UNKNOWN_JOB`, `NOT_FOUND` |
+| 400 | validator errors; `INVALID_REQUEST` (`details.field`), `INVALID_PARAMS` (design: `details.param`; check: `details.field`), `INVALID_SEQUENCE`, `TEMPLATE_TOO_LONG`, `REGION_OUT_OF_BOUNDS`, `INTERVAL_OUT_OF_BOUNDS`, `SYSTEM_NAME_MISMATCH`, `PRIMER3_INPUT_ERROR` (`details.primer3_error`), `DUPLICATE_PAIR_ID`, `TOO_MANY_PRIMERS`, `PRODUCT_TOO_LONG_TO_CHECK`, `GENOME_NOT_CHECKABLE`; genotyping: `VARIANT_WINDOW_TOO_LONG`, `INVALID_VARIANT`, `REF_MISMATCH`, `ALT_REQUIRED`, `ALT_NOT_AT_SITE`, `UNSUPPORTED_ALLELE`, `VARIANT_TOO_CLOSE_TO_END`, `VARIANT_TOO_REPETITIVE`, `GENOTYPING_SET_INVALID` |
+| 404 | `UNKNOWN_GENE`, `UNKNOWN_TRANSCRIPT`, `UNKNOWN_GENOME`, `UNKNOWN_REGION`, `UNKNOWN_JOB`, `NOT_FOUND`, `UNKNOWN_VARIANT` |
 | 405 | `METHOD_NOT_ALLOWED` (`details.allowed_methods`) |
 | 413 | body over 100 kb (body-parser shape, below; no `code`) |
-| 422 | `NO_SEQUENCE`, `AMBIGUOUS_ASSEMBLY` (`details.candidates`), `NO_BLASTDB`, `JOB_TOO_LARGE` |
-| 500 | `PRIMER3_FAILED`, `GENE_STRUCTURE_MISMATCH`, `INTERNAL` |
-| 503 | `BUSY` (5 s), `PRIMER3_UNAVAILABLE`, `MONGO_UNAVAILABLE` (30 s), `QUEUE_FULL` (60 s), `JOB_STORE_UNAVAILABLE` (5 s), `FEATURE_DISABLED` (300 s) |
+| 422 | `NO_SEQUENCE`, `AMBIGUOUS_ASSEMBLY` (`details.candidates`), `NO_BLASTDB`, `JOB_TOO_LARGE`, `NO_VARIATION_DATA`, `AMBIGUOUS_VARIANT_MAPPING`, `VARIANT_NOT_ON_ASSEMBLY` |
+| 500 | `PRIMER3_FAILED`, `GENE_STRUCTURE_MISMATCH`, `INTERNAL`, `THERMO_FAILED` |
+| 503 | `BUSY` (5 s), `PRIMER3_UNAVAILABLE`, `MONGO_UNAVAILABLE` (30 s), `QUEUE_FULL` (60 s), `JOB_STORE_UNAVAILABLE` (5 s), `FEATURE_DISABLED` (300 s), `VARIATION_SOURCE_UNAVAILABLE` (30 s; 5 s for `queue_full`), `THERMO_UNAVAILABLE` (60 s, or 5 s) |
 | 504 | `DEADLINE_EXCEEDED` |
+
+The genotyping codes are described under [Genotyping error codes](#genotyping-error-codes).
 
 **Body parser.** An oversized or malformed JSON body is rejected while swagger parses it, before validation, and
 comes back in body-parser's own shape — check `type`, there is no `code`:
@@ -325,15 +338,18 @@ under species 4530).
 ```jsonc
 { "system_name": "sorghum_bicolor",
   "species": { "taxon_id": 4558, "name": "Sorghum bicolor" },
+  "variation": { "available": true, "source": "ensembl", "release": "115" },
   "counts": { "total": 120, "with_blastdb": 120, "with_cdna_blastdb": 120 },
   "genomes": [
     { "system_name": "sorghum_bicolor", "display_name": "Sb bicolor BTx623 v3", "taxon_id": 4558006, "map_id": "GCA_000003195.3",
-      "is_query": true, "has_sequence": true, "has_blastdb": true, "has_cdna_blastdb": true,
+      "is_query": true, "has_sequence": true, "has_blastdb": true, "has_cdna_blastdb": true, "has_variation": true,
       "repeat_masking": "unmasked_copy", "total_bases": 708735318, "warnings": [] },
-    { "system_name": "sorghum_rio", "…": "…", "repeat_masking": "soft_masked" } ] }
+    { "system_name": "sorghum_rio", "…": "…", "has_variation": false, "repeat_masking": "soft_masked" } ] }
 ```
 
 - The query genome is first, then the rest by `display_name`. No filesystem paths are ever returned.
+- `variation` (the query genome) and `genomes[].has_variation` say which genomes have known variants from Ensembl; see
+  [variation fields](#get-primersgenomes-variation-fields).
 - A genome whose assembly cannot be resolved is still listed, with `has_*` false, `repeat_masking: absent`,
   `total_bases: null` and a `warnings` entry (e.g. `AMBIGUOUS_ASSEMBLY`).
 - `ASSEMBLY_MISMATCH` means fewer than 80% of the map's **real** regions were found (by name and length) in the FASTA
@@ -689,6 +705,1714 @@ reference assembly's `ASSEMBLY_MISMATCH` / `AMBIGUOUS_ASSEMBLY` prefixed with it
 
 ---
 
+## Genotyping primers (KASP / allele-specific PCR)
+
+Design primers that tell the two alleles of one variant apart, then check them across the pan-genome. A **set** is two
+allele-specific (AS) primers, whose 3′ base is the base that differs between the REF and the ALT allele, plus one
+**common** primer on the other side of the variant. KASP sets carry the FAM and HEX 5′ tails of the KASP chemistry; sets
+for gel-based allele-specific PCR (`as_pcr`) carry a deliberate mismatch near the 3′ end instead.
+
+- **Variants** come from Ensembl REST release 115, always through this API (a browser never calls Ensembl), or are
+  entered by hand on any genome that has sequence. On this site only `sorghum_bicolor` has Ensembl variation data.
+- **Identity:** a variant is its `key`, `region:position:REF:ALT` in left-aligned VCF form (`1:11109:C:A`, `1:11282:CA:C`,
+  `1:11502:C:CGT`). Designs and check jobs use the key; Ensembl ids are for lookup and display.
+- **Design spec:** `docs/genotyping_design_spec.md`; the § numbers below refer to it. Where the spec and this section
+  differ, this section describes what is implemented, and the spec's last section lists the known differences.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /primers/genomes?system_name=` | Gains `variation` and `genomes[].has_variation`: which genomes have Ensembl variants |
+| `GET /primers/variants?system_name=&region=&start=&end=` | Known variants in a window, normalized, merged and checked against the genome |
+| `GET /primers/variants/{variant_id}?system_name=` | One Ensembl variation id |
+| `POST /primers/genotyping/design` | KASP or AS-PCR sets for one variant (synchronous, ≤ 45 s) |
+| `POST /primers/check` | Gains an optional `genotyping` block: which allele each assembly carries |
+
+**Typical flow**
+
+1. `GET /primers/genomes`: offer the Ensembl variant picker when `variation.available` is true; otherwise ask for region,
+   position, ref and alt.
+2. `GET /primers/variants` over a window (the gene ± 2 kb, say), or `GET /primers/variants/{variant_id}` for a deep link.
+3. `POST /primers/genotyping/design` with the chosen id (or the entry's `vcf`), or with a manual variant.
+4. Export the order sheet from `sets[].order`, `assay.kasp_mix` and `variant.submission_sequence`.
+5. `POST /primers/check` with the design's `check.request` (or the sets you choose), then poll `GET /primers/check/{job_id}`
+   for `results.genotyping`.
+
+### Variants
+
+Every variant object (in list, lookup and design responses) carries these representations. The values are real:
+
+| Field | Meaning | rs871475760 | rs5413864115 | tmp_1_11502_C_CGT |
+| --- | --- | --- | --- | --- |
+| `key` | `region:position:REF:ALT`, left-aligned VCF with an anchor base for indels | `1:11109:C:A` | `1:11282:CA:C` | `1:11502:C:CGT` |
+| `vcf` | `{position, ref, alt}` of the key; what the check takes | `{11109, C, A}` | `{11282, CA, C}` | `{11502, C, CGT}` |
+| `minimal` | Ensembl style `{start, end, ref, alt}`, `-` for an empty allele; an insertion has `start = end + 1` | `{11109, 11109, C, A}` | `{11283, 11283, A, -}` | `{11503, 11502, -, GT}` |
+| `label` | display text | `1:11109 C/A` | `1:11283-11283 A/-` | `1:11502^11503 -/GT` |
+| `kind` | `snv`, `mnv`, `insertion`, `deletion` or `complex` | `snv` | `deletion` | `insertion` |
+| `shift` | how many bases the event can slide right and still give the same haplotype | 0 | 2 | 0 |
+| `zone` | `{start, end}`: the VCF span, both discriminating positions and both ALT 3′ anchor mappings. Only an allele-specific primer may touch it | `{11109, 11109}` | `{11282, 11286}` | `{11502, 11503}` |
+| `discriminating.forward` | `{position, ref_base, alt_base, alt_maps_to}`: the 3′ base of a forward AS primer, the first base (left to right) where the haplotypes differ. `alt_maps_to` is the reference coordinate of the ALT base, `null` for an inserted base | `{11109, C, A, 11109}` | `{11285, A, G, 11286}` | `{11503, A, G, null}` |
+| `discriminating.reverse` | the same, scanning right to left (plus-strand bases) | `{11109, C, A, 11109}` | `{11283, A, C, 11282}` | `{11502, C, T, null}` |
+
+- `ids`: every Ensembl id of the event, the requested id first, then `rs` ids by number, then the rest alphabetically.
+  Records describing the same event (an EVA and a SAP record of one insertion, say) merge into one entry.
+- `synonyms`: Ensembl's synonyms of the requested id (lookup and design by id; `.` is dropped); `[]` in listings.
+- `alleles`, `multiallelic`: the site's alleles, reference first; `multiallelic` is `{alleles, other_alts}` or `null`.
+  A multi-allelic record gives one entry per alternative allele.
+- `records[]`: `{id, source, ems}`. `source` is Ensembl's short source code (`EVA`, `EMS_PMID38100514_Jiao`,
+  `SAP_PMID35653240_Boatwri`), or `null` for an id known only from its lookup. `ems` is true when the source matches
+  `variation.ems_source_pattern` (`^EMS_`). A record is never dropped because of its id; an id Ensembl reports in an
+  unusable form becomes `null`.
+- `ems`: every merged record is EMS. EMS mutations are private to BTx623-background mutant lines.
+- `consequence`, `ref_verified` (REF matches this site's FASTA), `designable` and `issues[]` (`{code, message, details}`,
+  codes `REF_MISMATCH`, `STAR_ALLELE`, `ALLELE_TOO_LONG`, `UNSUPPORTED_ALLELE`, `REPEAT_TOO_LONG`). Only `STAR_ALLELE` (a
+  `*` sibling allele) leaves an entry designable. With `REPEAT_TOO_LONG` (the event slides more than `variation.max_shift`,
+  1,000 bp, or up to the region end) `zone` and `discriminating` are `null`.
+- Design responses add `requested_id` (the id, or `null` for a manual variant) right after `key`, and
+  `submission_sequence`.
+
+**Manual input** (`variant` in a design request): alleles are `A`, `C`, `G`, `T` in any case, at most 50 nt, or `-` for
+an empty allele.
+
+| Style | When | `position` is | rs5413864115 entered this way |
+| --- | --- | --- | --- |
+| VCF | neither allele is `-` | the first base of `ref` | `{"region": "1", "position": 11282, "ref": "CA", "alt": "C"}` |
+| Ensembl | exactly one allele is `-` | deletion: the first deleted base; insertion: the base after the insertion point (`minimal.start`) | `{"region": "1", "position": 11283, "ref": "A", "alt": "-"}` |
+
+The server left-aligns every input, so both rows give key `1:11282:CA:C`. The check's `genotyping.variant` takes VCF style
+only.
+
+**Orientation.** Coordinates are 1-based inclusive on the reference plus strand, and the genotyping template is always
+the plus strand.
+
+| `orientation` | allele-specific primer | its 3′ end | common primer |
+| --- | --- | --- | --- |
+| `forward` | left primer, plus strand | `discriminating.forward.position` | right primer, after `zone.end` |
+| `reverse` | right primer, minus strand | `discriminating.reverse.position` | left primer, before `zone.start` |
+
+### Ensembl, and what happens without it
+
+- **Calls.** `GET {variation.base_url}/overlap/region/{species}/{region}:{start}-{end}?feature=variation;content-type=application/json`
+  in fixed 10 kb chunks (`variation.chunk_bp`), and `GET {variation.base_url}/variation/{species}/{id}?content-type=application/json`.
+  - Only the species in `variation.species` are ever called (`sorghum_bicolor` here).
+  - The region must be a sequence of the assembly and the id must match the id pattern before either goes into a URL,
+    and both are URL-encoded.
+  - Redirects are refused. Each call has an 8 s timeout and a body cap: 1 MB per chunk, 256 KB per lookup.
+- **Resilience,** per API process:
+  - At most 4 outbound calls run at a time (`variation.max_concurrent`). A call that cannot start within 5 s, or finds 256
+    calls already waiting, fails with reason `queue_full` (`retry_after_s` 5).
+  - There is one in-flight request per chunk or id, shared by every caller. A client that disconnects stops waiting
+    without cancelling it.
+  - A circuit breaker opens after 3 failures within 60 s and stays open for 60 s (reason `breaker_open`, `retry_after_s` =
+    the seconds left). A success closes it.
+  - An LRU cache of 500 entries holds validated records only. Results are kept for 1 h (release 115 is static), unknown
+    ids for 5 min, and failures (`timeout`, `transport`, `http_5xx`, `rate_limited`) for 30 s.
+  - A request repeated inside those 30 s answers 503 at once, with the seconds left, and does not count again. The breaker
+    therefore opens only after failures on 3 different chunks or ids.
+
+| Ensembl answers | Result |
+| --- | --- |
+| 200 with JSON of the expected shape | the records, cached |
+| 400 on `/variation/…` with a JSON `error` matching `not found` | `404 UNKNOWN_VARIANT`; cached 5 min, not a breaker failure |
+| another 4xx, a redirect, a non-JSON body (e.g. an HTML 404 from a wrong base URL), a body over the cap, an unexpected shape | `503 VARIATION_SOURCE_UNAVAILABLE`, reason `invalid_response`, `retry_after_s` 30; a breaker failure, not cached |
+| 429, 5xx, a timeout, a network error | reason `rate_limited`, `http_5xx`, `timeout` or `transport`, `retry_after_s` 30; cached 30 s; a breaker failure |
+
+Records are kept when they are variation features of the requested region with integer coordinates and 2–10 alleles made
+of `ACGTN` bases, `-` or `*`. Other records are dropped and counted in warning `VARIATION_RECORDS_SKIPPED {count, reasons}`.
+
+**When Ensembl is unavailable:**
+
+| Call | Answer |
+| --- | --- |
+| `GET /primers/variants`, `GET /primers/variants/{variant_id}` | `503 VARIATION_SOURCE_UNAVAILABLE {retry_after_s, reason}`; offer manual entry |
+| `POST /primers/genotyping/design` with `variant.id` | the same 503 |
+| `POST /primers/genotyping/design` with a manual variant, on a genome with variation data | `200`: the sets are designed, with `neighbours.data: "unavailable"` and warning `NEIGHBOURS_UNAVAILABLE {reason}`. No known variant was screened, and `variant.ids` stays empty |
+| `POST /primers/genotyping/design` on a genome without variation data | `200` with `neighbours.data: "none"` and warning `NO_VARIATION_DATA`; Ensembl is never called |
+| `POST /primers/check`, the check worker, `POST /primers/design`, `GET /primers/genomes` | never call Ensembl |
+
+All the Ensembl work of a design (resolving the id, fetching the neighbours) happens **before** the design takes a Primer3
+slot, inside its 45 s deadline. A slow or failing Ensembl therefore never holds one of the 4 slots, and never turns an
+ordinary `POST /primers/design` into `503 BUSY`.
+
+### Feature flags
+
+| Setting | Effect |
+| --- | --- |
+| `PRIMERS_ENABLED=0` (`enabled`) | Every `/primers` endpoint, the new ones included, answers `503 FEATURE_DISABLED` (retry after 300 s). |
+| `PRIMERS_VARIATION_ENABLED=0` (`variation.enabled`) | Ensembl is switched off. `GET /primers/variants` and `GET /primers/variants/{variant_id}` answer `503 FEATURE_DISABLED` (300 s), and so does a design with `variant.id` on a genome listed in `variation.species` (on other genomes that is `422 NO_VARIATION_DATA`). Manual designs keep working on every genome, as on a genome without data: `neighbours.data: "none"` and warning `NO_VARIATION_DATA`, whose message says the genome has no known-variant data. `GET /primers/genomes` reports `variation.available: false` and `has_variation: false` everywhere. Checks are unaffected. |
+| `PRIMERS_VARIATION_URL` (`variation.base_url`) | Another Ensembl REST base URL. Accepted only as `https://…`, or as `http://127.0.0.1[:port]` for a loopback test server, without credentials, query or fragment. Any other value is ignored with a startup warning. |
+
+### `GET /primers/genomes`: variation fields
+
+Two additive fields; nothing else changed.
+
+- `variation` describes the query genome as `{available, source, release}`. It is never `null`: a genome without data has
+  `{available: false, source: null, release: null}`.
+- `genomes[].has_variation` is true when `variation.enabled` is on, the genome's `system_name` is a key of
+  `variation.species`, and its assembly resolves with a FASTA. On sorghum_v11 that is `sorghum_bicolor` alone (1 of 120).
+  No Ensembl call is made.
+
+<!-- example: request GET /primers/genomes capture=capture-genomes-sorghum_bicolor.json#/request/path -->
+```http
+GET /sorghum_v11/primers/genomes?system_name=sorghum_bicolor
+```
+
+<!-- example: response GET /primers/genomes 200 capture=capture-genomes-sorghum_bicolor.json#/response -->
+```json
+{
+  "system_name": "sorghum_bicolor", "species": { "taxon_id": 4558, "name": "Sorghum bicolor" },
+  "variation": { "available": true, "source": "ensembl", "release": "115" },
+  "counts": { "total": 120, "with_blastdb": 120, "with_cdna_blastdb": 120 },
+  "genomes": [
+    {
+      "system_name": "sorghum_bicolor", "display_name": "Sb bicolor BTx623 v3", "taxon_id": 4558006,
+      "map_id": "GCA_000003195.3", "is_query": true, "has_sequence": true, "has_blastdb": true,
+      "has_cdna_blastdb": true, "has_variation": true, "repeat_masking": "unmasked_copy", "total_bases": 708735318,
+      "warnings": []
+    },
+    {
+      "system_name": "sorghum_rio", "display_name": "Sb bicolor PI651496 Rio", "taxon_id": 4558116,
+      "map_id": "GCA_015952705.1", "is_query": false, "has_sequence": true, "has_blastdb": true,
+      "has_cdna_blastdb": true, "has_variation": false, "repeat_masking": "soft_masked", "total_bases": 729379862,
+      "warnings": []
+    },
+    "…"
+  ]
+}
+```
+
+### `GET /primers/variants`
+
+The known variants of a window on a genome with variation data, one entry per `key`.
+
+| param | in | type | required | rule |
+| --- | --- | --- | --- | --- |
+| `system_name` | query | `^[a-z0-9_]+$`, ≤ 128 | yes | a genome with variation data, else `422 NO_VARIATION_DATA` |
+| `region` | query | string ≤ 255 | yes | a sequence of the assembly, else `404 UNKNOWN_REGION` |
+| `start`, `end` | query | integer ≥ 1 | yes | `start ≤ end ≤` region length, else `400 REGION_OUT_OF_BOUNDS`; at most 50,000 bp (`variation.max_window`), else `400 VARIANT_WINDOW_TOO_LONG {length, max}` |
+| `types` | query | comma-separated `snv`, `mnv`, `insertion`, `deletion`, `complex` | no | default all |
+| `include_ems` | query | boolean | no | default `true`; `false` drops entries whose records are all EMS |
+| `limit` | query | integer 1–5000 | no | default 2000 |
+
+- An entry is in the window when its `minimal` span overlaps `[start, end]`. Entries are sorted by `vcf.position`, then
+  `key`.
+- A multi-allelic record gives one entry per alternative allele, and records of the same event merge into one entry
+  whatever their ids. `synonyms` is always `[]` here.
+- Entries that cannot be designed are listed too, with `designable: false` and their `issues`, so a picker can say why.
+- `total` counts the entries that pass `types` and `include_ems`, and `returned` is at most `limit`. When more matched,
+  `truncated` is `true` and warning `VARIANTS_TRUNCATED {returned, total, limit}` is added.
+- REF is checked against this site's FASTA (`ref_verified`); disagreeing entries add warning `REF_MISMATCHES {count}`.
+- The window is read from the FASTA once (± 1,250 bp). The 10 kb Ensembl chunks are cached for an hour and shared with
+  later designs and lookups at the same locus. The example below took 0.32 s with cold caches.
+
+<!-- example: request GET /primers/variants capture=capture-variants-list-1_11180-11290.json#/request/path -->
+```http
+GET /sorghum_v11/primers/variants?system_name=sorghum_bicolor&region=1&start=11180&end=11290
+```
+
+<!-- example: response GET /primers/variants 200 capture=capture-variants-list-1_11180-11290.json#/response -->
+```json
+{
+  "system_name": "sorghum_bicolor", "region": "1", "start": 11180, "end": 11290,
+  "source": { "name": "ensembl", "release": "115" }, "total": 4, "returned": 4, "truncated": false,
+  "variants": [
+    {
+      "key": "1:11182:A:G", "ids": ["rs873026643"], "synonyms": [], "label": "1:11182 A/G", "kind": "snv",
+      "region": "1", "vcf": { "position": 11182, "ref": "A", "alt": "G" },
+      "minimal": { "start": 11182, "end": 11182, "ref": "A", "alt": "G" }, "alleles": ["A", "G"],
+      "multiallelic": null, "shift": 0, "zone": { "start": 11182, "end": 11182 },
+      "discriminating": {
+        "forward": { "position": 11182, "ref_base": "A", "alt_base": "G", "alt_maps_to": 11182 },
+        "reverse": { "position": 11182, "ref_base": "A", "alt_base": "G", "alt_maps_to": 11182 }
+      },
+      "records": [{ "id": "rs873026643", "source": "EVA", "ems": false }], "ems": false,
+      "consequence": "3_prime_UTR_variant", "ref_verified": true, "designable": true, "issues": []
+    },
+    {
+      "key": "1:11193:C:T", "ids": ["tmp_1_11193_C_T"], "synonyms": [], "label": "1:11193 C/T", "kind": "snv",
+      "region": "1", "vcf": { "position": 11193, "ref": "C", "alt": "T" },
+      "minimal": { "start": 11193, "end": 11193, "ref": "C", "alt": "T" }, "alleles": ["C", "T"],
+      "multiallelic": null, "shift": 0, "zone": { "start": 11193, "end": 11193 },
+      "discriminating": {
+        "forward": { "position": 11193, "ref_base": "C", "alt_base": "T", "alt_maps_to": 11193 },
+        "reverse": { "position": 11193, "ref_base": "C", "alt_base": "T", "alt_maps_to": 11193 }
+      },
+      "records": [{ "id": "tmp_1_11193_C_T", "source": "EMS_PMID38100514_Jiao", "ems": true }], "ems": true,
+      "consequence": "3_prime_UTR_variant", "ref_verified": true, "designable": true, "issues": []
+    },
+    {
+      "key": "1:11203:C:T", "ids": ["tmp_1_11203_C_T"], "synonyms": [], "label": "1:11203 C/T", "kind": "snv",
+      "region": "1", "vcf": { "position": 11203, "ref": "C", "alt": "T" },
+      "minimal": { "start": 11203, "end": 11203, "ref": "C", "alt": "T" }, "alleles": ["C", "T"],
+      "multiallelic": null, "shift": 0, "zone": { "start": 11203, "end": 11203 },
+      "discriminating": {
+        "forward": { "position": 11203, "ref_base": "C", "alt_base": "T", "alt_maps_to": 11203 },
+        "reverse": { "position": 11203, "ref_base": "C", "alt_base": "T", "alt_maps_to": 11203 }
+      },
+      "records": [{ "id": "tmp_1_11203_C_T", "source": "EMS_PMID29378822_Addo-Qu", "ems": true }], "ems": true,
+      "consequence": "3_prime_UTR_variant", "ref_verified": true, "designable": true, "issues": []
+    },
+    {
+      "key": "1:11282:CA:C", "ids": ["rs5413864115"], "synonyms": [], "label": "1:11283-11283 A/-",
+      "kind": "deletion", "region": "1", "vcf": { "position": 11282, "ref": "CA", "alt": "C" },
+      "minimal": { "start": 11283, "end": 11283, "ref": "A", "alt": "-" }, "alleles": ["A", "-"],
+      "multiallelic": null, "shift": 2, "zone": { "start": 11282, "end": 11286 },
+      "discriminating": {
+        "forward": { "position": 11285, "ref_base": "A", "alt_base": "G", "alt_maps_to": 11286 },
+        "reverse": { "position": 11283, "ref_base": "A", "alt_base": "C", "alt_maps_to": 11282 }
+      },
+      "records": [{ "id": "rs5413864115", "source": "EVA", "ems": false }], "ems": false,
+      "consequence": "3_prime_UTR_variant", "ref_verified": true, "designable": true, "issues": []
+    }
+  ],
+  "warnings": []
+}
+```
+
+A genome without variation data:
+
+<!-- example: request GET /primers/variants capture=capture-variants-list-no-variation-data.json#/request/path -->
+```http
+GET /sorghum_v11/primers/variants?system_name=sorghum_rio&region=1&start=1&end=100
+```
+
+<!-- example: response GET /primers/variants 422 capture=capture-variants-list-no-variation-data.json#/response -->
+```json
+{
+  "message": "sorghum_rio has no known-variant data; enter the variant as region, position, ref and alt",
+  "code": "NO_VARIATION_DATA", "details": { "system_name": "sorghum_rio" }
+}
+```
+
+**Errors:** validator `400`; `400 VARIANT_WINDOW_TOO_LONG`, `REGION_OUT_OF_BOUNDS`; `404 UNKNOWN_GENOME`, `UNKNOWN_REGION`;
+`422 NO_VARIATION_DATA`, `NO_SEQUENCE`, `AMBIGUOUS_ASSEMBLY`; `503 VARIATION_SOURCE_UNAVAILABLE`, `FEATURE_DISABLED`,
+`MONGO_UNAVAILABLE`.
+**Warnings:** `VARIATION_RECORDS_SKIPPED {count, reasons}`, `REF_MISMATCHES {count}`, `VARIANTS_TRUNCATED {returned, total, limit}`.
+
+### `GET /primers/variants/{variant_id}`
+
+Resolves one Ensembl variation id.
+
+| param | in | type | required | notes |
+| --- | --- | --- | --- | --- |
+| `variant_id` | path | `^[A-Za-z0-9][A-Za-z0-9_.:,*-]{0,254}$` | yes | URL-encode it: real ids contain `,` and `*` (`tmp_1_13549_TTA_T%2C%2A`) and run to 255 characters |
+| `system_name` | query | `^[a-z0-9_]+$`, ≤ 128 | yes | a genome with variation data |
+
+- Returns every entry of the id, one per alternative allele, including the non-designable ones with their `issues`.
+- Each entry carries every Ensembl id of the same event; a merge adds warning `DUPLICATE_VARIANT_IDS {key, ids}`.
+- `requested_id` is a top-level member; the entries do not repeat it.
+- `synonyms` holds Ensembl's synonyms of the id: `GET /primers/variants/rs871475760?system_name=sorghum_bicolor` gives key
+  `1:11109:C:A` with `synonyms: ["tmp_1_11109_C_A"]`.
+- `records[].source` comes from the overlap records at the id's position, because the lookup itself reports a long title.
+  An id that the overlap does not list is reported from its lookup mapping, with `source: null`.
+- The id must map to exactly one sequence of this assembly: no mapping is `422 VARIANT_NOT_ON_ASSEMBLY {id}`, several are
+  `422 AMBIGUOUS_VARIANT_MAPPING {id, mappings}`.
+
+<!-- example: request GET /primers/variants/{variant_id} capture=capture-variants-lookup-tmp_1_11502_C_CGT.json#/request/path -->
+```http
+GET /sorghum_v11/primers/variants/tmp_1_11502_C_CGT?system_name=sorghum_bicolor
+```
+
+<!-- example: response GET /primers/variants/{variant_id} 200 capture=capture-variants-lookup-tmp_1_11502_C_CGT.json#/response -->
+```json
+{
+  "requested_id": "tmp_1_11502_C_CGT", "system_name": "sorghum_bicolor",
+  "source": { "name": "ensembl", "release": "115" },
+  "variants": [
+    {
+      "key": "1:11502:C:CGT", "ids": ["tmp_1_11502_C_CGT", "rs5413863549"], "synonyms": [],
+      "label": "1:11502^11503 -/GT", "kind": "insertion", "region": "1",
+      "vcf": { "position": 11502, "ref": "C", "alt": "CGT" },
+      "minimal": { "start": 11503, "end": 11502, "ref": "-", "alt": "GT" }, "alleles": ["-", "GT"],
+      "multiallelic": null, "shift": 0, "zone": { "start": 11502, "end": 11503 },
+      "discriminating": {
+        "forward": { "position": 11503, "ref_base": "A", "alt_base": "G", "alt_maps_to": null },
+        "reverse": { "position": 11502, "ref_base": "C", "alt_base": "T", "alt_maps_to": null }
+      },
+      "records": [
+        { "id": "tmp_1_11502_C_CGT", "source": "SAP_PMID35653240_Boatwri", "ems": false },
+        { "id": "rs5413863549", "source": "EVA", "ems": false }
+      ],
+      "ems": false, "consequence": "3_prime_UTR_variant", "ref_verified": true, "designable": true, "issues": []
+    }
+  ],
+  "warnings": [
+    {
+      "code": "DUPLICATE_VARIANT_IDS",
+      "message": "2 Ensembl ids describe the same event 1:11502:C:CGT; they were merged",
+      "details": { "key": "1:11502:C:CGT", "ids": ["tmp_1_11502_C_CGT", "rs5413863549"] }
+    }
+  ]
+}
+```
+
+An unknown id (Ensembl answers 400 "not found", which is cached for 5 minutes):
+
+<!-- example: request GET /primers/variants/{variant_id} capture=capture-variants-lookup-unknown-variant.json#/request/path -->
+```http
+GET /sorghum_v11/primers/variants/rs0000000001?system_name=sorghum_bicolor
+```
+
+<!-- example: response GET /primers/variants/{variant_id} 404 capture=capture-variants-lookup-unknown-variant.json#/response -->
+```json
+{
+  "message": "unknown variant rs0000000001 for sorghum_bicolor", "code": "UNKNOWN_VARIANT",
+  "details": { "id": "rs0000000001", "system_name": "sorghum_bicolor" }
+}
+```
+
+**Errors:** validator `400` (the id pattern); `404 UNKNOWN_VARIANT {id, system_name}`, `UNKNOWN_GENOME`;
+`422 NO_VARIATION_DATA`, `NO_SEQUENCE`, `AMBIGUOUS_ASSEMBLY`, `AMBIGUOUS_VARIANT_MAPPING`, `VARIANT_NOT_ON_ASSEMBLY`;
+`503 VARIATION_SOURCE_UNAVAILABLE`, `FEATURE_DISABLED`, `MONGO_UNAVAILABLE`.
+**Warnings:** `DUPLICATE_VARIANT_IDS {key, ids}`, `VARIATION_RECORDS_SKIPPED`, `REF_MISMATCHES`.
+
+### `POST /primers/genotyping/design`
+
+Synchronous. Designs up to `num_sets` sets for one variant, in both orientations, and returns them ranked with order rows
+and a ready check request.
+
+#### Request
+
+| field | type | notes |
+| --- | --- | --- |
+| `system_name` | `^[a-z0-9_]+$`, ≤ 128 | required |
+| `variant` | object | required: exactly one of `{id [, alt]}` or `{region, position, ref, alt}` |
+| `variant.id` | the Ensembl id pattern | the genome needs variation data; `alt` picks the allele at a multi-allelic site, where it is required |
+| `variant.region`, `variant.position` | string ≤ 255, integer ≥ 1 | manual input |
+| `variant.ref`, `variant.alt` | `^([ACGTacgt]{1,50}\|-)$` | manual input, in [VCF or Ensembl style](#variants) |
+| `assay` | object | below; unset values take the defaults of `assay.type` |
+| `params` | object | a closed subset of the design params, below |
+| `avoid_repeats` | bool | default `false`. When true the template is repeat-masked as in `/primers/design`, except the allele-specific primer window, which is always exempt (`template.features.exempt`) |
+| `repeat_mask_mode` | `n_mask` (default) \| `three_prime` | only with `avoid_repeats` |
+| `template_only` | bool | resolve and verify the variant only. The response has `variant`, `template`, `assay`, `neighbours`, `settings`, `engine` and `warnings`, with `orientations: null`, `sets: []` and `check: null`. Primer3 is not run, and no Primer3 slot is taken unless `avoid_repeats` is set |
+| `label` | `^[A-Za-z0-9_.-]{1,40}$` | prefix of the order-sheet oligo names; default: the first variant id, else the key (other characters become `_`) |
+
+**Assay.** Any combination is accepted (tails on `as_pcr`, a deliberate mismatch on `kasp`); `assay` in the response echoes
+the effective values.
+
+| field | values | `kasp` default | `as_pcr` default |
+| --- | --- | --- | --- |
+| `type` | `kasp` \| `as_pcr` | `kasp` when omitted | |
+| `orientation` | `both` \| `forward` \| `reverse` | `both` | `both` |
+| `tails` | `none` \| `ref_fam_alt_hex` \| `ref_hex_alt_fam` | `ref_fam_alt_hex` | `none` |
+| `deliberate_mismatch` | `none` \| `auto` | `none` | `auto` |
+| `mismatch_position` | `2` \| `3`, the distance from the 3′ end (Little 1995 Table 9.8.1 is defined for 2; 3 is extrapolated) | `2` | `2` |
+| `num_sets` | 1–10 (`genotyping.max_sets`) | 6 (`genotyping.num_sets_default`) | 6 |
+| `max_relaxation` | 0–2 | 2 | 2 |
+| `neighbour_policy` | `avoid_3p` \| `ignore` | `avoid_3p` | `avoid_3p` |
+
+The KASP tails are FAM `GAAGGTGACCAAGTTCATGCT` and HEX `GAAGGTCGGAGTCAACGGATT`.
+
+**Params, presets and the relaxation ladder.**
+
+- **Accepted params:** `opt_size`, `min_size`, `max_size`, `opt_tm`, `min_tm`, `max_tm`, `opt_gc`, `min_gc`, `max_gc`,
+  `max_tm_diff`, `max_poly_x`, `gc_clamp`, `max_end_stability`, `salt_monovalent`, `salt_divalent`, `dntp_conc` and
+  `dna_conc`, with the bounds of [`POST /primers/design`](#params-presets-and-primer3-tags). `product_size_ranges` takes
+  1–4 ranges of integers 20–1000. Anything else (`num_return`, `max_ns`, the junction params) is rejected.
+- **Defaults and levels:** unset params come from the preset. Each ladder level applies its changes on top of the previous
+  level.
+- **Pinned params:** a param the client set is never changed by any level (`settings.pinned`).
+- **Product minimum:** at every level the effective product-range minimum is raised to `2 × max_size + 1`.
+
+| param | `kasp` L0 | L1 | L2 | `as_pcr` L0 | L1 | L2 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `opt_size` / `min_size` / `max_size` | 22 / 18 / 30 | max 32 | – | 24 / 18 / 30 | max 32 | – |
+| `opt_tm` / `min_tm` / `max_tm` | 60 / 57 / 63 | min 55, max 65 | min 52 | 60 / 57 / 63 | min 55, max 65 | min 52 |
+| `min_gc` / `max_gc` | 30 / 70 | 20 / 80 | – | 30 / 70 | 20 / 80 | – |
+| `max_tm_diff` | 3 | – | 6 | 3 | – | 6 |
+| `max_poly_x` | 5 | – | – | 4 | – | – |
+| `product_size_ranges` | `[[50,120]]`, effective `[[61,120]]` | `[[50,150]]`, effective `[[65,150]]` | – | `[[150,300]]` | – | – |
+
+- **Hard floors, never relaxed.** Every allele-specific primer needs a Tm of at least 52 °C (`genotyping.as_min_tm`; for a
+  deliberate-mismatch primer, the Tm of its perfect-match sequence). The derived primers (the ALT primer and any mismatch
+  primer) also need GC ≥ 15 % (`genotyping.as_min_gc`). A set that fails is dropped (`rejected.below_floor`).
+  Primer3's `PRIMER_PICK_ANYWAY` is never used to design.
+- **Where the ladder stops.** It stops at the first level that keeps a set. Sets from level 1 or 2 carry that
+  `relaxation_level`, and the orientation adds warning `RELAXED_CONSTRAINTS`. `settings.ladder` lists each level's changes,
+  and `settings.floors` the floors.
+
+#### How a design works
+
+1. The request rules (below) are checked, and the 45 s deadline starts (`design.deadline_ms`; the semaphore wait counts).
+2. The design resolves:
+   - the assembly;
+   - the variant: by id through Ensembl, or manual;
+   - REF against the FASTA, the shift, both discriminating positions and the zone;
+   - the known variants of the template window.
+
+   **All Ensembl work happens here, before step 3.**
+3. The design takes a Primer3 slot of the design semaphore. The slots are shared with `POST /primers/design`: 4 running and 16
+   waiting per API process, a 10 s wait, then `503 BUSY`.
+4. The template is built: the plus-strand reference from the lower discriminating position − F to the higher one + F,
+   with `F = max(400, largest product-range bound + 40)` (`genotyping.template_flank`), plus its ALT haplotype. An optional
+   repeat mask exempts the allele-specific window.
+5. For each orientation:
+   - Natural targets with `neighbour_policy: "avoid_3p"` get the neighbour check first: a known non-EMS variant in the
+     last 5 nt of the allele-specific primer blocks the orientation.
+   - Primer3 runs once per ladder level, with the allele-specific 3′ end forced (`SEQUENCE_FORCE_LEFT_END` or
+     `SEQUENCE_FORCE_RIGHT_END`) and a 10 nt `SEQUENCE_TARGET` guard just outside the zone. The guard keeps the common
+     primer off the variant on both haplotypes.
+6. Each returned pair, in Primer3 order, is rejected when:
+   - Primer3 ignored the forced end (`rejected.force`);
+   - the common primer touches the zone or the allele-specific primer on either haplotype (`rejected.overlap`);
+   - the common primer ends on a known non-EMS variant where neighbours block (`rejected.common_neighbour_3p`);
+   - it repeats an earlier pair (`rejected.duplicate`).
+7. Scoring, for at most 8 candidates per orientation:
+   - The ALT primer is derived from the REF primer: same 5′ end, 3′ end at the first haplotype difference, which also
+     covers indels.
+   - A deliberate mismatch, when asked for, is looked up in Little 1995 Table 9.8.1.
+   - Derived oligos are scored by Primer3 `check_primers` runs on their own haplotype (`rejected.alt_scoring_failed` when
+     that fails), and the floors apply.
+   - Tailed hairpins and dimers, and the duplex Tm of mismatch primers, come from `ntthal` with the same salts.
+   - Discrimination is the check's own classification of each AS primer on the other allele, not a ΔTm.
+8. Issues, quality, score and ranking; order rows; the check request. The slot is released.
+
+#### Process budget
+
+Each design request has a fixed budget:
+
+| Limit | Value | Config |
+| --- | --- | --- |
+| Pairs returned by each Primer3 design run | 20 | `genotyping.num_return_per_run` |
+| Candidates scored per orientation, over all levels | 8 | `genotyping.max_scored_per_orientation` |
+| Primer3 runs per request (design and `check_primers` runs, each counted when it starts) | 54 | `genotyping.max_primer3_runs` |
+| Distinct `ntthal` calls per request | 272 | `genotyping.max_thermo_calls` |
+| `ntthal` calls at a time, and per-call timeout | 4 per request, 5 s | `genotyping.thermo_concurrency`, `genotyping.thermo_timeout_ms` |
+
+- **Reservation.** Before scoring a candidate, the design reserves its worst case: 1 `check_primers` run (3 with a
+  deliberate mismatch) and 15 `ntthal` calls with tails (plus 2 with a deliberate mismatch).
+- **When a reservation does not fit:**
+  - That pair and the rest of its level stay unscored (`attempts[].not_scored`), and the orientation's ladder stops.
+  - **The response is still a `200`** with the sets scored so far, plus warning `DESIGN_BUDGET_EXHAUSTED {orientation,
+    primer3_runs, thermo_calls, max_primer3_runs, max_thermo_calls, not_scored, sets_returned}`. The counters are as at
+    the end of the request.
+  - An orientation left without a set reports `status: "no_sets"` with `reason: "budget_exhausted"`.
+  - It is never a `500`.
+- **Timing.** The examples below stay within the default caps; they took 0.44–1.0 s over HTTP on the dev instance with
+  live Ensembl. The largest case the caps allow, 54 Primer3 runs and 272 `ntthal` calls, measured about 1.15 s (spec §4.16).
+
+#### Handler rules and errors
+
+In this order; everything up to the Primer3 slot runs before a slot is taken.
+
+| Rule | Error |
+| --- | --- |
+| Unknown keys (swagger rejects them first) | `400 INVALID_REQUEST {field}` |
+| `variant` has `id` together with `region`, `position` or `ref`, or has neither `id` nor all four manual fields | `400 INVALID_VARIANT {reason: "id_or_manual"}` |
+| Manual alleles both `-`, equal, or `-` against something other than bases | `400 INVALID_VARIANT {reason: "alleles"}` |
+| An allele longer than 50 nt | `400 INVALID_VARIANT {reason: "allele_too_long"}` |
+| The params' cross-field rules (`min ≤ opt ≤ max`, `gc_clamp ≤ min_size`, each range `a < b`), at every ladder level | `400 INVALID_PARAMS {param}`, plus `level` when a relaxed level breaks them |
+| The genome and its assembly | `404 UNKNOWN_GENOME`; `422 AMBIGUOUS_ASSEMBLY`, `NO_SEQUENCE`; `503 MONGO_UNAVAILABLE` |
+| By id: the genome has variation data | `422 NO_VARIATION_DATA {system_name}`; `503 FEATURE_DISABLED` when variation is switched off |
+| By id: Ensembl resolves the id onto this assembly | `404 UNKNOWN_VARIANT {id, system_name}`; `422 VARIANT_NOT_ON_ASSEMBLY`, `AMBIGUOUS_VARIANT_MAPPING`; `503 VARIATION_SOURCE_UNAVAILABLE` |
+| By id: `alt` omitted where the site has several designable alternative alleles | `400 ALT_REQUIRED {id, alts}` |
+| By id: `alt` is not an allele of the site | `400 ALT_NOT_AT_SITE {id, alt, alleles}` |
+| An allele `*`, or containing `N` | `400 UNSUPPORTED_ALLELE {allele}` |
+| Manual: the region exists and the variant lies inside it | `404 UNKNOWN_REGION`; `400 REGION_OUT_OF_BOUNDS {region, position, length}` |
+| REF is the genome's bases | `400 REF_MISMATCH {region, position, given, genome}` |
+| The event slides at most 1,000 bp (`variation.max_shift`) | `400 VARIANT_TOO_REPETITIVE {region, position, shift, max}` |
+| The known variants of the template window | by id, a 503 as above; a manual design degrades instead |
+| A Primer3 slot | `503 BUSY` (5 s) |
+| An orientation has room for the smallest product | `400 VARIANT_TOO_CLOSE_TO_END {region, position, region_length, needed}` |
+| Primer3 and `ntthal` | `400 PRIMER3_INPUT_ERROR`; `500 PRIMER3_FAILED`, `THERMO_FAILED {binary}`; `503 PRIMER3_UNAVAILABLE`, `THERMO_UNAVAILABLE {binary, retry_after_s}` (60 s for a missing or non-executable binary, 5 s when it could not be started) |
+| The 45 s deadline, at any step | `504 DEADLINE_EXCEEDED` |
+
+`ntthal` is not checked at startup: a missing binary shows up as `503 THERMO_UNAVAILABLE` on the first design that needs it.
+
+#### Response
+
+| member | content |
+| --- | --- |
+| `variant` | The [variant](#variants), with `requested_id` and `submission_sequence`. A manual variant on a genome with variation data takes `ids`, `records`, `ems`, `consequence`, `alleles` and `multiallelic` from Ensembl (rs5413864115 below). |
+| `template` | `{system_name, region, start, end, strand: 1, length, alt_length, seq, alt_seq, masked, mask_source, mask, masked_fraction, features}`. `seq` is the REF window and `alt_seq` the same window on the ALT haplotype. `features` are in template coordinates: the `variant` and `zone` spans, the `discriminating` indices, `alt_offset` (`len(alt) − len(ref)`), and the `exempt` intervals as `[start, length]`. |
+| `assay` | The effective assay, plus `ems_target` (every record of the target is EMS) and `kasp_mix` (`kasp` only, else `null`). |
+| `neighbours` | `{data: "ensembl" \| "none" \| "unavailable", window, variants, non_ems, ems, dense_non_ems}` for the template window, the target excluded. |
+| `orientations` | `{forward, reverse}`, each `{status, reason, discriminating_position, relaxation_level, sets_found, blockers, attempts}`; `null` with `template_only`. |
+| `sets` | The ranked sets, at most `num_sets`. |
+| `check` | `{request, set_ids, unique_primers, omitted_set_ids}`; `null` when there is no set. |
+| `settings` | `{preset, params, pinned, ladder, floors}`; `params` are level 0, with the product-range minimum raised. |
+| `engine` | `{primer3, thermo, genotyping_design: "1", variation_source}`. `thermo` is `"ntthal "` plus the Primer3 version, because `ntthal` prints none. `variation_source` is `"ensembl 115"` or `null`. `primer3` and `thermo` are `null` with `template_only`. |
+| `warnings` | Response-level [warnings](#genotyping-warning-codes). |
+
+**Orientations**
+
+| `status` | `reason` | meaning |
+| --- | --- | --- |
+| `ok` | `null` | Sets found; `relaxation_level` is the level that kept them. |
+| `blocked` | `neighbour_at_3p` | A known non-EMS variant lies in the last 5 nt of the allele-specific primer (`genotyping.neighbour_3p_window`), listed in `blockers` with `distance_from_3p`. Primer3 is not run. Only natural targets with `neighbour_policy: "avoid_3p"` are blocked. |
+| `skipped` | `too_close_to_end`, `n_in_primer_window`, `not_requested` | No room for the smallest product before the region end; an `N` in the allele-specific primer window; only the other orientation was requested. |
+| `no_sets` | `null`, `below_floor`, `budget_exhausted` | Every allowed level was tried; `attempts[].explain` holds Primer3's reasons. |
+
+`attempts[]` is `{level, changes, explain {left, right, pair}, pairs_returned, rejected {force, overlap,
+common_neighbour_3p, alt_scoring_failed, below_floor, duplicate}, not_scored, sets}`. `pairs_returned` is always the sum of
+`rejected`, `not_scored` and `sets`, and the `explain` lines are parsed as in `/primers/design`.
+
+**Sets**
+
+| member | content |
+| --- | --- |
+| `id`, `rank` | `S1`, `S2`, … by rank (`rank` is 0-based). |
+| `key` | The first 12 hex characters of `sha256(orientation\|as_ref.target_seq\|as_alt.target_seq\|common.target_seq)`. It is stable across re-designs; match check results to sets by the target sequences, never by `id`. |
+| `orientation`, `relaxation_level` | |
+| `quality` | `poor` when any issue is high severity; `usable` when any issue is warn, or `relaxation_level ≥ 1`; else `good`. Quality does not change the order. |
+| `score` | Lower is better. It sums: Primer3's pair penalty; 5 × the relaxation level; 2 × the AS Tm difference above 1.0 °C; 2 × the distance of `common_minus_as` outside −1…+3 °C; for `kasp`, `max(0, REF product − 100) / 25`; and 3 per high and 1 per warn issue, not counting `AS_TM_IMBALANCE`, `COMMON_TM_OUT_OF_RANGE` and info issues. The sum is exact, then rounded (spec §4.16). |
+| `primers` | The `as_ref`, `as_alt` and `common` oligos, below. |
+| `products` | `ref` and `alt`, each `{size, template, genomic, inserted_bases}`; an indel's ALT product differs in size by `alt_offset`. |
+| `thermo` | `ref_common` and `alt_common` `{compl_any_th, compl_end_th}`, and `tailed` (the tailed cross-dimers, `null` without tails). |
+| `tm_balance` | `{as_tm_diff, common_minus_as}`. |
+| `neighbour_sites` | The distinct non-EMS known variants under the three primers. |
+| `primer3_penalty` | The penalty of the Primer3 pair the set was built from, 4 decimals. |
+| `issues`, `warnings` | `issues` holds every [set issue](#genotyping-warning-codes) with its `severity`; `warnings` holds the warn and high ones as `{code, message, details}`. |
+| `check` | `{set: {id, ref_pair, alt_pair}, pairs}`: this set's part of a check request. |
+| `order` | Three order rows, in the order REF, ALT, common. |
+
+**Oligos** (`sets[].primers.*`)
+
+| member | content |
+| --- | --- |
+| `role`, `allele`, `three_prime_base`, `haplotype` | `as_ref`, `as_alt` or `common`; the VCF allele the primer detects (`null` for the common primer, and `CGT` for the ALT primer of the insertion below); its 3′ base; `ref`, `alt` or `both`. |
+| `target_seq` | The part that anneals, as ordered, including any deliberate mismatch. **It is the only sequence a check ever receives.** |
+| `matched_seq` | The perfect match, before any deliberate mismatch. |
+| `dye`, `tail_seq`, `order_seq` | `FAM`, `HEX` or `null`; the 5′ tail or `null`; `tail_seq + target_seq`, which is what the vendor synthesizes. |
+| `len`, `order_len` | The lengths of `target_seq` and `order_seq`. |
+| `tm`, `tm_method`, `matched_tm` | Primer3's Tm (`primer3`). For a deliberate-mismatch primer: the `ntthal` duplex Tm on its own allele (`ntthal_duplex`), with the perfect-match Tm in `matched_tm`. |
+| `gc`, `hairpin_th`, `self_any_th`, `self_end_th`, `end_stability` | GC % computed from the sequence; the untailed structure Tm at 37 °C (negative values are reported as 0). |
+| `primer3_problems` | Primer3's problem text for a derived oligo, e.g. `" Temperature too low;"`. It is informational; the floors decide. |
+| `template`, `genomic`, `inserted_bases` | The span in `template.seq` or `alt_seq`; the genomic footprint (an ALT primer across a deletion has two `blocks`); the bases inside an insertion, which have no reference coordinate. |
+| `deliberate_mismatch` | `null`, or `{position, original_base, new_base, template_base, terminal_pair, terminal_mismatch_class, added_mismatch_class, source}`. |
+| `discrimination` | AS primers only. `{own_allele, other_allele}`, each `{mm_pos, likelihood}` as the check would classify the primer on that allele. `terminal_mismatch_class` is Little 1995's `max`, `strong`, `medium` or `weak`. `in_shift_tract` says whether the 3′ base lies in the indel's shift tract. |
+| `tailed` | The tailed hairpin and self-dimer Tm; `null` without a tail. |
+| `neighbours` | Known variants under the primer, EMS included, each with `distance_from_3p` (1 = the 3′ base). |
+
+Temperatures and percentages have 2 decimals, rounded once, half away from zero, from exact decimals (spec §2.1).
+
+**Neighbouring known variants.**
+
+For natural targets with `neighbour_policy: "avoid_3p"`:
+- In the last 5 nt of an allele-specific primer, a known variant blocks the orientation.
+- In the last 5 nt of the common primer, it rejects that pair (`rejected.common_neighbour_3p`), and the orientation goes on.
+- Elsewhere in a primer, it raises issue `NEIGHBOUR_IN_PRIMER` (warn). There is at most one such issue for the
+  allele-specific pair and one for the common primer.
+
+EMS neighbours never block and never raise an issue; they are listed in `neighbours` only.
+
+For an EMS target (every record is EMS, warning `EMS_TARGET`), or with `neighbour_policy: "ignore"`, nothing blocks. A
+non-EMS variant in a last-5-nt window becomes issue `NEIGHBOUR_AT_3P` (high) instead.
+
+**Order sheet.**
+
+- **`sets[].order[]`** rows are `{name, set_id, set_key, role, allele, dye, order_seq, target_seq, tail_seq, length, tm, gc,
+  orientation, product_size_ref, product_size_alt, variant_key, notes}`.
+  - `name` is `{label}_{set id}_{REF|ALT|COM}`, plus `_FAM` or `_HEX` for a tailed AS primer (`rs871475760_S1_REF_FAM`).
+  - `notes` names a deliberate mismatch (`deliberate mismatch −2 A→G (Little 1995 Table 9.8.1)`) or a tailed hairpin issue
+    (`tail hairpin 51.5 °C`).
+- **`assay.kasp_mix`** is 12 µL of the REF primer, 12 µL of the ALT primer and 30 µL of the common primer, each at 100 µM,
+  plus 46 µL of water. The ratio is from Makhoul et al. 2020; the water volume is inferred.
+- **`variant.submission_sequence`** is 50 bp of reference on each side of `[REF/ALT]`, in minimal alleles with `-` written
+  as nothing (`[/GT]`). Biallelic non-EMS SNV neighbours are written as IUPAC codes. Indel and multi-allelic neighbours
+  stay reference bases and add warning `SUBMISSION_NEIGHBOURS_OMITTED {ids}`.
+
+**The proposed check request.**
+
+- **Body.** `check.request` is a ready `POST /primers/check` body: `{system_name, mode: "region", checks: ["specificity",
+  "pangenome"], pairs, genotyping}`. It has no `genomes`, so every other assembly is checked, and no `params`.
+- **Caps.** Sets are added in rank order while they fit 5 sets (`genotyping.check_max_sets`), 10 pairs (`check.max_pairs`)
+  and 13 distinct primers (`genotyping.check_max_unique_primers`, the most that fit under the 6,000 CPU-s limit over the
+  full panel). The rest are listed in `omitted_set_ids`.
+- **Pairs.** Pair ids are `S1_REF`, `S1_ALT` and so on, `expected` is the REF product, and `genotyping.variant` is
+  `variant.vcf` plus the region.
+
+#### Example: rs871475760, KASP, two sets
+
+The complete response. Only `template.seq` and `template.alt_seq` (801 nt each) are shortened, with `…`. It took 0.95 s.
+
+<!-- example: request POST /primers/genotyping/design capture=capture-genotyping-design-rs871475760-kasp.json#/request/body -->
+```json
+{
+  "system_name": "sorghum_bicolor", "variant": { "id": "rs871475760", "alt": "A" },
+  "assay": { "type": "kasp", "num_sets": 2 }
+}
+```
+
+<!-- example: response POST /primers/genotyping/design 200 capture=capture-genotyping-design-rs871475760-kasp.json#/response -->
+```json
+{
+  "variant": {
+    "key": "1:11109:C:A", "requested_id": "rs871475760", "ids": ["rs871475760"], "synonyms": ["tmp_1_11109_C_A"],
+    "label": "1:11109 C/A", "kind": "snv", "region": "1", "vcf": { "position": 11109, "ref": "C", "alt": "A" },
+    "minimal": { "start": 11109, "end": 11109, "ref": "C", "alt": "A" }, "alleles": ["C", "A"], "multiallelic": null,
+    "shift": 0, "zone": { "start": 11109, "end": 11109 },
+    "discriminating": {
+      "forward": { "position": 11109, "ref_base": "C", "alt_base": "A", "alt_maps_to": 11109 },
+      "reverse": { "position": 11109, "ref_base": "C", "alt_base": "A", "alt_maps_to": 11109 }
+    },
+    "records": [{ "id": "rs871475760", "source": "EVA", "ems": false }], "ems": false,
+    "consequence": "downstream_gene_variant", "ref_verified": true, "designable": true, "issues": [],
+    "submission_sequence": "YCCTCAAAAAGCTTCTCTAAGTGGTTATCCGAATATAGTCATACTCTATT[C/A]TGAATTTCTCGCTAGTCAAAGATAACAAAAATAGCATATTCTGGATTTCT"
+  },
+  "template": {
+    "system_name": "sorghum_bicolor", "region": "1", "start": 10709, "end": 11509, "strand": 1, "length": 801,
+    "alt_length": 801, "seq": "GCGAGTTCTCAAG…CATATGAT", "alt_seq": "GCGAGTTCTCAAG…CATATGAT", "masked": false,
+    "mask_source": null, "mask": [], "masked_fraction": 0,
+    "features": {
+      "variant": { "start": 401, "end": 401 }, "zone": { "start": 401, "end": 401 },
+      "discriminating": { "forward": 401, "reverse": 401 }, "alt_offset": 0, "exempt": [[365, 37], [401, 37]]
+    }
+  },
+  "assay": {
+    "type": "kasp", "orientation": "both", "tails": "ref_fam_alt_hex", "deliberate_mismatch": "none",
+    "mismatch_position": 2, "num_sets": 2, "max_relaxation": 2, "neighbour_policy": "avoid_3p", "ems_target": false,
+    "kasp_mix": {
+      "stock_uM": 100, "as_ref_uL": 12, "as_alt_uL": 12, "common_uL": 30, "water_uL": 46, "total_uL": 100,
+      "source": "Makhoul et al. 2020 (12:12:30 at 100 uM); water to 100 uL inferred"
+    }
+  },
+  "neighbours": {
+    "data": "ensembl", "window": { "start": 10709, "end": 11509 }, "variants": 57, "non_ems": 45, "ems": 12,
+    "dense_non_ems": 0
+  },
+  "orientations": {
+    "forward": {
+      "status": "ok", "reason": null, "discriminating_position": 11109, "relaxation_level": 0, "sets_found": 8,
+      "blockers": [],
+      "attempts": [
+        {
+          "level": 0, "changes": {},
+          "explain": {
+            "left": {
+              "raw": "considered 13, GC content failed 5, low tm 6, ok 2", "considered": 13, "GC content failed": 5,
+              "low tm": 6, "ok": 2
+            },
+            "right": {
+              "raw": "considered 4771, GC content failed 1718, low tm 1123, high tm 777, ok 1153", "considered": 4771,
+              "GC content failed": 1718, "low tm": 1123, "high tm": 777, "ok": 1153
+            },
+            "pair": {
+              "raw": "considered 1463, unacceptable product size 1443, ok 20", "considered": 1463,
+              "unacceptable product size": 1443, "ok": 20
+            }
+          },
+          "pairs_returned": 20,
+          "rejected": {
+            "force": 0, "overlap": 0, "common_neighbour_3p": 0, "alt_scoring_failed": 0, "below_floor": 0,
+            "duplicate": 0
+          },
+          "not_scored": 12, "sets": 8
+        }
+      ]
+    },
+    "reverse": {
+      "status": "ok", "reason": null, "discriminating_position": 11109, "relaxation_level": 0, "sets_found": 8,
+      "blockers": [],
+      "attempts": [
+        {
+          "level": 0, "changes": {},
+          "explain": {
+            "left": {
+              "raw": "considered 4771, GC content failed 598, low tm 1550, high tm 1031, ok 1592", "considered": 4771,
+              "GC content failed": 598, "low tm": 1550, "high tm": 1031, "ok": 1592
+            },
+            "right": { "raw": "considered 13, low tm 6, ok 7", "considered": 13, "low tm": 6, "ok": 7 },
+            "pair": {
+              "raw": "considered 905, unacceptable product size 883, tm diff too large 1, ok 21", "considered": 905,
+              "unacceptable product size": 883, "tm diff too large": 1, "ok": 21
+            }
+          },
+          "pairs_returned": 20,
+          "rejected": {
+            "force": 0, "overlap": 0, "common_neighbour_3p": 6, "alt_scoring_failed": 0, "below_floor": 0,
+            "duplicate": 0
+          },
+          "not_scored": 6, "sets": 8
+        }
+      ]
+    }
+  },
+  "sets": [
+    {
+      "id": "S1", "key": "f9df650ad116", "rank": 0, "orientation": "reverse", "relaxation_level": 0,
+      "quality": "usable", "score": 9.18,
+      "primers": {
+        "as_ref": {
+          "role": "as_ref", "allele": "C", "three_prime_base": "G", "haplotype": "ref",
+          "target_seq": "ATCTTTGACTAGCGAGAAATTCAG", "matched_seq": "ATCTTTGACTAGCGAGAAATTCAG", "dye": "FAM",
+          "tail_seq": "GAAGGTGACCAAGTTCATGCT", "order_seq": "GAAGGTGACCAAGTTCATGCTATCTTTGACTAGCGAGAAATTCAG",
+          "len": 24, "order_len": 45, "tm": 57.1, "tm_method": "primer3", "matched_tm": null, "gc": 37.5,
+          "hairpin_th": 0, "self_any_th": 0, "self_end_th": 0, "end_stability": 3.02, "primer3_problems": null,
+          "template": { "start": 401, "end": 424, "sequence": "ref" },
+          "genomic": {
+            "region": "1", "start": 11109, "end": 11132, "strand": -1, "blocks": [{ "start": 11109, "end": 11132 }]
+          },
+          "inserted_bases": 0, "deliberate_mismatch": null,
+          "discrimination": {
+            "own_allele": { "mm_pos": [], "likelihood": "likely" },
+            "other_allele": { "mm_pos": [1], "likelihood": "likely_weak" }, "terminal_mismatch_class": "max",
+            "in_shift_tract": false
+          },
+          "tailed": { "hairpin_th": 42.62, "self_any_th": 3.63, "self_end_th": 11.64 }, "neighbours": []
+        },
+        "as_alt": {
+          "role": "as_alt", "allele": "A", "three_prime_base": "T", "haplotype": "alt",
+          "target_seq": "ATCTTTGACTAGCGAGAAATTCAT", "matched_seq": "ATCTTTGACTAGCGAGAAATTCAT", "dye": "HEX",
+          "tail_seq": "GAAGGTCGGAGTCAACGGATT", "order_seq": "GAAGGTCGGAGTCAACGGATTATCTTTGACTAGCGAGAAATTCAT",
+          "len": 24, "order_len": 45, "tm": 56.51, "tm_method": "primer3", "matched_tm": null, "gc": 33.33,
+          "hairpin_th": 0, "self_any_th": 0, "self_end_th": 0, "end_stability": 2.57,
+          "primer3_problems": " Temperature too low;", "template": { "start": 401, "end": 424, "sequence": "alt" },
+          "genomic": {
+            "region": "1", "start": 11109, "end": 11132, "strand": -1, "blocks": [{ "start": 11109, "end": 11132 }]
+          },
+          "inserted_bases": 0, "deliberate_mismatch": null,
+          "discrimination": {
+            "own_allele": { "mm_pos": [], "likelihood": "likely" },
+            "other_allele": { "mm_pos": [1], "likelihood": "likely_weak" }, "terminal_mismatch_class": "max",
+            "in_shift_tract": false
+          },
+          "tailed": { "hairpin_th": 51.5, "self_any_th": 26.85, "self_end_th": 11.47 }, "neighbours": []
+        },
+        "common": {
+          "role": "common", "allele": null, "three_prime_base": "A", "haplotype": "both",
+          "target_seq": "AGCTTCTCTAAGTGGTTATCCGA", "matched_seq": "AGCTTCTCTAAGTGGTTATCCGA", "dye": null,
+          "tail_seq": null, "order_seq": "AGCTTCTCTAAGTGGTTATCCGA", "len": 23, "order_len": 23, "tm": 58.72,
+          "tm_method": "primer3", "matched_tm": null, "gc": 43.48, "hairpin_th": 34.99, "self_any_th": 0,
+          "self_end_th": 0, "end_stability": 4.55, "primer3_problems": null,
+          "template": { "start": 360, "end": 382, "sequence": "ref" },
+          "genomic": {
+            "region": "1", "start": 11068, "end": 11090, "strand": 1, "blocks": [{ "start": 11068, "end": 11090 }]
+          },
+          "inserted_bases": 0, "deliberate_mismatch": null, "discrimination": null, "tailed": null,
+          "neighbours": [
+            {
+              "key": "1:11069:G:A", "ids": ["tmp_1_11069_G_A"], "label": "1:11069 G/A", "start": 11069, "end": 11069,
+              "alleles": "G/A", "ems": true, "distance_from_3p": 22
+            }
+          ]
+        }
+      },
+      "products": {
+        "ref": {
+          "size": 65, "template": { "start": 360, "end": 424, "sequence": "ref" },
+          "genomic": {
+            "region": "1", "start": 11068, "end": 11132, "strand": 1, "blocks": [{ "start": 11068, "end": 11132 }]
+          },
+          "inserted_bases": 0
+        },
+        "alt": {
+          "size": 65, "template": { "start": 360, "end": 424, "sequence": "alt" },
+          "genomic": {
+            "region": "1", "start": 11068, "end": 11132, "strand": 1, "blocks": [{ "start": 11068, "end": 11132 }]
+          },
+          "inserted_bases": 0
+        }
+      },
+      "thermo": {
+        "ref_common": { "compl_any_th": 0, "compl_end_th": 0 },
+        "alt_common": { "compl_any_th": 0, "compl_end_th": 0 },
+        "tailed": {
+          "ref_alt_any_th": 6.89, "ref_alt_end_th": 8.21, "ref_common_any_th": 0, "ref_common_end_th": 0,
+          "alt_common_any_th": 5.46, "alt_common_end_th": 0
+        }
+      },
+      "tm_balance": { "as_tm_diff": 0.59, "common_minus_as": 1.62 }, "neighbour_sites": 0, "primer3_penalty": 7.1797,
+      "warnings": [
+        {
+          "code": "ALT_PRIMER_SUBOPTIMAL",
+          "message": "the derived as_alt primer would not have been chosen de novo (Primer3: temperature too low); it clears the hard floors",
+          "details": { "oligo": "as_alt", "problems": " Temperature too low;" }
+        },
+        {
+          "code": "TAILED_STRUCTURE", "message": "HEX-tailed as_alt: hairpin Tm 51.50 °C is above 47 °C",
+          "details": { "oligo": "as_alt", "metric": "hairpin_th", "value": 51.5, "severity": "warn" }
+        }
+      ],
+      "issues": [
+        {
+          "code": "ALT_PRIMER_SUBOPTIMAL", "severity": "warn",
+          "message": "as_alt: Primer3 reports temperature too low",
+          "details": { "oligo": "as_alt", "problems": " Temperature too low;" }
+        },
+        {
+          "code": "TAILED_STRUCTURE", "severity": "warn", "message": "HEX-tailed as_alt hairpin 51.50 °C",
+          "details": { "oligo": "as_alt", "metric": "hairpin_th", "value": 51.5 }
+        }
+      ],
+      "check": {
+        "set": { "id": "S1", "ref_pair": "S1_REF", "alt_pair": "S1_ALT" },
+        "pairs": [
+          {
+            "id": "S1_REF", "left": "AGCTTCTCTAAGTGGTTATCCGA", "right": "ATCTTTGACTAGCGAGAAATTCAG",
+            "expected": { "region": "1", "start": 11068, "end": 11132 }
+          },
+          {
+            "id": "S1_ALT", "left": "AGCTTCTCTAAGTGGTTATCCGA", "right": "ATCTTTGACTAGCGAGAAATTCAT",
+            "expected": { "region": "1", "start": 11068, "end": 11132 }
+          }
+        ]
+      },
+      "order": [
+        {
+          "name": "rs871475760_S1_REF_FAM", "set_id": "S1", "set_key": "f9df650ad116", "role": "as_ref",
+          "allele": "C", "dye": "FAM", "order_seq": "GAAGGTGACCAAGTTCATGCTATCTTTGACTAGCGAGAAATTCAG",
+          "target_seq": "ATCTTTGACTAGCGAGAAATTCAG", "tail_seq": "GAAGGTGACCAAGTTCATGCT", "length": 45, "tm": 57.1,
+          "gc": 37.5, "orientation": "reverse", "product_size_ref": 65, "product_size_alt": 65,
+          "variant_key": "1:11109:C:A", "notes": ""
+        },
+        {
+          "name": "rs871475760_S1_ALT_HEX", "set_id": "S1", "set_key": "f9df650ad116", "role": "as_alt",
+          "allele": "A", "dye": "HEX", "order_seq": "GAAGGTCGGAGTCAACGGATTATCTTTGACTAGCGAGAAATTCAT",
+          "target_seq": "ATCTTTGACTAGCGAGAAATTCAT", "tail_seq": "GAAGGTCGGAGTCAACGGATT", "length": 45, "tm": 56.51,
+          "gc": 33.33, "orientation": "reverse", "product_size_ref": 65, "product_size_alt": 65,
+          "variant_key": "1:11109:C:A", "notes": "tail hairpin 51.5 °C"
+        },
+        {
+          "name": "rs871475760_S1_COM", "set_id": "S1", "set_key": "f9df650ad116", "role": "common", "allele": null,
+          "dye": null, "order_seq": "AGCTTCTCTAAGTGGTTATCCGA", "target_seq": "AGCTTCTCTAAGTGGTTATCCGA",
+          "tail_seq": null, "length": 23, "tm": 58.72, "gc": 43.48, "orientation": "reverse", "product_size_ref": 65,
+          "product_size_alt": 65, "variant_key": "1:11109:C:A", "notes": ""
+        }
+      ]
+    },
+    {
+      "id": "S2", "key": "1accc54c262d", "rank": 1, "orientation": "forward", "relaxation_level": 0,
+      "quality": "poor", "score": 19.63,
+      "primers": {
+        "as_ref": {
+          "role": "as_ref", "allele": "C", "three_prime_base": "C", "haplotype": "ref",
+          "target_seq": "GGTTATCCGAATATAGTCATACTCTATTC", "matched_seq": "GGTTATCCGAATATAGTCATACTCTATTC", "dye": "FAM",
+          "tail_seq": "GAAGGTGACCAAGTTCATGCT", "order_seq": "GAAGGTGACCAAGTTCATGCTGGTTATCCGAATATAGTCATACTCTATTC",
+          "len": 29, "order_len": 50, "tm": 57.28, "tm_method": "primer3", "matched_tm": null, "gc": 34.48,
+          "hairpin_th": 39.2, "self_any_th": 12.01, "self_end_th": 12.01, "end_stability": 1.75,
+          "primer3_problems": null, "template": { "start": 373, "end": 401, "sequence": "ref" },
+          "genomic": {
+            "region": "1", "start": 11081, "end": 11109, "strand": 1, "blocks": [{ "start": 11081, "end": 11109 }]
+          },
+          "inserted_bases": 0, "deliberate_mismatch": null,
+          "discrimination": {
+            "own_allele": { "mm_pos": [], "likelihood": "likely" },
+            "other_allele": { "mm_pos": [1], "likelihood": "likely_weak" }, "terminal_mismatch_class": "max",
+            "in_shift_tract": false
+          },
+          "tailed": { "hairpin_th": 36.16, "self_any_th": 3.63, "self_end_th": 12.01 }, "neighbours": []
+        },
+        "as_alt": {
+          "role": "as_alt", "allele": "A", "three_prime_base": "A", "haplotype": "alt",
+          "target_seq": "GGTTATCCGAATATAGTCATACTCTATTA", "matched_seq": "GGTTATCCGAATATAGTCATACTCTATTA", "dye": "HEX",
+          "tail_seq": "GAAGGTCGGAGTCAACGGATT", "order_seq": "GAAGGTCGGAGTCAACGGATTGGTTATCCGAATATAGTCATACTCTATTA",
+          "len": 29, "order_len": 50, "tm": 56.34, "tm_method": "primer3", "matched_tm": null, "gc": 31.03,
+          "hairpin_th": 30.63, "self_any_th": 0.58, "self_end_th": 0, "end_stability": 0.98,
+          "primer3_problems": " Temperature too low;", "template": { "start": 373, "end": 401, "sequence": "alt" },
+          "genomic": {
+            "region": "1", "start": 11081, "end": 11109, "strand": 1, "blocks": [{ "start": 11081, "end": 11109 }]
+          },
+          "inserted_bases": 0, "deliberate_mismatch": null,
+          "discrimination": {
+            "own_allele": { "mm_pos": [], "likelihood": "likely" },
+            "other_allele": { "mm_pos": [1], "likelihood": "likely_weak" }, "terminal_mismatch_class": "max",
+            "in_shift_tract": false
+          },
+          "tailed": { "hairpin_th": 66.22, "self_any_th": 27.34, "self_end_th": 10.26 }, "neighbours": []
+        },
+        "common": {
+          "role": "common", "allele": null, "three_prime_base": "A", "haplotype": "both",
+          "target_seq": "TCTTTGTCTACTGAGAAATCCAGA", "matched_seq": "TCTTTGTCTACTGAGAAATCCAGA", "dye": null,
+          "tail_seq": null, "order_seq": "TCTTTGTCTACTGAGAAATCCAGA", "len": 24, "order_len": 24, "tm": 57.08,
+          "tm_method": "primer3", "matched_tm": null, "gc": 37.5, "hairpin_th": 35.39, "self_any_th": 0,
+          "self_end_th": 0, "end_stability": 3.86, "primer3_problems": null,
+          "template": { "start": 441, "end": 464, "sequence": "ref" },
+          "genomic": {
+            "region": "1", "start": 11149, "end": 11172, "strand": -1, "blocks": [{ "start": 11149, "end": 11172 }]
+          },
+          "inserted_bases": 0, "deliberate_mismatch": null, "discrimination": null, "tailed": null,
+          "neighbours": [
+            {
+              "key": "1:11161:A:T", "ids": ["rs872438201"], "label": "1:11161 A/T", "start": 11161, "end": 11161,
+              "alleles": "A/T", "ems": false, "distance_from_3p": 13
+            }
+          ]
+        }
+      },
+      "products": {
+        "ref": {
+          "size": 92, "template": { "start": 373, "end": 464, "sequence": "ref" },
+          "genomic": {
+            "region": "1", "start": 11081, "end": 11172, "strand": 1, "blocks": [{ "start": 11081, "end": 11172 }]
+          },
+          "inserted_bases": 0
+        },
+        "alt": {
+          "size": 92, "template": { "start": 373, "end": 464, "sequence": "alt" },
+          "genomic": {
+            "region": "1", "start": 11081, "end": 11172, "strand": 1, "blocks": [{ "start": 11081, "end": 11172 }]
+          },
+          "inserted_bases": 0
+        }
+      },
+      "thermo": {
+        "ref_common": { "compl_any_th": 0, "compl_end_th": 0 },
+        "alt_common": { "compl_any_th": 0, "compl_end_th": 0 },
+        "tailed": {
+          "ref_alt_any_th": 5.46, "ref_alt_end_th": 0, "ref_common_any_th": 0, "ref_common_end_th": 0,
+          "alt_common_any_th": 0, "alt_common_end_th": 0
+        }
+      },
+      "tm_balance": { "as_tm_diff": 0.95, "common_minus_as": -0.2 }, "neighbour_sites": 1, "primer3_penalty": 14.6344,
+      "warnings": [
+        {
+          "code": "ALT_PRIMER_SUBOPTIMAL",
+          "message": "the derived as_alt primer would not have been chosen de novo (Primer3: temperature too low); it clears the hard floors",
+          "details": { "oligo": "as_alt", "problems": " Temperature too low;" }
+        },
+        {
+          "code": "TAILED_STRUCTURE",
+          "message": "HEX-tailed as_alt: hairpin Tm 66.22 °C is at or above 55 °C, the final KASP annealing temperature",
+          "details": { "oligo": "as_alt", "metric": "hairpin_th", "value": 66.22, "severity": "high" }
+        },
+        {
+          "code": "NEIGHBOUR_IN_PRIMER",
+          "message": "known variant rs872438201 lies in the common primer, 13 nt from its 3′ end",
+          "details": { "role": "common", "ids": ["rs872438201"], "distances": [13] }
+        }
+      ],
+      "issues": [
+        {
+          "code": "ALT_PRIMER_SUBOPTIMAL", "severity": "warn",
+          "message": "as_alt: Primer3 reports temperature too low",
+          "details": { "oligo": "as_alt", "problems": " Temperature too low;" }
+        },
+        {
+          "code": "TAILED_STRUCTURE", "severity": "high", "message": "HEX-tailed as_alt hairpin 66.22 °C",
+          "details": { "oligo": "as_alt", "metric": "hairpin_th", "value": 66.22 }
+        },
+        {
+          "code": "NEIGHBOUR_IN_PRIMER", "severity": "warn",
+          "message": "rs872438201 in the common primer, 13 nt from its 3′ end",
+          "details": { "role": "common", "ids": ["rs872438201"], "distances": [13] }
+        }
+      ],
+      "check": {
+        "set": { "id": "S2", "ref_pair": "S2_REF", "alt_pair": "S2_ALT" },
+        "pairs": [
+          {
+            "id": "S2_REF", "left": "GGTTATCCGAATATAGTCATACTCTATTC", "right": "TCTTTGTCTACTGAGAAATCCAGA",
+            "expected": { "region": "1", "start": 11081, "end": 11172 }
+          },
+          {
+            "id": "S2_ALT", "left": "GGTTATCCGAATATAGTCATACTCTATTA", "right": "TCTTTGTCTACTGAGAAATCCAGA",
+            "expected": { "region": "1", "start": 11081, "end": 11172 }
+          }
+        ]
+      },
+      "order": [
+        {
+          "name": "rs871475760_S2_REF_FAM", "set_id": "S2", "set_key": "1accc54c262d", "role": "as_ref",
+          "allele": "C", "dye": "FAM", "order_seq": "GAAGGTGACCAAGTTCATGCTGGTTATCCGAATATAGTCATACTCTATTC",
+          "target_seq": "GGTTATCCGAATATAGTCATACTCTATTC", "tail_seq": "GAAGGTGACCAAGTTCATGCT", "length": 50,
+          "tm": 57.28, "gc": 34.48, "orientation": "forward", "product_size_ref": 92, "product_size_alt": 92,
+          "variant_key": "1:11109:C:A", "notes": ""
+        },
+        {
+          "name": "rs871475760_S2_ALT_HEX", "set_id": "S2", "set_key": "1accc54c262d", "role": "as_alt",
+          "allele": "A", "dye": "HEX", "order_seq": "GAAGGTCGGAGTCAACGGATTGGTTATCCGAATATAGTCATACTCTATTA",
+          "target_seq": "GGTTATCCGAATATAGTCATACTCTATTA", "tail_seq": "GAAGGTCGGAGTCAACGGATT", "length": 50,
+          "tm": 56.34, "gc": 31.03, "orientation": "forward", "product_size_ref": 92, "product_size_alt": 92,
+          "variant_key": "1:11109:C:A", "notes": "tail hairpin 66.2 °C"
+        },
+        {
+          "name": "rs871475760_S2_COM", "set_id": "S2", "set_key": "1accc54c262d", "role": "common", "allele": null,
+          "dye": null, "order_seq": "TCTTTGTCTACTGAGAAATCCAGA", "target_seq": "TCTTTGTCTACTGAGAAATCCAGA",
+          "tail_seq": null, "length": 24, "tm": 57.08, "gc": 37.5, "orientation": "forward", "product_size_ref": 92,
+          "product_size_alt": 92, "variant_key": "1:11109:C:A", "notes": ""
+        }
+      ]
+    }
+  ],
+  "check": {
+    "request": {
+      "system_name": "sorghum_bicolor", "mode": "region", "checks": ["specificity", "pangenome"],
+      "pairs": [
+        {
+          "id": "S1_REF", "left": "AGCTTCTCTAAGTGGTTATCCGA", "right": "ATCTTTGACTAGCGAGAAATTCAG",
+          "expected": { "region": "1", "start": 11068, "end": 11132 }
+        },
+        {
+          "id": "S1_ALT", "left": "AGCTTCTCTAAGTGGTTATCCGA", "right": "ATCTTTGACTAGCGAGAAATTCAT",
+          "expected": { "region": "1", "start": 11068, "end": 11132 }
+        },
+        {
+          "id": "S2_REF", "left": "GGTTATCCGAATATAGTCATACTCTATTC", "right": "TCTTTGTCTACTGAGAAATCCAGA",
+          "expected": { "region": "1", "start": 11081, "end": 11172 }
+        },
+        {
+          "id": "S2_ALT", "left": "GGTTATCCGAATATAGTCATACTCTATTA", "right": "TCTTTGTCTACTGAGAAATCCAGA",
+          "expected": { "region": "1", "start": 11081, "end": 11172 }
+        }
+      ],
+      "genotyping": {
+        "variant": { "region": "1", "position": 11109, "ref": "C", "alt": "A" },
+        "sets": [
+          { "id": "S1", "ref_pair": "S1_REF", "alt_pair": "S1_ALT" },
+          { "id": "S2", "ref_pair": "S2_REF", "alt_pair": "S2_ALT" }
+        ]
+      }
+    },
+    "set_ids": ["S1", "S2"], "unique_primers": 6, "omitted_set_ids": []
+  },
+  "settings": {
+    "preset": "kasp",
+    "params": {
+      "opt_size": 22, "min_size": 18, "max_size": 30, "opt_tm": 60, "min_tm": 57, "max_tm": 63, "min_gc": 30,
+      "max_gc": 70, "max_tm_diff": 3, "max_poly_x": 5, "product_size_ranges": [[61, 120]]
+    },
+    "pinned": [],
+    "ladder": [
+      {
+        "level": 1,
+        "changes": {
+          "max_size": 32, "min_tm": 55, "max_tm": 65, "min_gc": 20, "max_gc": 80, "product_size_ranges": [[65, 150]]
+        }
+      },
+      { "level": 2, "changes": { "min_tm": 52, "max_tm_diff": 6 } }
+    ],
+    "floors": { "as_min_tm": 52, "as_min_gc": 15 }
+  },
+  "engine": {
+    "primer3": "2.6.1", "thermo": "ntthal 2.6.1", "genotyping_design": "1", "variation_source": "ensembl 115"
+  },
+  "warnings": []
+}
+```
+
+#### Example: tmp_1_11502_C_CGT, forward orientation blocked
+
+An insertion, designed by id:
+- Two Ensembl ids describe the event, and they are merged.
+- The forward orientation is blocked by rs5413863234, 4 nt from the allele-specific 3′ end, so the set comes from the
+  reverse orientation.
+- Its ALT primer ends on an inserted base (`inserted_bases: 1`, `allele: "CGT"`).
+
+This is an excerpt: `"…": "…"` marks where members were left out.
+
+<!-- example: request POST /primers/genotyping/design capture=capture-genotyping-design-tmp_1_11502_C_CGT.json#/request/body -->
+```json
+{ "system_name": "sorghum_bicolor", "variant": { "id": "tmp_1_11502_C_CGT" }, "assay": { "num_sets": 1 } }
+```
+
+<!-- example: response POST /primers/genotyping/design 200 capture=capture-genotyping-design-tmp_1_11502_C_CGT.json#/response -->
+```json
+{
+  "variant": {
+    "key": "1:11502:C:CGT", "requested_id": "tmp_1_11502_C_CGT", "ids": ["tmp_1_11502_C_CGT", "rs5413863549"],
+    "label": "1:11502^11503 -/GT", "kind": "insertion", "vcf": { "position": 11502, "ref": "C", "alt": "CGT" },
+    "minimal": { "start": 11503, "end": 11502, "ref": "-", "alt": "GT" }, "shift": 0,
+    "zone": { "start": 11502, "end": 11503 },
+    "discriminating": {
+      "forward": { "position": 11503, "ref_base": "A", "alt_base": "G", "alt_maps_to": null },
+      "reverse": { "position": 11502, "ref_base": "C", "alt_base": "T", "alt_maps_to": null }
+    },
+    "records": [
+      { "id": "tmp_1_11502_C_CGT", "source": "SAP_PMID35653240_Boatwri", "ems": false },
+      { "id": "rs5413863549", "source": "EVA", "ems": false }
+    ],
+    "…": "…"
+  },
+  "template": {
+    "region": "1", "start": 11102, "end": 11903, "length": 802, "alt_length": 804,
+    "features": {
+      "variant": { "start": 401, "end": 401 }, "zone": { "start": 401, "end": 402 },
+      "discriminating": { "forward": 402, "reverse": 401 }, "alt_offset": 2, "exempt": [[366, 37], [401, 37]]
+    },
+    "…": "…"
+  },
+  "neighbours": {
+    "data": "ensembl", "window": { "start": 11102, "end": 11903 }, "variants": 59, "non_ems": 49, "ems": 10,
+    "dense_non_ems": 5
+  },
+  "orientations": {
+    "forward": {
+      "status": "blocked", "reason": "neighbour_at_3p", "discriminating_position": 11503, "relaxation_level": null,
+      "sets_found": 0,
+      "blockers": [
+        {
+          "key": "1:11500:G:A", "ids": ["rs5413863234"], "label": "1:11500 G/A", "start": 11500, "end": 11500,
+          "alleles": "G/A", "ems": false, "distance_from_3p": 4
+        }
+      ],
+      "attempts": []
+    },
+    "reverse": {
+      "status": "ok", "reason": null, "discriminating_position": 11502, "relaxation_level": 0, "sets_found": 8,
+      "blockers": [], "…": "…"
+    }
+  },
+  "sets": [
+    {
+      "id": "S1", "key": "53942cb55348", "rank": 0, "orientation": "reverse", "relaxation_level": 0,
+      "quality": "usable", "score": 9.56,
+      "primers": {
+        "as_ref": {
+          "role": "as_ref", "allele": "C", "three_prime_base": "G", "target_seq": "GCAGGAAAAGAAATCCTAACATCATATG",
+          "dye": "FAM", "len": 28, "tm": 59.19, "gc": 35.71,
+          "genomic": {
+            "region": "1", "start": 11502, "end": 11529, "strand": -1, "blocks": [{ "start": 11502, "end": 11529 }]
+          },
+          "inserted_bases": 0,
+          "neighbours": [
+            {
+              "key": "1:11509:T:C", "ids": ["rs5413864238"], "label": "1:11509 T/C", "start": 11509, "end": 11509,
+              "alleles": "T/C", "ems": false, "distance_from_3p": 8
+            },
+            {
+              "key": "1:11516:A:T", "ids": ["rs5413863874"], "label": "1:11516 A/T", "start": 11516, "end": 11516,
+              "alleles": "A/T", "ems": false, "distance_from_3p": 15
+            },
+            {
+              "key": "1:11523:T:A", "ids": ["rs5413863270"], "label": "1:11523 T/A", "start": 11523, "end": 11523,
+              "alleles": "T/A", "ems": false, "distance_from_3p": 22
+            }
+          ],
+          "…": "…"
+        },
+        "as_alt": {
+          "role": "as_alt", "allele": "CGT", "three_prime_base": "A", "target_seq": "GCAGGAAAAGAAATCCTAACATCATATA",
+          "dye": "HEX", "len": 28, "tm": 58.03, "gc": 32.14,
+          "genomic": {
+            "region": "1", "start": 11503, "end": 11529, "strand": -1, "blocks": [{ "start": 11503, "end": 11529 }]
+          },
+          "inserted_bases": 1, "…": "…"
+        },
+        "common": {
+          "role": "common", "target_seq": "AGGATCTTTGCAACCCTGTGTT", "len": 22, "tm": 60.43, "gc": 45.45,
+          "genomic": {
+            "region": "1", "start": 11458, "end": 11479, "strand": 1, "blocks": [{ "start": 11458, "end": 11479 }]
+          },
+          "neighbours": [
+            {
+              "key": "1:11474:T:A", "ids": ["rs5413863452"], "label": "1:11474 T/A", "start": 11474, "end": 11474,
+              "alleles": "T/A", "ems": false, "distance_from_3p": 6
+            }
+          ],
+          "…": "…"
+        }
+      },
+      "products": {
+        "ref": { "size": 72, "inserted_bases": 0, "…": "…" }, "alt": { "size": 74, "inserted_bases": 2, "…": "…" }
+      },
+      "tm_balance": { "as_tm_diff": 1.16, "common_minus_as": 1.24 }, "neighbour_sites": 4,
+      "warnings": [
+        {
+          "code": "AS_TM_IMBALANCE", "message": "as_ref and as_alt Tm differ by 1.16 °C (limit 1.0)",
+          "details": { "diff": 1.16 }
+        },
+        {
+          "code": "NEIGHBOUR_IN_PRIMER",
+          "message": "known variants lie in the allele-specific primers: rs5413864238 (8 nt), rs5413863874 (15 nt), rs5413863270 (22 nt) from the 3′ end",
+          "details": {
+            "role": "as_ref", "ids": ["rs5413864238", "rs5413863874", "rs5413863270"], "distances": [8, 15, 22]
+          }
+        },
+        {
+          "code": "NEIGHBOUR_IN_PRIMER",
+          "message": "known variant rs5413863452 lies in the common primer, 6 nt from its 3′ end",
+          "details": { "role": "common", "ids": ["rs5413863452"], "distances": [6] }
+        }
+      ],
+      "check": {
+        "set": { "id": "S1", "ref_pair": "S1_REF", "alt_pair": "S1_ALT" },
+        "pairs": [
+          {
+            "id": "S1_REF", "left": "AGGATCTTTGCAACCCTGTGTT", "right": "GCAGGAAAAGAAATCCTAACATCATATG",
+            "expected": { "region": "1", "start": 11458, "end": 11529 }
+          },
+          {
+            "id": "S1_ALT", "left": "AGGATCTTTGCAACCCTGTGTT", "right": "GCAGGAAAAGAAATCCTAACATCATATA",
+            "expected": { "region": "1", "start": 11458, "end": 11529 }
+          }
+        ]
+      },
+      "…": "…"
+    }
+  ],
+  "check": { "set_ids": ["S1"], "unique_primers": 3, "omitted_set_ids": [], "…": "…" },
+  "warnings": [
+    {
+      "code": "DUPLICATE_VARIANT_IDS",
+      "message": "2 Ensembl ids describe the same event 1:11502:C:CGT; they were merged",
+      "details": { "key": "1:11502:C:CGT", "ids": ["tmp_1_11502_C_CGT", "rs5413863549"] }
+    },
+    {
+      "code": "ORIENTATION_BLOCKED",
+      "message": "forward: known variant rs5413863234 (G/A) lies 4 nt from the allele-specific primer's 3′ end",
+      "details": { "orientation": "forward", "ids": ["rs5413863234"], "distances": [4] }
+    },
+    {
+      "code": "DENSE_NEIGHBOURS", "message": "5 known non-EMS variants lie within 30 bp of the variant",
+      "details": { "count": 5, "window": 30 }
+    }
+  ],
+  "…": "…"
+}
+```
+
+#### Example: a manual variant
+
+rs5413864115 entered by hand in Ensembl style, as `1:11283 A/-`: a deletion inside `AAA` that can slide 2 bases.
+- The variant is left-aligned to `1:11282:CA:C` and takes its id from Ensembl; `requested_id` is `null`.
+- Both orientations need relaxation level 1.
+- The ALT products are 1 bp shorter (`alt_offset: -1`), and the forward ALT primer spans the deletion (two `genomic.blocks`).
+
+This is an excerpt.
+
+<!-- example: request POST /primers/genotyping/design capture=capture-genotyping-design-manual-deletion.json#/request/body -->
+```json
+{
+  "system_name": "sorghum_bicolor", "variant": { "region": "1", "position": 11283, "ref": "A", "alt": "-" },
+  "assay": { "num_sets": 2 }
+}
+```
+
+<!-- example: response POST /primers/genotyping/design 200 capture=capture-genotyping-design-manual-deletion.json#/response -->
+```json
+{
+  "variant": {
+    "key": "1:11282:CA:C", "requested_id": null, "ids": ["rs5413864115"], "label": "1:11283-11283 A/-",
+    "kind": "deletion", "vcf": { "position": 11282, "ref": "CA", "alt": "C" },
+    "minimal": { "start": 11283, "end": 11283, "ref": "A", "alt": "-" }, "shift": 2,
+    "zone": { "start": 11282, "end": 11286 },
+    "discriminating": {
+      "forward": { "position": 11285, "ref_base": "A", "alt_base": "G", "alt_maps_to": 11286 },
+      "reverse": { "position": 11283, "ref_base": "A", "alt_base": "C", "alt_maps_to": 11282 }
+    },
+    "records": [{ "id": "rs5413864115", "source": "EVA", "ems": false }],
+    "submission_sequence": "AAAATATATAGAAAACAATTTTATACAGATGATTTTCCAAATGATGATTC[A/]AAGTGTGAAATTTGRAAAGWCTCTTRGASATGMTYTAAGTGGAAGGAACA",
+    "…": "…"
+  },
+  "template": {
+    "start": 10883, "end": 11685, "length": 803, "alt_length": 802,
+    "features": {
+      "variant": { "start": 400, "end": 401 }, "zone": { "start": 400, "end": 404 },
+      "discriminating": { "forward": 403, "reverse": 401 }, "alt_offset": -1, "exempt": [[367, 38], [400, 38]]
+    },
+    "…": "…"
+  },
+  "neighbours": {
+    "data": "ensembl", "window": { "start": 10883, "end": 11685 }, "variants": 53, "non_ems": 45, "ems": 8,
+    "dense_non_ems": 4
+  },
+  "orientations": {
+    "forward": {
+      "status": "ok", "reason": null, "discriminating_position": 11285, "relaxation_level": 1, "sets_found": 8,
+      "…": "…"
+    },
+    "reverse": {
+      "status": "ok", "reason": null, "discriminating_position": 11283, "relaxation_level": 1, "sets_found": 8,
+      "…": "…"
+    }
+  },
+  "sets": [
+    {
+      "id": "S1", "key": "a5277232d8ab", "orientation": "forward", "relaxation_level": 1, "quality": "usable",
+      "score": 15.48,
+      "primers": {
+        "as_ref": {
+          "target_seq": "ACAGATGATTTTCCAAATGATGATTCAAA", "len": 29, "tm": 59.22,
+          "genomic": {
+            "region": "1", "start": 11257, "end": 11285, "strand": 1, "blocks": [{ "start": 11257, "end": 11285 }]
+          },
+          "discrimination": {
+            "own_allele": { "mm_pos": [], "likelihood": "likely" },
+            "other_allele": { "mm_pos": [1], "likelihood": "likely_weak" }, "terminal_mismatch_class": "weak",
+            "in_shift_tract": true
+          },
+          "…": "…"
+        },
+        "as_alt": {
+          "target_seq": "ACAGATGATTTTCCAAATGATGATTCAAG", "len": 29, "tm": 59.53,
+          "genomic": {
+            "region": "1", "start": 11257, "end": 11286, "strand": 1,
+            "blocks": [{ "start": 11257, "end": 11282 }, { "start": 11284, "end": 11286 }]
+          },
+          "inserted_bases": 0, "…": "…"
+        },
+        "common": {
+          "target_seq": "CCCCATGTTTTTGTTCCTTCCA", "tm": 59.3,
+          "genomic": {
+            "region": "1", "start": 11323, "end": 11344, "strand": -1, "blocks": [{ "start": 11323, "end": 11344 }]
+          },
+          "…": "…"
+        }
+      },
+      "products": { "ref": { "size": 88, "…": "…" }, "alt": { "size": 87, "inserted_bases": 0, "…": "…" } },
+      "warnings": [
+        {
+          "code": "NEIGHBOUR_IN_PRIMER",
+          "message": "known variants lie in the common primer: tmp_1_11334_A_G (12 nt), tmp_1_11335_A_G (13 nt), tmp_1_11340_TG_T (19 nt) from the 3′ end",
+          "details": {
+            "role": "common", "ids": ["tmp_1_11334_A_G", "tmp_1_11335_A_G", "tmp_1_11340_TG_T"],
+            "distances": [12, 13, 19]
+          }
+        },
+        {
+          "code": "SHIFT_TRACT_DISCRIMINATION",
+          "message": "the as_ref primer's 3′ base lies inside the shift tract of the indel; on the other allele it may still prime through a bulge",
+          "details": { "primer": "as_ref", "shift": 2 }
+        }
+      ],
+      "…": "…"
+    },
+    {
+      "id": "S2", "key": "cb3ef66afd37", "orientation": "reverse", "relaxation_level": 1, "quality": "usable",
+      "score": 23.95,
+      "primers": {
+        "as_ref": {
+          "target_seq": "AGAGTCTTTTCAAATTTCACACTTT", "len": 25, "tm": 56.09,
+          "genomic": {
+            "region": "1", "start": 11283, "end": 11307, "strand": -1, "blocks": [{ "start": 11283, "end": 11307 }]
+          },
+          "discrimination": {
+            "own_allele": { "mm_pos": [], "likelihood": "likely" },
+            "other_allele": { "mm_pos": [1], "likelihood": "likely_weak" }, "terminal_mismatch_class": "max",
+            "in_shift_tract": true
+          },
+          "…": "…"
+        },
+        "as_alt": {
+          "target_seq": "AGAGTCTTTTCAAATTTCACACTTG", "len": 25, "tm": 56.71,
+          "genomic": {
+            "region": "1", "start": 11282, "end": 11307, "strand": -1,
+            "blocks": [{ "start": 11282, "end": 11282 }, { "start": 11284, "end": 11307 }]
+          },
+          "inserted_bases": 0, "…": "…"
+        },
+        "common": {
+          "target_seq": "ACAAAAATAGCTCTCTAGAGTATACACA", "tm": 58.12,
+          "genomic": {
+            "region": "1", "start": 11179, "end": 11206, "strand": 1, "blocks": [{ "start": 11179, "end": 11206 }]
+          },
+          "…": "…"
+        }
+      },
+      "products": { "ref": { "size": 129, "…": "…" }, "alt": { "size": 128, "inserted_bases": 0, "…": "…" } },
+      "warnings": [
+        {
+          "code": "NEIGHBOUR_IN_PRIMER",
+          "message": "known variants lie in the allele-specific primers: tmp_1_11298_A_G (16 nt), tmp_1_11303_A_T (21 nt) from the 3′ end",
+          "details": { "role": "as_ref", "ids": ["tmp_1_11298_A_G", "tmp_1_11303_A_T"], "distances": [16, 21] }
+        },
+        {
+          "code": "NEIGHBOUR_IN_PRIMER",
+          "message": "known variant rs873026643 lies in the common primer, 25 nt from its 3′ end",
+          "details": { "role": "common", "ids": ["rs873026643"], "distances": [25] }
+        },
+        {
+          "code": "SHIFT_TRACT_DISCRIMINATION",
+          "message": "the as_ref primer's 3′ base lies inside the shift tract of the indel; on the other allele it may still prime through a bulge",
+          "details": { "primer": "as_ref", "shift": 2 }
+        }
+      ],
+      "…": "…"
+    }
+  ],
+  "check": {
+    "request": {
+      "system_name": "sorghum_bicolor", "mode": "region", "checks": ["specificity", "pangenome"],
+      "genotyping": {
+        "variant": { "region": "1", "position": 11282, "ref": "CA", "alt": "C" },
+        "sets": [
+          { "id": "S1", "ref_pair": "S1_REF", "alt_pair": "S1_ALT" },
+          { "id": "S2", "ref_pair": "S2_REF", "alt_pair": "S2_ALT" }
+        ]
+      },
+      "…": "…"
+    },
+    "set_ids": ["S1", "S2"], "unique_primers": 6, "…": "…"
+  },
+  "warnings": [
+    {
+      "code": "SHIFTABLE_INDEL",
+      "message": "the deletion can slide 2 bases inside AAA; the forward and reverse primers end at different bases and the wrong-allele primer may still prime through a 1-nt bulge",
+      "details": {
+        "shift": 2, "forward_position": 11285, "reverse_position": 11283, "zone": { "start": 11282, "end": 11286 }
+      }
+    },
+    {
+      "code": "DENSE_NEIGHBOURS", "message": "4 known non-EMS variants lie within 30 bp of the variant",
+      "details": { "count": 4, "window": 30 }
+    },
+    {
+      "code": "RELAXED_CONSTRAINTS", "message": "forward: sets need relaxation level 1",
+      "details": {
+        "orientation": "forward", "level": 1,
+        "changes": {
+          "max_size": 32, "min_tm": 55, "max_tm": 65, "min_gc": 20, "max_gc": 80, "product_size_ranges": [[65, 150]]
+        }
+      }
+    },
+    {
+      "code": "RELAXED_CONSTRAINTS", "message": "reverse: sets need relaxation level 1",
+      "details": {
+        "orientation": "reverse", "level": 1,
+        "changes": {
+          "max_size": 32, "min_tm": 55, "max_tm": 65, "min_gc": 20, "max_gc": 80, "product_size_ranges": [[65, 150]]
+        }
+      }
+    }
+  ],
+  "…": "…"
+}
+```
+
+#### Error example
+
+A wrong reference allele, with `template_only` (a full design gets the same answer):
+
+<!-- example: request POST /primers/genotyping/design capture=capture-genotyping-design-ref-mismatch.json#/request/body -->
+```json
+{
+  "system_name": "sorghum_bicolor", "variant": { "region": "1", "position": 11109, "ref": "A", "alt": "C" },
+  "template_only": true
+}
+```
+
+<!-- example: response POST /primers/genotyping/design 400 capture=capture-genotyping-design-ref-mismatch.json#/response -->
+```json
+{
+  "message": "the reference allele A does not match the genome base C at 1:11109", "code": "REF_MISMATCH",
+  "details": { "region": "1", "position": 11109, "given": "A", "genome": "C" }
+}
+```
+
+### `POST /primers/check`: the `genotyping` block
+
+An optional member of the check request that says which pairs form allele-specific sets for a variant. Each set is two
+ordinary `pairs[]` items that share the common primer: the REF pair (the REF-specific primer and the common primer) and
+the ALT pair (the ALT-specific primer and the common primer). This subsection covers the request; the results are
+[below](#results-resultsgenotyping).
+
+| field | type | notes |
+| --- | --- | --- |
+| `genotyping.variant` | `{region, position, ref, alt}`, all required | `region` ≤ 255, `position` ≥ 1, `ref` and `alt` `^[ACGTacgt]{1,50}$` (VCF style, no `-`). It need not be left-aligned, and `ref` and `alt` must differ |
+| `genotyping.sets` | 1–5 items | |
+| `genotyping.sets[].id`, `.ref_pair`, `.alt_pair` | `^[A-Za-z0-9_.:-]{1,64}$`, all required | set ids are unique; `ref_pair` and `alt_pair` name `pairs[]` items |
+
+**Submit-time validation.** A mislabelled or misplaced set would queue a job of up to 6,000 CPU-s and return confident,
+wrong allele predictions, so it is refused at submit. The rules run in this order:
+
+1. The block's shape (swagger, then the handler): `400 INVALID_REQUEST {field}`. Beyond the swagger definition, `ref` and
+   `alt` must differ and set ids must be unique.
+2. The existing pair rules (unique pair ids, at most 20 distinct primers).
+3. `mode` must be `gene` or `region`, the modes that honour `expected`: `400 INVALID_REQUEST {field: "genotyping",
+   reason: "mode"}`.
+4. The links between sets and pairs, without I/O: `400 GENOTYPING_SET_INVALID` with reasons `unknown_pair`, `same_pair`,
+   `pair_reused`, `expected_required`, `expected_differs`, `no_shared_common`.
+5. The existing rules: `expected` and `params`, the catalog, the gene, the reference assembly and its BLAST DB.
+6. One FASTA read of `position ± 1,700` bp:
+   - `404 UNKNOWN_REGION`, `422 NO_SEQUENCE`;
+   - `400 REGION_OUT_OF_BOUNDS {region, start, end, length}`, also when left-aligning reaches the region edge;
+   - `400 REF_MISMATCH {region, position, given, genome}`;
+   - `400 VARIANT_TOO_REPETITIVE {region, position, shift, max}`, with `shift: null` when the event slides beyond the read;
+   - then, per set, `400 GENOTYPING_SET_INVALID` with reasons `not_at_variant`, `alleles_swapped`, `too_many_edits`,
+     `common_in_zone`, `expected_mismatch`.
+7. The pan-genome genomes and the cost guard (`422 JOB_TOO_LARGE`).
+
+| `reason` | the set is refused when | extra `details` |
+| --- | --- | --- |
+| `unknown_pair` | `ref_pair` or `alt_pair` names no pair | `pair_ids` are the missing ids |
+| `same_pair` | `ref_pair` equals `alt_pair` | |
+| `pair_reused` | a pair already belongs to an earlier set | |
+| `expected_required` | a pair has no `expected` | `pair_ids` are the pairs without it |
+| `expected_differs` | the two pairs' `expected` differ | |
+| `no_shared_common` | the two pairs do not share exactly one primer, on the same side | |
+| `not_at_variant` | an allele-specific primer does not end at the discriminating base on its own haplotype | `primer` (`ref_pair` or `alt_pair`), `sequence` |
+| `alleles_swapped` | an allele-specific primer matches the other allele at least as well as its own | `primer`, `sequence` |
+| `too_many_edits` | an allele-specific primer differs from its own allele by more than one mismatch 2 or 3 nt from its 3′ end, or by an indel | `primer`, `sequence`, `mm_pos` |
+| `common_in_zone` | the common primer, placed from `expected`, does not lie beyond the zone and the base beside it | `primer: "common"`, `sequence` |
+| `expected_mismatch` | `expected` is on another region, or the REF-specific primer's 5′ end is not `expected.start` (forward) or `expected.end` (reverse) | `primer: "ref_pair"`, `sequence` |
+
+Every rejection has `details {set_id, reason, pair_ids}` plus the members listed.
+
+- **Orientation** is derived from the shared primer and is never sent. A shared right primer makes the left primers
+  allele-specific (`forward`); a shared left primer makes the right ones allele-specific (`reverse`).
+- **Deliberate mismatches** need no declaration: one extra mismatch 2 or 3 nt from the 3′ end of an allele-specific
+  primer is accepted as one, and its position is kept for the worker.
+- **The stored request** keeps only the client's keys, with the variant uppercased and left-aligned, so `job.request`
+  stays a valid check request. `POST /primers/check` never calls Ensembl.
+- **Job ids.** A request with `genotyping` hashes with algorithm version `"2+g1"` (`jobId`'s `algo`) instead of `"2"`.
+  Every existing job id is therefore unchanged, and a change to the allele caller (`g1`) invalidates genotyping jobs only.
+  The check's `ALGORITHM_VERSION` stays `"2"`.
+
+**Cost.** The allele caller adds `(1 + pan-genome genomes) × 0.2` CPU-s (`check.genotype_cpu_s_per_genome`) to the
+[estimate](#cost-guard), and `breakdown.genotyping` appears only in such requests. The table below was computed with
+`check/cost.js` and the real genome sizes (reference 708,735,318 bases; the 119 other assemblies 83,774,241,795):
+
+| Check (region mode) | Without `genotyping` | With `genotyping` |
+| --- | --- | --- |
+| 1 set (3 primers), all 119 other assemblies | 1,333 | 1,357 |
+| 2 sets (6 primers), all 119 | 2,666 | 2,690 |
+| 4 sets (12 primers), all 119 | 5,332 | 5,356 |
+| 13 distinct primers, all 119 | 5,776 | 5,800, the most accepted |
+| 14 distinct primers, all 119 | 6,221 | 6,245 → `422 JOB_TOO_LARGE` |
+| 2 sets (6 primers), 3 genomes | 95 | 95 |
+
+The UI mirrors this term for display.
+
+#### Example
+
+The `check.request` of the rs871475760 design above, unchanged:
+
+<!-- example: request POST /primers/check capture=capture-genotyping-design-rs871475760-kasp.json#/response/check/request -->
+```json
+{
+  "system_name": "sorghum_bicolor", "mode": "region", "checks": ["specificity", "pangenome"],
+  "pairs": [
+    {
+      "id": "S1_REF", "left": "AGCTTCTCTAAGTGGTTATCCGA", "right": "ATCTTTGACTAGCGAGAAATTCAG",
+      "expected": { "region": "1", "start": 11068, "end": 11132 }
+    },
+    {
+      "id": "S1_ALT", "left": "AGCTTCTCTAAGTGGTTATCCGA", "right": "ATCTTTGACTAGCGAGAAATTCAT",
+      "expected": { "region": "1", "start": 11068, "end": 11132 }
+    },
+    {
+      "id": "S2_REF", "left": "GGTTATCCGAATATAGTCATACTCTATTC", "right": "TCTTTGTCTACTGAGAAATCCAGA",
+      "expected": { "region": "1", "start": 11081, "end": 11172 }
+    },
+    {
+      "id": "S2_ALT", "left": "GGTTATCCGAATATAGTCATACTCTATTA", "right": "TCTTTGTCTACTGAGAAATCCAGA",
+      "expected": { "region": "1", "start": 11081, "end": 11172 }
+    }
+  ],
+  "genotyping": {
+    "variant": { "region": "1", "position": 11109, "ref": "C", "alt": "A" },
+    "sets": [
+      { "id": "S1", "ref_pair": "S1_REF", "alt_pair": "S1_ALT" },
+      { "id": "S2", "ref_pair": "S2_REF", "alt_pair": "S2_ALT" }
+    ]
+  }
+}
+```
+
+**Response `202`.** This one is illustrative: no job was submitted for this document. The `job_id`, `queue_position` and
+`created_at` values are invented. `estimate` and `progress.total` are what `check/cost.js` gives this request: 6 primers
+over the reference and the 119 other assemblies.
+
+<!-- example: response POST /primers/check 202 illustrative -->
+```json
+{
+  "job_id": "5d0c3b9e2a7f41c68e1f9a2b7c4d6e80", "status": "queued", "kind": "pangenome", "queue_position": 0,
+  "progress": { "done": 0, "total": 120, "stage": "queued", "running": [] }, "estimate": { "cpu_s": 2690 },
+  "created_at": "2026-09-15T12:00:00.000Z", "warnings": []
+}
+```
+
+**Rejections.** These were produced by the submit-time validator (`check/genotype.js`) on the real sorghum_bicolor FASTA,
+without submitting a job. With `S1_ALT.left` changed to `GGTTATCCGAATATAGTCATACTCTATTC`, S1's pairs no longer share a
+primer:
+
+<!-- example: response POST /primers/check 400 capture=capture-check-genotyping-no-shared-common.json#/response -->
+```json
+{
+  "message": "set S1: S1_REF and S1_ALT must share exactly one primer, the common primer, on the same side",
+  "code": "GENOTYPING_SET_INVALID",
+  "details": { "set_id": "S1", "reason": "no_shared_common", "pair_ids": ["S1_REF", "S1_ALT"] }
+}
+```
+
+With `S1_REF.right` changed to `TCTTTGACTAGCGAGAAATTCAGA` (the primer Primer3 picks at 1:11108–11131 without the zone
+guard):
+
+<!-- example: response POST /primers/check 400 capture=capture-check-genotyping-not-at-variant.json#/response -->
+```json
+{
+  "message": "set S1: the REF-specific primer TCTTTGACTAGCGAGAAATTCAGA does not end at the variant (1:11109)",
+  "code": "GENOTYPING_SET_INVALID",
+  "details": {
+    "set_id": "S1", "reason": "not_at_variant", "pair_ids": ["S1_REF"], "primer": "ref_pair",
+    "sequence": "TCTTTGACTAGCGAGAAATTCAGA"
+  }
+}
+```
+
+### Genotyping error codes
+
+These are all handler errors `{message, code, details}`; no new HTTP status is used.
+
+| Status | Code | Endpoints | When | `details` |
+| --- | --- | --- | --- | --- |
+| 400 | `VARIANT_WINDOW_TOO_LONG` | variants list | the window is over 50,000 bp | `{length, max}` |
+| 400 | `INVALID_VARIANT` | design | a wrong combination of variant fields, or invalid or over-long alleles | `{reason: "id_or_manual" \| "alleles" \| "allele_too_long"}` |
+| 400 | `REF_MISMATCH` | design, check | the reference allele is not the genome's bases | `{region, position, given, genome}` |
+| 400 | `ALT_REQUIRED` | design | an id with several designable alternative alleles, and no `alt` | `{id, alts}` |
+| 400 | `ALT_NOT_AT_SITE` | design | `alt` is not an allele of the id's site | `{id, alt, alleles}` |
+| 400 | `UNSUPPORTED_ALLELE` | design | an allele `*`, or containing `N` | `{allele}` |
+| 400 | `VARIANT_TOO_CLOSE_TO_END` | design | no orientation has room for the smallest product | `{region, position, region_length, needed}` |
+| 400 | `VARIANT_TOO_REPETITIVE` | design, check | the event slides more than 1,000 bp | `{region, position, shift, max}` |
+| 400 | `GENOTYPING_SET_INVALID` | check | a set's structure or position ([reasons](#post-primerscheck-the-genotyping-block)) | `{set_id, reason, pair_ids, primer?, sequence?, mm_pos?}` |
+| 400 | `INVALID_REQUEST` | check | `genotyping` outside gene and region modes | `{field: "genotyping", reason: "mode"}` |
+| 404 | `UNKNOWN_VARIANT` | lookup, design | Ensembl does not know the id | `{id, system_name}` |
+| 422 | `NO_VARIATION_DATA` | variants list and lookup, design by id | the genome has no variation data | `{system_name}` |
+| 422 | `AMBIGUOUS_VARIANT_MAPPING` | lookup, design | the id maps to several sequences of the assembly | `{id, mappings}` |
+| 422 | `VARIANT_NOT_ON_ASSEMBLY` | lookup, design | the id maps to no sequence of the assembly | `{id}` |
+| 500 | `THERMO_FAILED` | design | `ntthal` failed or printed nothing usable | `{binary}` |
+| 503 | `THERMO_UNAVAILABLE` | design | `ntthal` is missing or could not be started | `{binary, retry_after_s}` |
+| 503 | `VARIATION_SOURCE_UNAVAILABLE` | variants list and lookup, design by id | an Ensembl call failed | `{retry_after_s, reason}`, where `reason` is `timeout`, `transport`, `http_5xx`, `rate_limited`, `invalid_response`, `breaker_open` or `queue_full` |
+| 503 | `FEATURE_DISABLED` | variants list and lookup, design by id | `variation.enabled` is false | `{retry_after_s: 300}` |
+
+### Genotyping warning codes
+
+Warnings are `{code, message, details}`.
+
+**Variants endpoints:** `DUPLICATE_VARIANT_IDS {key, ids}`; `VARIATION_RECORDS_SKIPPED {count, reasons}` (malformed Ensembl
+records dropped; an id is never a reason); `REF_MISMATCHES {count}`; `VARIANTS_TRUNCATED {returned, total, limit}`.
+
+**Design, response level**, in the order they appear:
+
+| Code | When | `details` |
+| --- | --- | --- |
+| `DUPLICATE_VARIANT_IDS` | several Ensembl ids describe the target | `{key, ids}` |
+| `EMS_TARGET` | every record of the target is EMS, so natural neighbours warn instead of blocking | `{sources}` |
+| `MULTIALLELIC_SITE` | the site has other alternative alleles; assemblies carrying them mismatch both AS primers | `{key, other_alts}` |
+| `SHIFTABLE_INDEL` | `shift > 0`: the forward and reverse primers end at different bases | `{shift, forward_position, reverse_position, zone}` |
+| `ORIENTATION_BLOCKED` | a non-EMS known variant in the last 5 nt of an AS primer | `{orientation, ids, distances}` |
+| `NO_VARIATION_DATA` | the genome has no variation data, or it is switched off: neighbours were not screened | `{system_name}` |
+| `NEIGHBOURS_UNAVAILABLE` | Ensembl failed during a manual design: neighbours were not screened | `{reason}` |
+| `DENSE_NEIGHBOURS` | more than 2 non-EMS known variants within 30 bp of the variant | `{count, window}` |
+| `SUBMISSION_NEIGHBOURS_OMITTED` | indel or multi-allelic neighbours in the submission flanks | `{ids}` |
+| template and mask warnings | as in `/primers/design`: the assembly warnings of the template, and `REPEAT_MASK_FAILED`, `NO_REPEAT_MASK`, `BLAST_DEPTH_MASK`, `MOSTLY_REPEAT` with `avoid_repeats` | |
+| `VARIANT_IN_REPEAT` | the repeat mask covered bases of the exempt AS window | `{orientation, masked_bases}` |
+| `PRIMER3_WARNING` | Primer3 printed a warning | `{orientation, level}` |
+| `ORIENTATION_SKIPPED` | too close to the region end, or an `N` in the AS window | `{orientation, reason}` |
+| `ORIENTATION_NO_SETS` | the ladder was exhausted | `{orientation, levels_tried}` |
+| `RELAXED_CONSTRAINTS` | the orientation's sets needed level 1 or 2 | `{orientation, level, changes}` |
+| `NO_SETS` | no set in either orientation (`sets: []`; read `orientations.*.attempts[].explain`) | `{}` |
+| `DESIGN_BUDGET_EXHAUSTED` | the process budget left pairs unscored | `{orientation, primer3_runs, thermo_calls, max_primer3_runs, max_thermo_calls, not_scored, sets_returned}` |
+
+**Design, set level** (`sets[].issues[]` with a `severity`; the warn and high ones are repeated in `sets[].warnings`):
+
+| Code | When | Severity | `details` |
+| --- | --- | --- | --- |
+| `ALT_PRIMER_SUBOPTIMAL` | an ordered derived oligo (the ALT primer; with a deliberate mismatch, both AS primers) has Primer3 problems but clears the floors | warn | `{oligo, problems}` |
+| `AS_TM_IMBALANCE` | the AS primers' Tm differ by more than 1.0 °C | warn; high above 2.0 °C | `{diff}` |
+| `COMMON_TM_OUT_OF_RANGE` | `common_minus_as` is outside −1.0…+3.0 °C | warn | `{value}` |
+| `TAILED_STRUCTURE` | a tailed AS primer's hairpin or self-dimer Tm ≥ 47 °C, or a tailed cross-dimer Tm ≥ 47 °C | warn; high for a hairpin ≥ 55 °C | a primer: `{oligo, metric, value}`; a cross-dimer: `{pair, metric, value}` |
+| `MISMATCH_NOT_APPLICABLE` | the base at −k differs between the AS primers, so no mismatch was applied | warn | `{position}` |
+| `MISMATCH_STRUCTURE` | a deliberate-mismatch primer's hairpin or self-dimer Tm ≥ 47 °C | warn; high ≥ 55 °C | `{oligo, metric, value}` |
+| `NEIGHBOUR_IN_PRIMER` | non-EMS known variants in a primer outside its last 5 nt: one issue for the AS pair (`role: "as_ref"`, both primers' variants) and one for the common primer | warn | `{role, ids, distances}` |
+| `NEIGHBOUR_AT_3P` | a non-EMS known variant in the last 5 nt that was not allowed to block (EMS target, or `neighbour_policy: "ignore"`) | high | `{role, ids, distances}` |
+| `WEAK_DISCRIMINATION` | an AS primer is predicted to amplify the other allele (`likely`) | high | `{primer, mm_pos}` |
+| `SHIFT_TRACT_DISCRIMINATION` | an AS primer's 3′ base lies inside the indel's shift tract | warn | `{primer, shift}` |
+| `WEAK_TERMINAL_CLASS` | both AS 3′ mismatches are in Little's weak class (A/G and C/T sites) | info: in `issues` only, not scored | `{}` |
+
+In `sets[].warnings`, `TAILED_STRUCTURE` and `MISMATCH_STRUCTURE` details also carry the `severity`.
+
+### Results: `results.genotyping`
+
+Present in the results of `GET /primers/check/{job_id}` only for jobs whose request carried a `genotyping` block. For the
+reference genome (a control) and each pan-genome assembly it gives the allele found at the variant; for each set, the
+predicted signal of its REF, ALT and common primers and the predicted genotype. The definitions are in spec §2.12
+(`docs/genotyping_design_spec.md`).
+
+To be completed when the worker-side caller lands (M8).
+
+---
+
 ## Operations
 
 ### Processes
@@ -739,6 +2463,9 @@ warning, never a startup crash):
 | `PRIMERS_ENABLED` | `enabled` | `1`/`true`/`yes`; anything else disables `/primers` |
 | `PRIMERS_SITE_KEY` | `site_key` | Redis namespace; set the same value for the API and the worker |
 | `PRIMER3_CORE`, `BLASTN`, `BLASTDBCMD` | `primer3_core`, `blastn`, `blastdbcmd` | binaries (defaults under `/home/olson/bin`) |
+| `NTTHAL` | `ntthal` | `ntthal` binary for genotyping designs (default `/home/olson/primer3-2.6.1/bin/ntthal`); not checked at startup, a missing binary is `503 THERMO_UNAVAILABLE` |
+| `PRIMERS_VARIATION_URL` | `variation.base_url` | Ensembl REST base (default `https://data.gramene.org/pansite-ensembl-115`); `https://` only, or `http://127.0.0.1[:port]` for a loopback test server; anything else is ignored with a warning |
+| `PRIMERS_VARIATION_ENABLED` | `variation.enabled` | `1`/`true`/`yes`; anything else switches Ensembl off (see [Feature flags](#feature-flags)) |
 | `PRIMERS_FASTA_ROOT` | `fasta_root` | default `/scratch/olson/fasta` |
 | `PRIMERS_JOB_STORE` | `check.store` | `redis` (default) or `memory` (tests only; the worker needs redis) |
 | `PRIMERS_REDIS_URL` | `check.redis_url` | default `redis://localhost:6380/1` |
@@ -755,6 +2482,47 @@ for a one-off run through the config library's `NODE_CONFIG` variable, e.g.
 - `assembly_overrides: {system_name: prefix}` picks the assembly in a directory with several (`422 AMBIGUOUS_ASSEMBLY`
   lists the candidate prefixes).
 - `repeat_masking_overrides: {system_name: soft_masked|unmasked_copy|absent}` overrides the sampled masking state.
+
+**Genotyping keys** (defaults in `config.js` and `config/default.yaml`; see [Genotyping primers](#genotyping-primers-kasp--allele-specific-pcr)):
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `ntthal` | `/home/olson/primer3-2.6.1/bin/ntthal` | `ntthal` binary (env `NTTHAL`) |
+| `variation.enabled` | `true` | Ensembl variants on or off (env `PRIMERS_VARIATION_ENABLED`) |
+| `variation.base_url` | `https://data.gramene.org/pansite-ensembl-115` | Ensembl REST base (env `PRIMERS_VARIATION_URL`) |
+| `variation.release` | `'115'` | reported as `source.release` and in `GET /primers/genomes` |
+| `variation.species` | `{sorghum_bicolor: sorghum_bicolor}` | `system_name` → Ensembl species; no other genome is ever sent to Ensembl |
+| `variation.timeout_ms` | 8000 | per outbound call |
+| `variation.chunk_bp` | 10000 | overlap chunk size |
+| `variation.max_chunk_bytes`, `variation.max_lookup_bytes` | 1000000, 262144 | response body caps |
+| `variation.max_window` | 50000 | largest `GET /primers/variants` window |
+| `variation.list_limit_default`, `variation.list_limit_max` | 2000, 5000 | `limit` default and maximum |
+| `variation.max_concurrent`, `variation.queue_wait_ms` | 4, 5000 | outbound limiter per API process |
+| `variation.cache_entries` | 500 | LRU size of the result cache and of the failure cache |
+| `variation.cache_ttl_ms`, `variation.unknown_cache_ttl_ms`, `variation.unavailable_cache_ttl_ms` | 3600000, 300000, 30000 | how long results, unknown ids and failures are cached |
+| `variation.breaker_failures`, `variation.breaker_window_ms`, `variation.breaker_open_ms` | 3, 60000, 60000 | circuit breaker |
+| `variation.retry_after_s`, `variation.queue_retry_after_s` | 30, 5 | `retry_after_s` of upstream failures and of `queue_full` |
+| `variation.max_allele_length` | 50 | longest allele |
+| `variation.max_shift` | 1000 | farthest an indel may slide (`VARIANT_TOO_REPETITIVE`) |
+| `variation.ems_source_pattern` | `^EMS_` | Ensembl sources counted as EMS |
+| `genotyping.template_flank` | 400 | smallest template flank |
+| `genotyping.num_return_per_run` | 20 | pairs per Primer3 design run |
+| `genotyping.num_sets_default`, `genotyping.max_sets` | 6, 10 | `assay.num_sets` default and maximum |
+| `genotyping.max_scored_per_orientation` | 8 | candidates scored per orientation |
+| `genotyping.max_primer3_runs`, `genotyping.max_thermo_calls` | 54, 272 | process budget of one design |
+| `genotyping.thermo_concurrency`, `genotyping.thermo_timeout_ms` | 4, 5000 | `ntthal` calls at a time per design, and each call's timeout |
+| `genotyping.guard_gap` | 10 | `SEQUENCE_TARGET` guard length beside the zone |
+| `genotyping.mask_exempt_pad` | 36 | allele-specific window kept out of the repeat mask |
+| `genotyping.as_min_tm`, `genotyping.as_min_gc` | 52, 15 | hard floors |
+| `genotyping.structure_warn_th`, `genotyping.structure_high_th` | 47, 55 | structure Tm thresholds (warn, high) |
+| `genotyping.as_tm_diff_warn` | 1.0 | `AS_TM_IMBALANCE` threshold (high above a fixed 2.0) |
+| `genotyping.common_tm_low`, `genotyping.common_tm_high` | -1.0, 3.0 | `COMMON_TM_OUT_OF_RANGE` window |
+| `genotyping.neighbour_3p_window` | 5 | 3′ window for known neighbours |
+| `genotyping.dense_window`, `genotyping.dense_count` | 30, 2 | `DENSE_NEIGHBOURS` |
+| `genotyping.check_max_sets`, `genotyping.check_max_unique_primers` | 5, 13 | caps of the proposed check request |
+| `check.genotype_cpu_s_per_genome` | 0.2 | cost of the allele caller per genome task |
+| `check.genotype_flank_min`, `check.genotype_amplicon_pad` | 15, 50 | allele-caller windows, also prepared at submit |
+| `check.genotype_ortholog_min_identity`, `check.genotype_ortholog_size_tolerance`, `check.genotype_max_copies`, `check.genotype_max_anchors`, `check.genotype_max_megablast`, `check.genotype_megablast_timeout_ms`, `check.genotype_megablast_min_identity`, `check.genotype_megablast_min_query_cover`, `check.genotype_megablast_min_bitscore_frac` | 95, 0.2, 10, 50, 30, 20000, 95, 0.8, 0.9 | the worker's allele caller (spec §5.6), described with `results.genotyping` |
 
 ### Redis
 
@@ -786,7 +2554,8 @@ mkdir -p /home/olson/primer3-2.6.1/bin && cp primer3_core ntthal oligotm /home/o
 ln -s /home/olson/primer3-2.6.1/bin/primer3_core /home/olson/bin/primer3_core && primer3_core -about   # 2.6.1
 ```
 
-The thermodynamic tables are compiled in; do not create `primer3_config/`. BLAST+ 2.13.0 lives in `/home/olson/bin`.
+The thermodynamic tables are compiled in; do not create `primer3_config/`. Genotyping designs also run `ntthal` (config
+`ntthal`) for tailed structures and deliberate-mismatch duplex Tm, with the design's salts. BLAST+ 2.13.0 lives in `/home/olson/bin`.
 Genome data per `system_name`: `dna/<Prefix>.dna[_sm].toplevel.fa.gz` (bgzip, with `.fai` and `.gzi`),
 `<Prefix>.dna.toplevel.*` and `<Prefix>.cdna.all.*` BLAST DBs (`.nal` for multi-volume). The prefix is resolved from the
 directory listing (map `_id` suffix, then region matching), never derived from the system name.
@@ -823,6 +2592,10 @@ PRIMERS_IT_BASE=http://127.0.0.1:50111/sorghum_v11 node --test --test-concurrenc
   default API that request would be queued.
 - `contract.test.js` also runs every fixture through the handlers' own request rules (`check/normalize.js` up to the
   catalog lookup, `design.normalize`), and requires the check fixtures together to send every check param.
+- `docs_examples.test.js` checks every example of [Genotyping primers](#genotyping-primers-kasp--allele-specific-pcr): requests validate with sway and the
+  handlers' request rules, responses against their swagger definitions (allowing `null` where a definition is
+  `x-nullable`), and each example against the recording it was taken from (`test/primers/fixtures/docs/`). It also
+  requires the configuration section to list every environment override and genotyping config key.
 - Manual checks (not automated): stop the worker with Ctrl-C during a pan-genome job and start it again — the job ends
   `done` with `attempts: 2`; start the API with `PRIMERS_REDIS_URL=redis://localhost:6399` — `POST /primers/check`
   answers `503 JOB_STORE_UNAVAILABLE` within 3 s while `/primers/design` works; start it with

@@ -1,0 +1,6 @@
+{
+  "source": "recorded 2026-09-15 over HTTP from the genotyping dev API on 127.0.0.1:50112 (worktree HEAD 55fbb5f, live Ensembl REST release 115)",
+  "request": {"method":"GET","path":"/sorghum_v11/primers/variants/tmp_1_11502_C_CGT?system_name=sorghum_bicolor"},
+  "status": 200,
+  "response": {"requested_id":"tmp_1_11502_C_CGT","system_name":"sorghum_bicolor","source":{"name":"ensembl","release":"115"},"variants":[{"key":"1:11502:C:CGT","ids":["tmp_1_11502_C_CGT","rs5413863549"],"synonyms":[],"label":"1:11502^11503 -/GT","kind":"insertion","region":"1","vcf":{"position":11502,"ref":"C","alt":"CGT"},"minimal":{"start":11503,"end":11502,"ref":"-","alt":"GT"},"alleles":["-","GT"],"multiallelic":null,"shift":0,"zone":{"start":11502,"end":11503},"discriminating":{"forward":{"position":11503,"ref_base":"A","alt_base":"G","alt_maps_to":null},"reverse":{"position":11502,"ref_base":"C","alt_base":"T","alt_maps_to":null}},"records":[{"id":"tmp_1_11502_C_CGT","source":"SAP_PMID35653240_Boatwri","ems":false},{"id":"rs5413863549","source":"EVA","ems":false}],"ems":false,"consequence":"3_prime_UTR_variant","ref_verified":true,"designable":true,"issues":[]}],"warnings":[{"code":"DUPLICATE_VARIANT_IDS","message":"2 Ensembl ids describe the same event 1:11502:C:CGT; they were merged","details":{"key":"1:11502:C:CGT","ids":["tmp_1_11502_C_CGT","rs5413863549"]}}]}
+}

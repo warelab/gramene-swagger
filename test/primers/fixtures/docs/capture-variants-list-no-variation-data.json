@@ -1,0 +1,6 @@
+{
+  "source": "recorded 2026-09-15 over HTTP from the genotyping dev API on 127.0.0.1:50112 (worktree HEAD 55fbb5f, live Ensembl REST release 115)",
+  "request": {"method":"GET","path":"/sorghum_v11/primers/variants?system_name=sorghum_rio&region=1&start=1&end=100"},
+  "status": 422,
+  "response": {"message":"sorghum_rio has no known-variant data; enter the variant as region, position, ref and alt","code":"NO_VARIATION_DATA","details":{"system_name":"sorghum_rio"}}
+}
