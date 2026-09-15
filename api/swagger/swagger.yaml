@@ -2377,6 +2377,37 @@ definitions:
                 region: { type: string, maxLength: 255 }
                 start: { type: integer, minimum: 1 }
                 end: { type: integer, minimum: 1 }
+      genotyping: { $ref: "#/definitions/PrimerCheckGenotyping" }
+  PrimerCheckGenotypingVariant:
+    description: "the design response's variant.vcf plus its region; ACGT alleles only, left-aligned or not (the server normalizes)"
+    type: object
+    required: [region, position, ref, alt]
+    additionalProperties: false
+    properties:
+      region: { type: string, maxLength: 255 }
+      position: { type: integer, minimum: 1 }
+      ref: { type: string, pattern: "^[ACGTacgt]{1,50}$" }
+      alt: { type: string, pattern: "^[ACGTacgt]{1,50}$" }
+  PrimerCheckGenotypingSet:
+    type: object
+    required: [id, ref_pair, alt_pair]
+    additionalProperties: false
+    properties:
+      id: { type: string, pattern: "^[A-Za-z0-9_.:-]{1,64}$" }
+      ref_pair: { type: string, pattern: "^[A-Za-z0-9_.:-]{1,64}$", description: "id of the pairs[] item whose allele-specific primer carries the REF allele" }
+      alt_pair: { type: string, pattern: "^[A-Za-z0-9_.:-]{1,64}$" }
+  PrimerCheckGenotyping:
+    description: "Allele-specific sets over ordinary pairs. gene and region modes only; every referenced pair needs expected. The server derives each set's orientation and allele side from the shared primer and verifies both allele-specific primers against the reference haplotypes at submit."
+    type: object
+    required: [variant, sets]
+    additionalProperties: false
+    properties:
+      variant: { $ref: "#/definitions/PrimerCheckGenotypingVariant" }
+      sets:
+        type: array
+        minItems: 1
+        maxItems: 5
+        items: { $ref: "#/definitions/PrimerCheckGenotypingSet" }
   PrimerError:
     description: "Handler error body. Swagger validation errors instead look like {message: 'Validation errors', errors: [{code, message, path}]}; the code INVALID_CONTENT_TYPE appears there."
     type: object

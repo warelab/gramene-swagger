@@ -11,6 +11,8 @@
 // request body whose endpoint comes from the file name (design*.json -> POST /primers/design,
 // check*.json -> POST /primers/check) or, failing that, from its shape (a "pairs" array -> check, else design).
 // variants-*.json (GET /primers/variants[/{variant_id}]) must be wrappers {method, path, query}; their method defaults to GET.
+// check-genotyping-*.json are check bodies with a genotyping block (genotyping spec §7.7): routed by the check* name like any check
+// fixture, and run through check/normalize.js up to the catalog stub.
 // genotyping-design-*.json bare bodies go to POST /primers/genotyping/design.
 
 require('../../../api/helpers/primers/node_compat');
@@ -30,6 +32,7 @@ const FIXTURE_DIR = process.env.PRIMERS_CONTRACT_FIXTURES
 
 const design = require(path.join(ROOT, 'api/helpers/primers/design'));
 const checkNormalize = require(path.join(ROOT, 'api/helpers/primers/check/normalize'));
+const checkGenotype = require(path.join(ROOT, 'api/helpers/primers/check/genotype'));
 const config = require(path.join(ROOT, 'api/helpers/primers/config'));
 const grequest = require(path.join(ROOT, 'api/helpers/primers/genotyping/request'));
 const gpresets = require(path.join(ROOT, 'api/helpers/primers/genotyping/presets'));
@@ -323,6 +326,72 @@ test('malformed genotyping design bodies are rejected by the validator', functio
   invalid('POST', '/primers/genotyping/design', GENOTYPING_EXAMPLES[0], 'INVALID_CONTENT_TYPE', { headers: { 'content-type': 'text/plain' } });
 });
 
+// Genotyping spec §2.11 and §7.7 (M7): PrimerCheckRequest.genotyping, its three strict definitions, the documented bodies (the
+// §2.11 example and the design's check.request of §2.9) and malformed genotyping blocks.
+const CHECK_GENOTYPING_PAIRS = [
+  { id: 'S1_REF', left: 'AGCTTCTCTAAGTGGTTATCCGA', right: 'ATCTTTGACTAGCGAGAAATTCAG', expected: { region: '1', start: 11068, end: 11132 } },
+  { id: 'S1_ALT', left: 'AGCTTCTCTAAGTGGTTATCCGA', right: 'ATCTTTGACTAGCGAGAAATTCAT', expected: { region: '1', start: 11068, end: 11132 } },
+  { id: 'S2_REF', left: 'GGTTATCCGAATATAGTCATACTCTATTC', right: 'TCTTTGTCTACTGAGAAATCCAGA', expected: { region: '1', start: 11081, end: 11172 } },
+  { id: 'S2_ALT', left: 'GGTTATCCGAATATAGTCATACTCTATTA', right: 'TCTTTGTCTACTGAGAAATCCAGA', expected: { region: '1', start: 11081, end: 11172 } }
+];
+const CHECK_GENOTYPING_BLOCK = {
+  variant: { region: '1', position: 11109, ref: 'C', alt: 'A' },
+  sets: [{ id: 'S1', ref_pair: 'S1_REF', alt_pair: 'S1_ALT' }, { id: 'S2', ref_pair: 'S2_REF', alt_pair: 'S2_ALT' }]
+};
+const CHECK_GENOTYPING_EXAMPLES = [
+  { system_name: 'sorghum_bicolor', mode: 'region', checks: ['specificity', 'pangenome'], genomes: ['sorghum_bicolorv5', 'sorghum_pi180348', 'sorghum_pi329250'],
+    pairs: CHECK_GENOTYPING_PAIRS, genotyping: CHECK_GENOTYPING_BLOCK },
+  { system_name: 'sorghum_bicolor', mode: 'region', checks: ['specificity', 'pangenome'], pairs: CHECK_GENOTYPING_PAIRS, genotyping: CHECK_GENOTYPING_BLOCK }
+];
+
+test('PrimerCheckRequest.genotyping references three strict definitions (§2.11)', function () {
+  const d = definitions();
+  d.PrimerCheckRequest.properties.genotyping.should.eql({ $ref: '#/definitions/PrimerCheckGenotyping' });
+  ['PrimerCheckGenotyping', 'PrimerCheckGenotypingVariant', 'PrimerCheckGenotypingSet'].forEach(function (name) {
+    should.exist(d[name], name);
+    d[name].additionalProperties.should.equal(false, name);
+  });
+  d.PrimerCheckGenotyping.required.should.eql(['variant', 'sets']);
+  d.PrimerCheckGenotyping.properties.sets.should.match({ type: 'array', minItems: 1, maxItems: 5 });
+  d.PrimerCheckGenotypingVariant.required.should.eql(['region', 'position', 'ref', 'alt']);
+  d.PrimerCheckGenotypingSet.required.should.eql(['id', 'ref_pair', 'alt_pair']);
+});
+
+test('documented genotyping check bodies validate against PrimerCheckRequest', function () {
+  CHECK_GENOTYPING_EXAMPLES.forEach(function (body) { valid('POST', '/primers/check', body); });
+  // lowercase alleles, a variant that is not left-aligned and gene mode are the handler's business, not the contract's
+  valid('POST', '/primers/check', Object.assign({}, CHECK_GENOTYPING_EXAMPLES[1], { mode: 'gene', gene_id: 'SORBI_3001G000200',
+    genotyping: { variant: { region: '1', position: 11284, ref: 'aa', alt: 'a' }, sets: [CHECK_GENOTYPING_BLOCK.sets[0]] } }));
+});
+
+test('malformed genotyping blocks are rejected', function () {
+  const base = CHECK_GENOTYPING_EXAMPLES[1];
+  const g = function (block) { return Object.assign({}, base, { genotyping: block }); };
+  const variant = function (patch) { return g({ variant: Object.assign({}, CHECK_GENOTYPING_BLOCK.variant, patch), sets: CHECK_GENOTYPING_BLOCK.sets }); };
+  const set0 = function (patch) { return g({ variant: CHECK_GENOTYPING_BLOCK.variant, sets: [Object.assign({}, CHECK_GENOTYPING_BLOCK.sets[0], patch)] }); };
+  const bad = [
+    [g(null), 'INVALID_TYPE'],
+    [g(Object.assign({ orientation: 'reverse' }, CHECK_GENOTYPING_BLOCK)), 'OBJECT_ADDITIONAL_PROPERTIES'],
+    [g({ variant: CHECK_GENOTYPING_BLOCK.variant }), 'OBJECT_MISSING_REQUIRED_PROPERTY'],
+    [g({ sets: CHECK_GENOTYPING_BLOCK.sets }), 'OBJECT_MISSING_REQUIRED_PROPERTY'],
+    [g({ variant: CHECK_GENOTYPING_BLOCK.variant, sets: [] }), 'ARRAY_LENGTH_SHORT'],
+    [g({ variant: CHECK_GENOTYPING_BLOCK.variant, sets: Array(6).fill(CHECK_GENOTYPING_BLOCK.sets[0]) }), 'ARRAY_LENGTH_LONG'],
+    [set0({ orientation: 'reverse' }), 'OBJECT_ADDITIONAL_PROPERTIES'],
+    [g({ variant: CHECK_GENOTYPING_BLOCK.variant, sets: [{ id: 'S1', ref_pair: 'S1_REF' }] }), 'OBJECT_MISSING_REQUIRED_PROPERTY'],
+    [set0({ id: 'S 1' }), 'PATTERN'],
+    [set0({ ref_pair: 'p'.repeat(65) }), 'PATTERN'],
+    [set0({ alt_pair: '' }), 'PATTERN'],
+    [variant({ strand: 1 }), 'OBJECT_ADDITIONAL_PROPERTIES'],
+    [variant({ position: 0 }), 'MINIMUM'],
+    [variant({ position: '11109' }), 'INVALID_TYPE'],
+    [variant({ region: 'r'.repeat(256) }), 'MAX_LENGTH'],
+    [variant({ ref: 'N' }), 'PATTERN'],
+    [variant({ alt: '-' }), 'PATTERN'],
+    [variant({ alt: 'A'.repeat(51) }), 'PATTERN']
+  ];
+  bad.forEach(function (row) { invalid('POST', '/primers/check', row[0], row[1]); });
+});
+
 test('legacy and malformed check bodies are rejected', function () {
   const pair = { id: 'P2', left: P2_L, right: P2_R };
   const base = { system_name: 'sorghum_bicolor', pairs: [pair] };
@@ -560,6 +629,20 @@ test('PrimerCheckRequest matches check/normalize.js: params rules, modes, checks
   // a key the swagger contract lacks is also refused by the handler
   (function () { checkNormalize.validateShape({ system_name: 'sorghum_bicolor', max_mismatches: 3, pairs: [{ id: 'P', left: P2_L, right: P2_R }] }, ccfg); })
     .should.throw({ code: 'INVALID_REQUEST' });
+  // genotyping spec §7.7 (M7): every PrimerCheckRequest property is a handler body key, genotyping included; the documented
+  // genotyping bodies pass the handler's shape rules, which refuse a key their definition lacks; the definitions match check/genotype.js
+  Object.keys(req.properties).sort().should.eql(checkNormalize.BODY_KEYS.slice().sort());
+  checkNormalize.BODY_KEYS.should.containEql('genotyping');
+  CHECK_GENOTYPING_EXAMPLES.forEach(function (body) {
+    (function () { checkNormalize.validateShape(JSON.parse(JSON.stringify(body)), ccfg); }).should.not.throw();
+  });
+  (function () { checkNormalize.validateShape(Object.assign({}, CHECK_GENOTYPING_EXAMPLES[1], { genotyping: Object.assign({ orientation: 'reverse' }, CHECK_GENOTYPING_BLOCK) }), ccfg); })
+    .should.throw({ code: 'INVALID_REQUEST', details: { field: 'genotyping.orientation' } });
+  const gd = definitions();
+  gd.PrimerCheckGenotyping.properties.sets.maxItems.should.equal(checkGenotype.MAX_SETS);
+  Object.keys(gd.PrimerCheckGenotyping.properties).sort().should.eql(['sets', 'variant']);
+  Object.keys(gd.PrimerCheckGenotypingVariant.properties).sort().should.eql(['alt', 'position', 'ref', 'region']);
+  Object.keys(gd.PrimerCheckGenotypingSet.properties).sort().should.eql(['alt_pair', 'id', 'ref_pair']);
 });
 
 // Genotyping spec §7.7 (sync tests, design half): PrimerGenotypingParams is the closed subset of design.PARAM_SPECS with
@@ -729,4 +812,27 @@ test('request fixtures pass the handler shape rules too, and the check fixtures 
     Array.from(paramKeys).sort().should.eql(Object.keys(checkNormalize.PARAM_RULES).sort());
     t.diagnostic('handler layers: ' + checks + ' check, ' + designs + ' design and ' + genotyping + ' genotyping design fixture(s); check params sent: ' +
       Array.from(paramKeys).sort().join(','));
+  });
+
+// Genotyping spec §7.7 (M7): the check-genotyping-*.json request fixtures exist and pass check/normalize.js's pure genotyping
+// rules (shape, gene/region mode, set links) up to the catalog stub. The positional rules need the reference FASTA and are unit-tested
+// in check_normalize_genotyping.test.js.
+test('check-genotyping-*.json request fixtures pass the genotyping rules of check/normalize.js up to the catalog stub',
+  { skip: HAVE_FIXTURES ? false : 'no fixtures yet: ' + path.relative(ROOT, FIXTURE_DIR) + ' does not exist' },
+  async function (t) {
+    const cfg = cfgForTests();
+    const unreachable = function () { throw Object.assign(new Error('past the request rules'), { code: 'UNREACHABLE' }); };
+    const deps = { cfg: cfg, genomes: { getCatalog: unreachable }, assemblies: { resolve: unreachable }, mongo: {}, log: { info() {}, warn() {}, error() {}, log() {} } };
+    const files = listJson(FIXTURE_DIR).filter(function (f) { return /^check-genotyping-/.test(path.basename(f)); });
+    if (!process.env.PRIMERS_CONTRACT_FIXTURES) files.length.should.be.above(0);
+    for (const file of files) {
+      const body = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const rel = path.relative(FIXTURE_DIR, file);
+      should.exist(body.genotyping, rel);
+      let err = null;
+      try { await checkNormalize.normalize(JSON.parse(JSON.stringify(body)), deps); } catch (e) { err = e; }
+      should.exist(err, rel);
+      err.code.should.equal('UNREACHABLE', rel + ': ' + err.code + ' ' + err.message);
+    }
+    t.diagnostic('genotyping check fixtures: ' + files.map(function (f) { return path.basename(f); }).join(', '));
   });
