@@ -2199,7 +2199,11 @@ wrong allele predictions, so it is refused at submit. The rules run in this orde
 
 1. The block's shape (swagger, then the handler): `400 INVALID_REQUEST {field}`. Beyond the swagger definition, `ref` and
    `alt` must differ and set ids must be unique.
-2. The existing pair rules (unique pair ids, at most 20 distinct primers).
+2. The existing pair rules (unique pair ids, at most 20 distinct primers). The 20-primer cap cannot bind a genotyping
+   check: rule 4's `no_shared_common` makes a set exactly three distinct primers (two allele-specific plus one common),
+   so *N* sets are 2*N* pairs and at most 3*N* distinct primers — at the 5-set ceiling, 10 pairs (the pair cap itself)
+   and at most 15 primers. What can bind is the 5-set cap, the 10-pair cap and the cost guard of rule 7. A client
+   mirroring these limits should name whichever one it is blocking on.
 3. `mode` must be `gene` or `region`, the modes that honour `expected`: `400 INVALID_REQUEST {field: "genotyping",
    reason: "mode"}`.
 4. The links between sets and pairs, without I/O: `400 GENOTYPING_SET_INVALID` with reasons `unknown_pair`, `same_pair`,
