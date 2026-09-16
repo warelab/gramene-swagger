@@ -124,7 +124,7 @@ show, and it wins wherever the two differ. Key sets are exact and complete.
 | `orientations`, `check` | `template_only: true` → `orientations: null`, `sets: []`, `check: null`; `check` is also `null` when no set was found |
 | `engine.primer3`, `engine.thermo`, `engine.variation_source` | `template_only`, or no variation source |
 | `copies[].ortholog` | always `null` in region mode (only gene mode annotates orthologs) |
-| `genomes[].reason`, `genomes[].observed`, `genomes[].source` | `reason` is null for a successful call; `observed`/`source` are null for `missing`/`unavailable`/`ambiguous` |
+| `genomes[].reason`, `genomes[].observed`, `genomes[].source` | `reason` is null for a successful call; `source` is null for `missing`/`unavailable`. `observed` is null for `missing`/`unavailable`/`ambiguous` **and also for `other` when the copies read different cores** — the two decisions are independent (`check/genotype.js:1188-1208`): the allele is the shared copy call, or `ambiguous` when the copies disagree, while `observed` is filled only when every copy reports the identical string. So render `other` with a null `observed` rather than treating it as bad data |
 | primer call `likelihood`, `mm_pos`, `residual_mm_pos` | `status: "no_product"`, or an approximate alignment (`status: "unknown"`) |
 | `strength`, `agrees` | see §5 — both are routinely `null` |
 | job fields | `queue_position` (running/done), `results.transcriptome` (non-transcript), `error` |
