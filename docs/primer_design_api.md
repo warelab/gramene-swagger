@@ -2930,6 +2930,82 @@ GET /sorghum_v11/primers/check/8e9160d598f602137d94efa9fc409264
   - The copies, identities, observed cores, calls and primer calls of §2.13 reproduce exactly.
   - Only the S2 prediction on pi180348 differs from §2.13.
 
+#### Two more recorded states: `ambiguous`, and a job in flight
+
+Both come from one full-panel job on the deletion `1:11282:CA:C` (`rs5413864115`), all 119 other assemblies, run on the dev
+API and its worker. The recordings are `capture-check-genotyping-ambiguous.json` and `capture-check-genotyping-running.json`.
+
+`ambiguous` means the genome's orthologous copies disagree with each other, so no single allele can be reported. Here
+`sorghum_pi544069ph352` has two copies of equal quality, 99.56 % each, reading different cores: `TCAAAG` (`ref`) and
+`TCAAG` (`alt`). The genome-level `observed` is therefore `null`, and both sets predict `both`. Note that this excerpt's
+`summary` counts all 119 assemblies while the recorded file keeps 17 genome entries, so the arrays deliberately do not sum
+to the summary.
+
+<!-- example: response GET /primers/check/{job_id} 200 capture=capture-check-genotyping-ambiguous.json#/response -->
+```json
+{
+  "job_id": "afa2448f22719708b2d5dda511b3d08b", "status": "done", "kind": "pangenome", "partial": false,
+  "progress": { "done": 120, "total": 120, "stage": "done", "running": [] },
+  "results": {
+    "genotyping": {
+      "algorithm_version": "g1",
+      "summary": {
+        "genomes_total": 119, "ref": 111, "alt": 5, "other": 0, "ambiguous": 1, "missing": 2, "unavailable": 0
+      },
+      "genomes": [
+        {
+          "system_name": "sorghum_pi544069ph352", "display_name": "Sb bicolor PI544069 PH352", "is_reference": false,
+          "allele": "ambiguous", "observed": null, "source": "amplicon",
+          "copies": [
+            {
+              "region": "1", "start": 13134, "end": 13299, "strand": -1, "variant_position": 13196, "identity": 99.56,
+              "gap_compressed_identity": 99.56, "aligned_length": 229, "observed": "TCAAAG", "flank_edits": 1,
+              "call": "ref", "anchors": 2, "ortholog": null, "source": "amplicon"
+            },
+            "…"
+          ],
+          "…": "…"
+        },
+        "…"
+      ],
+      "…": "…"
+    },
+    "…": "…"
+  },
+  "…": "…"
+}
+```
+
+A running job carries `partial: true` and the genotyping block it has filled so far. Immediately after the reference
+stage there is one `genomes` entry, the reference, and every summary count is still zero — so a UI must not read an
+empty summary as "nothing found".
+
+<!-- example: response GET /primers/check/{job_id} 200 capture=capture-check-genotyping-running.json#/response -->
+```json
+{
+  "job_id": "afa2448f22719708b2d5dda511b3d08b", "status": "running", "partial": true,
+  "progress": { "done": 1, "total": 120, "stage": "reference", "running": [] },
+  "results": {
+    "genotyping": {
+      "algorithm_version": "g1",
+      "summary": {
+        "genomes_total": 0, "ref": 0, "alt": 0, "other": 0, "ambiguous": 0, "missing": 0, "unavailable": 0
+      },
+      "…": "…"
+    },
+    "…": "…"
+  },
+  "…": "…"
+}
+```
+
+**`other` in practice.** No genome was called `other` in either full panel run so far — not on this deletion, and not on
+the five-unit TGG repeat `1:13735:TTGG:T` (`rs5413863413`), which was chosen precisely because assemblies there carry
+differing repeat counts. That variant came closest: `sorghum_tx430nano` has a copy at `Scaffold_20:32561494-32561655`
+reading `ATTGGTGGTGGTGGTGGT`, one TGG short of either haplotype, so that **copy** is `other`; its second copy reads `ref`,
+which makes the genome `ambiguous`. So `other` is reachable per copy, and a genome-level `other` needs every orthologous
+copy to miss both haplotypes.
+
 ---
 
 ## Operations
