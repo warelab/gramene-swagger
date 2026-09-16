@@ -1,0 +1,124 @@
+{
+ "generated_by": "scratchpad build_cdna_fixture.py (primer3_core 2.6.1, -strict_tags)",
+ "genomic_50kb": {
+  "system_name": "sorghum_bicolor",
+  "region": "4",
+  "start": 7400001,
+  "end": 7450000,
+  "strand": 1,
+  "source": "samtools faidx dna.toplevel.fa.gz",
+  "preset": "pcr",
+  "num_return": 20
+ },
+ "transcript_junction": {
+  "gene_id": "SORBI_3001G000200",
+  "transcript_id": "SORBI_3001G000200.1",
+  "location": {
+   "region": "1",
+   "start": 11180,
+   "end": 14899,
+   "strand": -1,
+   "map": "GCA_000003195.3"
+  },
+  "length": 1982,
+  "junctions": [
+   397,
+   493,
+   597,
+   869,
+   992,
+   1081,
+   1187,
+   1285,
+   1546,
+   1630
+  ],
+  "segments": [
+   {
+    "id": "EER93047-1",
+    "t_start": 1,
+    "t_end": 397,
+    "g_start": 14503,
+    "g_end": 14899
+   },
+   {
+    "id": "EER93047-2",
+    "t_start": 398,
+    "t_end": 493,
+    "g_start": 14321,
+    "g_end": 14416
+   },
+   {
+    "id": "EER93047-3",
+    "t_start": 494,
+    "t_end": 597,
+    "g_start": 14017,
+    "g_end": 14120
+   },
+   {
+    "id": "EER93047-4",
+    "t_start": 598,
+    "t_end": 869,
+    "g_start": 13637,
+    "g_end": 13908
+   },
+   {
+    "id": "EER93047-5",
+    "t_start": 870,
+    "t_end": 992,
+    "g_start": 13278,
+    "g_end": 13400
+   },
+   {
+    "id": "EER93047-6",
+    "t_start": 993,
+    "t_end": 1081,
+    "g_start": 13094,
+    "g_end": 13182
+   },
+   {
+    "id": "EER93047-7",
+    "t_start": 1082,
+    "t_end": 1187,
+    "g_start": 12895,
+    "g_end": 13000
+   },
+   {
+    "id": "EER93047-8",
+    "t_start": 1188,
+    "t_end": 1285,
+    "g_start": 12689,
+    "g_end": 12786
+   },
+   {
+    "id": "EER93047-9",
+    "t_start": 1286,
+    "t_end": 1546,
+    "g_start": 11892,
+    "g_end": 12152
+   },
+   {
+    "id": "EER93047-10",
+    "t_start": 1547,
+    "t_end": 1630,
+    "g_start": 11649,
+    "g_end": 11732
+   },
+   {
+    "id": "EER93047-11",
+    "t_start": 1631,
+    "t_end": 1982,
+    "g_start": 11180,
+    "g_end": 11531
+   }
+  ],
+  "source": "genes API + fastaIdx :8888 gene span",
+  "preset": "qpcr"
+ },
+ "error_junction_overlap": {
+  "note": "PRIMER_MIN_5_PRIME_OVERLAP_OF_JUNCTION=13 > floor(24/2)"
+ },
+ "no_pairs": {
+  "note": "cDNA[1..200], Tm 84-90 -> zero pairs"
+ }
+}

@@ -868,6 +868,178 @@ paths:
         200:
           description: "MongoDB response object"
 
+  # Primer design (docs/primer_design_api.md). These must stay before /{collection}.
+  /primers/design:
+    x-swagger-router-controller: primers
+    post:
+      summary: "Design PCR or qPCR primers"
+      description: "Synchronous Primer3 2.6.1 design on a gene (with flanks), a spliced transcript (junction-spanning qPCR), a genomic region or a pasted sequence. Template coordinates are 1-based inclusive; intervals are [start, length]. Requires Content-Type: application/json. Every response is Cache-Control: no-store."
+      operationId: designPrimers
+      tags:
+        - "Primer design"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          description: "design request; mode-specific required fields are checked by the handler"
+          required: true
+          schema:
+            $ref: "#/definitions/PrimerDesignRequest"
+      responses:
+        200:
+          description: "Template, primer pairs (possibly none, with warning NO_PAIRS), Primer3 explain counts, effective settings and warnings"
+          schema:
+            $ref: "#/definitions/PrimerDesignResponse"
+        400:
+          description: "Swagger validation errors ({message: 'Validation errors', errors[]}, e.g. INVALID_CONTENT_TYPE) or INVALID_REQUEST, INVALID_PARAMS, INVALID_SEQUENCE, TEMPLATE_TOO_LONG, REGION_OUT_OF_BOUNDS, INTERVAL_OUT_OF_BOUNDS, SYSTEM_NAME_MISMATCH, PRIMER3_INPUT_ERROR"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        404:
+          description: "UNKNOWN_GENE, UNKNOWN_TRANSCRIPT, UNKNOWN_GENOME, UNKNOWN_REGION"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        413:
+          description: "Request body larger than 100 kb"
+        422:
+          description: "NO_SEQUENCE, AMBIGUOUS_ASSEMBLY"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        500:
+          description: "PRIMER3_FAILED, GENE_STRUCTURE_MISMATCH, INTERNAL"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        503:
+          description: "BUSY, PRIMER3_UNAVAILABLE, FEATURE_DISABLED, MONGO_UNAVAILABLE; details.retry_after_s and a Retry-After header"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        504:
+          description: "DEADLINE_EXCEEDED (45 s in total, 30 s for Primer3)"
+          schema:
+            $ref: "#/definitions/PrimerError"
+
+  /primers/genomes:
+    x-swagger-router-controller: primers
+    get:
+      summary: "Genomes of the same species, with sequence, BLAST database and repeat-masking availability"
+      description: "The query genome first, then the other genomes of its species (first taxonomy ancestor of rank species) by display name. No filesystem paths are returned."
+      operationId: primerGenomes
+      tags:
+        - "Primer design"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: query
+          name: system_name
+          description: "query genome, e.g. sorghum_bicolor"
+          required: true
+          type: string
+          pattern: "^[a-z0-9_]+$"
+          maxLength: 128
+      responses:
+        200:
+          description: "species, counts and genomes"
+          schema:
+            $ref: "#/definitions/PrimerGenomesResponse"
+        400:
+          description: "Swagger validation errors (missing or malformed system_name)"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        404:
+          description: "UNKNOWN_GENOME"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        503:
+          description: "MONGO_UNAVAILABLE, FEATURE_DISABLED"
+          schema:
+            $ref: "#/definitions/PrimerError"
+
+  /primers/check:
+    x-swagger-router-controller: primers
+    post:
+      summary: "Submit a primer specificity / pan-genome check"
+      description: "Queues a check job (BLAST against the reference genome, plus its transcriptome in transcript mode, and optionally every same-species genome). Job ids are deterministic: an identical request returns the existing job (200) instead of queueing a new one (202). Poll GET /primers/check/{job_id}."
+      operationId: submitPrimerCheck
+      tags:
+        - "Primer design"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          description: "check request (frozen contract)"
+          required: true
+          schema:
+            $ref: "#/definitions/PrimerCheckRequest"
+      responses:
+        200:
+          description: "An identical job already exists (queued, running or done)"
+          schema:
+            $ref: "#/definitions/PrimerCheckJob"
+        202:
+          description: "A new job was queued (also when an errored job is re-queued)"
+          schema:
+            $ref: "#/definitions/PrimerCheckJob"
+        400:
+          description: "Swagger validation errors, or INVALID_REQUEST, INVALID_PARAMS (params.max_amplifying_mismatches not below ignore_mismatches), DUPLICATE_PAIR_ID, TOO_MANY_PRIMERS, PRODUCT_TOO_LONG_TO_CHECK, GENOME_NOT_CHECKABLE, SYSTEM_NAME_MISMATCH"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        404:
+          description: "UNKNOWN_GENOME, UNKNOWN_GENE, UNKNOWN_TRANSCRIPT"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        422:
+          description: "JOB_TOO_LARGE, NO_BLASTDB, AMBIGUOUS_ASSEMBLY"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        503:
+          description: "QUEUE_FULL, JOB_STORE_UNAVAILABLE, FEATURE_DISABLED, MONGO_UNAVAILABLE; details.retry_after_s and a Retry-After header"
+          schema:
+            $ref: "#/definitions/PrimerError"
+
+  /primers/check/{job_id}:
+    x-swagger-router-controller: primers
+    get:
+      summary: "Check job status and results"
+      description: "status queued, running (partial results while the pan-genome stage runs), done or error. Jobs expire (done 24 h, error 1 h), after which the id returns 404 UNKNOWN_JOB."
+      operationId: getPrimerCheck
+      tags:
+        - "Primer design"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: path
+          name: job_id
+          description: "32 lowercase hex characters"
+          required: true
+          type: string
+          pattern: "^[0-9a-f]{32}$"
+      responses:
+        200:
+          description: "Job status, progress and results (results null until there is something to show)"
+          schema:
+            $ref: "#/definitions/PrimerCheckJob"
+        400:
+          description: "Swagger validation errors (malformed job_id)"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        404:
+          description: "UNKNOWN_JOB (unknown or expired)"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        503:
+          description: "JOB_STORE_UNAVAILABLE, FEATURE_DISABLED"
+          schema:
+            $ref: "#/definitions/PrimerError"
+
   /{collection}:
     x-swagger-router-controller: mongo
     get:
@@ -1896,7 +2068,386 @@ definitions:
             items:
               type: string
 
-
+  # ---- Primer design (/primers/*) --------------------------------------------------------------------
+  # Request definitions are strict (additionalProperties: false) and mirror api/helpers/primers/design.js
+  # (TOP_LEVEL_FIELDS, PARAM_SPECS) and check/normalize.js (BODY_KEYS, PARAM_RULES);
+  # test/primers/unit/contract.test.js keeps them in sync. PrimerCheckRequest is the frozen check contract.
+  # Response definitions are documentation only (validateResponse is false); nullable fields carry x-nullable.
+  PrimerInterval:
+    description: "[start, length] in 1-based template coordinates"
+    type: array
+    minItems: 2
+    maxItems: 2
+    items:
+      type: integer
+      minimum: 1
+  PrimerRegion:
+    description: "Genomic region, 1-based inclusive; strand defaults to 1"
+    type: object
+    required: [region, start, end]
+    additionalProperties: false
+    properties:
+      region: { type: string, maxLength: 255 }
+      start: { type: integer, minimum: 1 }
+      end: { type: integer, minimum: 1 }
+      strand: { type: integer, enum: [1, -1] }
+  PrimerDesignParams:
+    description: "Closed set of Primer3 settings. Unset values come from the preset (pcr; qpcr in transcript mode). Cross-field rules (min <= opt <= max, max_size <= smallest product size, junction overlaps <= floor(max_size/2)) are checked by the handler (400 INVALID_PARAMS)."
+    type: object
+    additionalProperties: false
+    properties:
+      opt_size: { type: integer, minimum: 15, maximum: 36 }
+      min_size: { type: integer, minimum: 15, maximum: 36 }
+      max_size: { type: integer, minimum: 15, maximum: 36 }
+      opt_tm: { type: number, minimum: 30, maximum: 90 }
+      min_tm: { type: number, minimum: 30, maximum: 90 }
+      max_tm: { type: number, minimum: 30, maximum: 90 }
+      opt_gc: { type: number, minimum: 0, maximum: 100 }
+      min_gc: { type: number, minimum: 0, maximum: 100 }
+      max_gc: { type: number, minimum: 0, maximum: 100 }
+      max_tm_diff: { type: number, minimum: 0, maximum: 30 }
+      max_poly_x: { type: integer, minimum: 0, maximum: 10 }
+      gc_clamp: { type: integer, minimum: 0, maximum: 5 }
+      max_end_stability: { type: number, minimum: 0, maximum: 100 }
+      max_ns: { type: integer, minimum: 0, maximum: 5 }
+      salt_monovalent: { type: number, minimum: 0, maximum: 1000 }
+      salt_divalent: { type: number, minimum: 0, maximum: 100 }
+      dntp_conc: { type: number, minimum: 0, maximum: 100 }
+      dna_conc: { type: number, minimum: 0, maximum: 10000 }
+      num_return: { type: integer, minimum: 1, maximum: 20 }
+      min_3_prime_overlap_of_junction: { type: integer, minimum: 1, maximum: 20 }
+      min_5_prime_overlap_of_junction: { type: integer, minimum: 1, maximum: 20 }
+      product_size_ranges:
+        type: array
+        minItems: 1
+        maxItems: 10
+        items:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items: { type: integer, minimum: 20, maximum: 50000 }
+  PrimerDesignRequest:
+    description: "gene: gene_id (+ flank_up/flank_down, transcript_id overlay, system_name must match). transcript: gene_id (+ transcript_id, default canonical; junction_spanning, default true). region: system_name + region. sequence: sequence (FASTA headers allowed; several records are joined into one template with warning MULTIPLE_RECORDS; system_name optional). Omit optional fields rather than sending null."
+    type: object
+    required: [mode]
+    additionalProperties: false
+    properties:
+      mode: { type: string, enum: [gene, transcript, region, sequence] }
+      gene_id: { type: string, maxLength: 255 }
+      transcript_id: { type: string, maxLength: 255 }
+      system_name: { type: string, pattern: "^[a-z0-9_]+$", maxLength: 128 }
+      region: { $ref: "#/definitions/PrimerRegion" }
+      sequence: { type: string, maxLength: 60000 }
+      flank_up: { type: integer, minimum: 0, maximum: 10000 }
+      flank_down: { type: integer, minimum: 0, maximum: 10000 }
+      target: { $ref: "#/definitions/PrimerInterval" }
+      included: { $ref: "#/definitions/PrimerInterval" }
+      excluded:
+        type: array
+        maxItems: 50
+        items: { $ref: "#/definitions/PrimerInterval" }
+      avoid_repeats: { type: boolean }
+      repeat_mask_mode: { type: string, enum: [n_mask, three_prime] }
+      junction_spanning: { type: boolean }
+      template_only: { type: boolean, description: "return the template (with its mask) and no pairs; Primer3 is not run and product_size_ranges are not checked against the template length (every other rule still applies)" }
+      params: { $ref: "#/definitions/PrimerDesignParams" }
+  PrimerCheckRequest:
+    description: "Frozen check contract. mode defaults to region; checks defaults to [specificity] and specificity always runs; genomes applies only with the pangenome check (omitted = every checkable same-species genome); expected is honoured only in gene and region modes."
+    type: object
+    required: [system_name, pairs]
+    additionalProperties: false
+    properties:
+      system_name: { type: string, pattern: "^[a-z0-9_]+$", maxLength: 128 }
+      mode: { type: string, enum: [gene, transcript, region, sequence] }
+      gene_id: { type: string, maxLength: 255 }
+      transcript_id: { type: string, maxLength: 255 }
+      checks: { type: array, minItems: 1, maxItems: 2, items: { type: string, enum: [specificity, pangenome] } }
+      genomes: { type: array, maxItems: 150, items: { type: string, pattern: "^[a-z0-9_]+$", maxLength: 128 } }
+      params:
+        type: object
+        description: "Unset values take the defaults (max_product_size 4000, ignore_mismatches 6, min_total_mismatches 2, min_3p_mismatches 2, three_prime_window 5, include_unlikely false, repeat_site_threshold 5, max_amplifying_mismatches 3). max_amplifying_mismatches must be below ignore_mismatches (400 INVALID_PARAMS); when it is omitted, the default is lowered to ignore_mismatches - 1 if needed."
+        additionalProperties: false
+        properties:
+          max_product_size: { type: integer, minimum: 50, maximum: 10000 }
+          ignore_mismatches: { type: integer, minimum: 3, maximum: 6, description: "a primer site with this many edits cannot prime; its products are dropped" }
+          min_total_mismatches: { type: integer, minimum: 0, maximum: 6 }
+          min_3p_mismatches: { type: integer, minimum: 1, maximum: 5 }
+          three_prime_window: { type: integer, minimum: 3, maximum: 10 }
+          include_unlikely: { type: boolean }
+          repeat_site_threshold: { type: integer, minimum: 1, maximum: 100 }
+          max_amplifying_mismatches: { type: integer, minimum: 0, maximum: 5, description: "a product amplifies only if each primer site has at most this many edits (and passes the 3' rule); products over it are unlikely" }
+      pairs:
+        type: array
+        minItems: 1
+        maxItems: 10
+        items:
+          type: object
+          required: [id, left, right]
+          additionalProperties: false
+          properties:
+            id: { type: string, pattern: "^[A-Za-z0-9_.:-]+$", maxLength: 64 }
+            left: { type: string, pattern: "^[ACGTacgt]{15,36}$" }
+            right: { type: string, pattern: "^[ACGTacgt]{15,36}$" }
+            expected:
+              type: object
+              required: [region, start, end]
+              additionalProperties: false
+              properties:
+                region: { type: string, maxLength: 255 }
+                start: { type: integer, minimum: 1 }
+                end: { type: integer, minimum: 1 }
+  PrimerError:
+    description: "Handler error body. Swagger validation errors instead look like {message: 'Validation errors', errors: [{code, message, path}]}; the code INVALID_CONTENT_TYPE appears there."
+    type: object
+    required: [message, code]
+    properties:
+      message: { type: string }
+      code: { type: string, description: "UPPER_SNAKE code" }
+      details: { type: object, description: "code-specific; every 503 carries retry_after_s (also sent as Retry-After)" }
+      errors: { type: array, items: { type: object } }
+  PrimerWarning:
+    type: object
+    properties:
+      code: { type: string }
+      message: { type: string }
+  PrimerBlock:
+    type: object
+    properties:
+      start: { type: integer }
+      end: { type: integer }
+  PrimerGenomicLocation:
+    description: "Genomic footprint; blocks are ascending and there are two or more when a cDNA primer spans an exon-exon junction"
+    type: object
+    x-nullable: true
+    properties:
+      region: { type: string }
+      start: { type: integer }
+      end: { type: integer }
+      strand: { type: integer, enum: [1, -1] }
+      blocks: { type: array, items: { $ref: "#/definitions/PrimerBlock" } }
+  PrimerOligo:
+    type: object
+    properties:
+      seq: { type: string, description: "5'->3', uppercase" }
+      start: { type: integer, description: "template coordinate of the leftmost base" }
+      end: { type: integer }
+      len: { type: integer }
+      tm: { type: number }
+      gc: { type: number }
+      self_any_th: { type: number }
+      self_end_th: { type: number }
+      hairpin_th: { type: number }
+      end_stability: { type: number }
+      penalty: { type: number }
+      junction:
+        type: object
+        x-nullable: true
+        properties:
+          position: { type: integer, description: "junction between template bases position and position+1" }
+          overlap_5p: { type: integer }
+          overlap_3p: { type: integer }
+      genomic: { $ref: "#/definitions/PrimerGenomicLocation" }
+  PrimerDesignPair:
+    type: object
+    properties:
+      rank: { type: integer }
+      penalty: { type: number }
+      product_size: { type: integer, description: "right.end - left.start + 1" }
+      product_tm: { type: number, x-nullable: true, description: "Primer3 product Tm; with repeat_mask_mode n_mask, recomputed on the unmasked template (Primer3 long_seq_tm, same salts) for products covering masked bases" }
+      compl_any_th: { type: number }
+      compl_end_th: { type: number }
+      left: { $ref: "#/definitions/PrimerOligo" }
+      right: { $ref: "#/definitions/PrimerOligo" }
+      product:
+        type: object
+        properties:
+          start: { type: integer }
+          end: { type: integer }
+          genomic: { $ref: "#/definitions/PrimerGenomicLocation" }
+          genomic_size: { type: integer, description: "transcript templates only: genomic envelope length" }
+  PrimerDesignTemplate:
+    type: object
+    properties:
+      mode: { type: string, enum: [gene, transcript, region, sequence] }
+      system_name: { type: string, x-nullable: true }
+      gene_id: { type: string, x-nullable: true }
+      transcript_id: { type: string, x-nullable: true }
+      region: { type: string, x-nullable: true }
+      start: { type: integer, x-nullable: true }
+      end: { type: integer, x-nullable: true }
+      strand: { type: integer, x-nullable: true }
+      length: { type: integer }
+      seq: { type: string, description: "uppercase and unmasked; Primer3 receives the masked copy" }
+      masked: { type: boolean }
+      mask_source: { type: string, enum: [softmask, blast_depth, user_lowercase], x-nullable: true }
+      mask: { type: array, items: { $ref: "#/definitions/PrimerInterval" } }
+      masked_fraction: { type: number }
+      features:
+        type: object
+        description: "gene: {gene, exons, cds, junctions}; transcript: {gene: null, exons, cds, junctions}; region and sequence: {}"
+  PrimerDesignResponse:
+    type: object
+    properties:
+      template: { $ref: "#/definitions/PrimerDesignTemplate" }
+      pairs: { type: array, items: { $ref: "#/definitions/PrimerDesignPair" } }
+      explain:
+        type: object
+        x-nullable: true
+        description: "Primer3 explain counts {left, right, pair}, each {raw, <reason>: count}; null for template_only"
+      settings:
+        type: object
+        properties:
+          preset: { type: string, enum: [pcr, qpcr] }
+          junction_spanning: { type: boolean }
+          avoid_repeats: { type: boolean }
+          repeat_mask_mode: { type: string, enum: [n_mask, three_prime], x-nullable: true }
+          params: { type: object, description: "effective values (preset merged with the request)" }
+      engine:
+        type: object
+        properties:
+          primer3: { type: string, x-nullable: true }
+      warnings: { type: array, items: { $ref: "#/definitions/PrimerWarning" } }
+  PrimerGenomesResponse:
+    type: object
+    properties:
+      system_name: { type: string }
+      species:
+        type: object
+        x-nullable: true
+        properties:
+          taxon_id: { type: integer }
+          name: { type: string }
+      counts:
+        type: object
+        properties:
+          total: { type: integer }
+          with_blastdb: { type: integer }
+          with_cdna_blastdb: { type: integer }
+      genomes:
+        type: array
+        items:
+          type: object
+          properties:
+            system_name: { type: string }
+            display_name: { type: string }
+            taxon_id: { type: integer, x-nullable: true }
+            map_id: { type: string }
+            is_query: { type: boolean }
+            has_sequence: { type: boolean }
+            has_blastdb: { type: boolean }
+            has_cdna_blastdb: { type: boolean }
+            repeat_masking: { type: string, enum: [soft_masked, unmasked_copy, absent] }
+            total_bases: { type: integer, x-nullable: true }
+            warnings: { type: array, items: { $ref: "#/definitions/PrimerWarning" } }
+  PrimerCheckJob:
+    description: "POST returns job_id, status, kind, queue_position, progress, estimate, created_at and warnings; GET adds partial, started_at, finished_at, attempts, request, results and error"
+    type: object
+    properties:
+      job_id: { type: string, pattern: "^[0-9a-f]{32}$" }
+      status: { type: string, enum: [queued, running, done, error] }
+      kind: { type: string, enum: [specificity, pangenome] }
+      partial: { type: boolean, description: "true while results holds the partial results of a running job" }
+      queue_position: { type: integer, x-nullable: true }
+      progress:
+        type: object
+        properties:
+          done: { type: integer }
+          total: { type: integer }
+          stage: { type: string, description: "queued, reference, transcriptome, pangenome, done" }
+          running: { type: array, items: { type: string } }
+      estimate:
+        type: object
+        properties:
+          cpu_s: { type: integer }
+      created_at: { type: string, format: date-time }
+      started_at: { type: string, format: date-time, x-nullable: true }
+      finished_at: { type: string, format: date-time, x-nullable: true }
+      attempts: { type: integer }
+      request: { type: object, description: "normalized request (defaults filled, primers uppercased)" }
+      warnings: { type: array, items: { $ref: "#/definitions/PrimerWarning" } }
+      results: { $ref: "#/definitions/PrimerCheckResults" }
+      error:
+        type: object
+        x-nullable: true
+        properties:
+          code: { type: string, description: "REFERENCE_BLAST_FAILED (details.cause, e.g. BLAST_TIMEOUT), NO_BLASTDB, JOB_TIMEOUT, RESULT_TOO_LARGE, WORKER_LOST, MONGO_UNAVAILABLE (mongo failed on the last attempt), CHECK_FAILED" }
+          message: { type: string }
+          details: { type: object }
+  PrimerCheckAmplicon:
+    type: object
+    properties:
+      region: { type: string }
+      start: { type: integer, description: "5' end of the forward-facing primer site" }
+      end: { type: integer, description: "5' end of the reverse-facing primer site" }
+      size: { type: integer }
+      strand: { type: integer, x-nullable: true }
+      orientation: { type: string, enum: [LR, RL, LL, RR], description: "LR/RL: a proper pair (an identical left/right primer pair is always LR); LL/RR: one primer priming both ways" }
+      likelihood: { type: string, enum: [likely, likely_weak, unlikely], description: "likely/likely_weak amplify: each primer site has at most max_amplifying_mismatches edits and is not 3'-blocked; unlikely: over the cap or 3'-blocked" }
+      left_mm: { type: integer }
+      right_mm: { type: integer }
+      left_3p_mm: { type: integer }
+      right_3p_mm: { type: integer }
+      left_mm_pos: { type: array, x-nullable: true, items: { type: integer }, description: "distances from the 3' end (1 = terminal base), 5'->3'" }
+      right_mm_pos: { type: array, x-nullable: true, items: { type: integer } }
+      terminal_mismatch: { type: boolean }
+      approx: { type: boolean, description: "true when a site was not re-aligned against the FASTA (its lower bound already exceeds max_amplifying_mismatches, or no FASTA): mismatch counts are lower bounds and mm_pos is null" }
+      genes: { type: array, x-nullable: true, items: { type: object } }
+  PrimerCheckResults:
+    type: object
+    x-nullable: true
+    properties:
+      engine:
+        type: object
+        properties:
+          algorithm_version: { type: string, description: "'2': max_amplifying_mismatches stringency, overlapping primer footprints discarded, gapped sites joined from split BLAST hits" }
+          blast: { type: string, x-nullable: true }
+          reference: { type: string }
+          pangenome: { type: string, x-nullable: true }
+      params: { type: object, description: "the 8 effective check params (request params with defaults filled)" }
+      reference:
+        type: object
+        properties:
+          system_name: { type: string }
+          map_id: { type: string }
+          total_bases: { type: integer }
+      sensitivity_note: { type: string }
+      primers:
+        type: object
+        description: "keyed by uppercase primer sequence"
+        additionalProperties:
+          type: object
+          properties:
+            len: { type: integer }
+            near_perfect_sites: { type: integer }
+            repetitive: { type: boolean }
+            truncated: { type: boolean }
+            sensitivity: { type: object, description: "{reference: {word_size, guaranteed_max_mismatches}, pangenome?: {...}}" }
+      specificity:
+        type: object
+        properties:
+          target: { type: string, enum: [genome] }
+          pairs:
+            type: array
+            items:
+              type: object
+              properties:
+                id: { type: string }
+                verdict: { type: string, enum: [specific, off_targets, on_target_missing, unverified_target, truncated, error] }
+                on_target_inferred: { type: boolean }
+                truncated: { type: boolean }
+                on_target: { $ref: "#/definitions/PrimerCheckAmplicon" }
+                off_target_count: { type: integer }
+                unlikely_count: { type: integer }
+                off_targets: { type: array, items: { $ref: "#/definitions/PrimerCheckAmplicon" } }
+                unlikely: { type: array, items: { $ref: "#/definitions/PrimerCheckAmplicon" }, description: "only with params.include_unlikely" }
+                gdna_products: { type: array, items: { $ref: "#/definitions/PrimerCheckAmplicon" } }
+      transcriptome: { type: object, x-nullable: true, description: "transcript mode: cDNA verdicts with amplicons grouped by gene" }
+      pangenome:
+        type: object
+        x-nullable: true
+        description: "{target, pairs: [{id, reference_size, max_size, summary {genomes_total, single_perfect, single_mismatch, multiple, no_amplicon, db_unavailable, error, amplifies, truncated}, genomes: [{system_name, display_name, status, ortholog_annotated, truncated, primary, other_amplicons, others, nearest, reason?, error?}]}]}. The status counts add up to genomes_total and amplifies = single_perfect + single_mismatch + multiple; truncated counts genomes whose search hit a cap (not a status: such a genome's status is a lower bound). nearest (no_amplicon) is the best unlikely product and may be approximate."
+      warnings: { type: array, items: { $ref: "#/definitions/PrimerWarning" } }
+      timings_ms: { type: object }
 
 parameters:
   q:

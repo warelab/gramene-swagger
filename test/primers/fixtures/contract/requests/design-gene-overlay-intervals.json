@@ -1,0 +1,33 @@
+{
+  "mode": "gene",
+  "gene_id": "SORBI_3004G087700",
+  "system_name": "sorghum_bicolor",
+  "transcript_id": "SORBI_3004G087700.3",
+  "flank_up": 1000,
+  "flank_down": 500,
+  "target": [
+    2000,
+    300
+  ],
+  "included": [
+    1000,
+    4000
+  ],
+  "excluded": [
+    [
+      2500,
+      40
+    ],
+    [
+      3000,
+      20
+    ]
+  ],
+  "avoid_repeats": true,
+  "repeat_mask_mode": "three_prime",
+  "params": {
+    "opt_tm": 61,
+    "max_tm": 64,
+    "num_return": 10
+  }
+}

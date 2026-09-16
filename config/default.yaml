@@ -39,3 +39,62 @@ swagger:
       name: swagger_raw
 
 # any other values in this file are just loaded into the config for application access...
+
+# Primer design and primer check service (/primers). api/helpers/primers/config.js merges this
+# block over its built-in DEFAULTS, then applies env overrides (read in config.js, not through
+# custom-environment-variables.yaml): PRIMERS_ENABLED, PRIMERS_SITE_KEY, PRIMER3_CORE, BLASTN,
+# BLASTDBCMD, PRIMERS_FASTA_ROOT, PRIMERS_JOB_STORE, PRIMERS_REDIS_URL, PRIMERS_GLOBAL_PREFIX,
+# PRIMERS_GLOBAL_MAX_JOBS, PRIMERS_MAX_QUEUED.
+primers:
+  enabled: true
+  site_key: null                    # default "<basePath w/o slash>:<getMongoConfig().db>" e.g. sorghum_v11:sorghum11
+  primer3_core: /home/olson/bin/primer3_core
+  blastn: /home/olson/bin/blastn
+  blastdbcmd: /home/olson/bin/blastdbcmd
+  fasta_root: /scratch/olson/fasta
+  tmp_dir: /tmp
+  assembly_overrides: {}            # { system_name: prefix }
+  repeat_masking_overrides: {}      # { system_name: soft_masked|unmasked_copy|absent }
+  design: { deadline_ms: 45000, primer3_timeout_ms: 30000, max_concurrent: 4, max_waiting: 16, wait_timeout_ms: 10000,
+            max_template_length: 50000, max_flank: 10000, max_fetch_length: 2000000, max_stdout_bytes: 2000000 }
+  repeat_mask: { enabled: true, min_hsp_len: 50, perc_identity: 85, evalue: 1.0e-10, min_depth: 3, threads: 2,
+                 chunk: 20000, exon_pad: 100, timeout_ms: 20000, cache_entries: 200 }
+  check:
+    store: redis                    # redis | memory
+    redis_url: redis://localhost:6380/1
+    global_prefix: 'primers:global:'  # host-wide slot ZSETs: <prefix>slots, <prefix>pan_slots
+    global_max_jobs: 2
+    pangenome_max_jobs: 1
+    local_max_jobs: 2
+    spec_job_procs: 4
+    pangenome_job_procs: 8
+    nice: 10
+    max_queued: 50
+    max_pairs: 10
+    max_unique_primers: 20
+    max_genomes: 150
+    max_job_cpu_s: 6000
+    cpu_s_per_primer_gb: { ws5: 5.2, ws6: 2.2, ws7: 1.2 }
+    reference_word_size: 5
+    pangenome_word_size: 6
+    pangenome_cpu_factor: 2.0   # pan-genome BLAST CPU vs the single-thread coefficients (measured 1.97 on the full sorghum panel)
+    blast_timeout_ms: 600000
+    job_timeout_ms: 1800000
+    heartbeat_ms: 10000
+    stale_ms: 60000
+    queue_sweep_ms: 600000
+    progress_min_interval_ms: 5000
+    max_attempts: 2
+    ttl_active_s: 21600
+    ttl_done_s: 86400
+    ttl_error_s: 3600
+    max_finished_jobs: 500
+    max_result_bytes: 5000000
+    max_candidates_per_pair: 5000
+    max_realign_sites_per_genome: 20000
+    realign_concurrency: 32
+    max_offtargets_listed: 100
+    max_annotated_amplicons: 200
+    defaults: { max_product_size: 4000, ignore_mismatches: 6, min_total_mismatches: 2, min_3p_mismatches: 2,
+                three_prime_window: 5, include_unlikely: false, repeat_site_threshold: 5,
+                max_amplifying_mismatches: 3 }   # must stay below ignore_mismatches

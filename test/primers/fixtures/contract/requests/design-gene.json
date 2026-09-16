@@ -1,0 +1,15 @@
+{
+  "mode": "gene",
+  "gene_id": "SORBI_3001G000200",
+  "system_name": "sorghum_bicolor",
+  "flank_up": 200,
+  "flank_down": 100,
+  "params": {
+    "product_size_ranges": [
+      [
+        300,
+        800
+      ]
+    ]
+  }
+}
