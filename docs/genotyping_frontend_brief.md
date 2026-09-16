@@ -75,7 +75,7 @@ designGenotyping(req: GenotypingDesignRequest, o?: RequestOptions): Promise<Geno
 | --- | --- |
 | `src/types.ts` | the block in §2.3 below. `CheckRequest` (`:297`) gains `genotyping?`; `CheckResults` (`:546`) gains `genotyping?`; `GenomeEntry` (`:241`) gains `has_variation?`; `GenomesResponse` (`:255`) gains `variation?`; `PrimersClient` (`:638`) gains the three optional methods; `PrimerDesignerState` gains `genotyping?`; `PrimerDesignerProps.modes`/`defaultMode` (`:711-712`) and `PrimerDesignerFeatures` (`:697`, add `genotyping?`) widen to `DesignerMode` |
 | `src/client.ts` | the three methods, a `variantsCache` beside `genomesCache` |
-| `src/request.ts` | `buildGenotypingRequest(state, ctx)`, `buildGenotypingCheckRequest(...)` (§4), `GENOTYPING_CHECK_LIMITS = {maxSets: 5, maxPairs: 10, maxUniquePrimers: 20}`; `CheckRequestErrorCode` gains `TOO_MANY_SETS` and `OVER_CPU_LIMIT`. `CHECK_LIMITS` (`:22`) stays as it is |
+| `src/request.ts` | `buildGenotypingRequest(state, ctx)`, `buildGenotypingCheckRequest(...)` (§4), `GENOTYPING_CHECK_LIMITS = {maxSets: 5, maxPairs: 10, maxUniquePrimers: 20}`; `CheckRequestErrorCode` gains `TOO_MANY_SETS` and `OVER_CPU_LIMIT`. `CHECK_LIMITS` (`:22`) stays as it is. **These three are what the server rejects:** more than 5 sets → `400 INVALID_REQUEST` (`details {field: "genotyping.sets", max: 5}`), more than 10 pairs → validator 400, more than 20 distinct primers → `400 TOO_MANY_PRIMERS` (`details {unique_primers, max}`). Do **not** use 13 as a Submit limit: `genotyping.check_max_unique_primers` (13) and `check_max_sets` (5) are design-side caps that bound how many sets the design endpoint packs into the `check.request` it returns, so the proposal fits the cost guard; a 20-primer check you assemble yourself is legal |
 | `src/validate.ts` | `validateVariantInput` (the two input styles, alleles `^([ACGTacgt]{1,50}\|-)$`, `ref !== alt`), `validateGenotypingParams` + `GENOTYPING_PARAM_LIMITS` (the accepted subset only — `num_return`, `max_ns` and the junction params are **rejected** by the server), and the hint that the effective product minimum is `2 × max_size + 1` |
 | `src/presets.ts` | `GENOTYPING_PRESETS` (`kasp`, `as_pcr` level 0), `GENOTYPING_LADDER` (display only), `changedGenotypingAssay`, `changedGenotypingParams`. `ParamsPanel.tsx:188` hard-codes `['pcr','qpcr']` — parameterize it |
 | `src/state.ts` | `ALL_MODES` (`:19`) and `availableModes` (`:42`) take `DesignerMode`; `normalizeDesignerState` (`:145`) gains `cleanGenotyping(raw)`; `designerIdentity` (`:234`) unchanged unless you want the variant key in it |
@@ -525,7 +525,10 @@ Add every new code to `WARNING_TEXT` (`src/components/Warnings.tsx:5`) so a mess
    `SHIFT_TRACT_DISCRIMINATION` notices, and the ALT primer's two genomic blocks.
 6. Checking S1 + S2 posts exactly `check.request` (4 pairs, `genotyping.sets` S1/S2, `genotyping.variant`
    `{region:"1", position:11109, ref:"C", alt:"A"}`); the cost line reads ≈ 95 CPU-s for 3 genomes and ≈ 2,690 for the
-   full panel; 14 distinct primers over the full panel disables Submit.
+   full panel. Submit is disabled at 14 distinct primers on the full panel because of the **cost guard**, not a primer
+   count: the mirrored estimate passes 6,000 CPU-s there (13 primers ≈ 5,800, 14 ≈ 6,245), and the server would answer
+   `422 JOB_TOO_LARGE {estimate_cpu_s, limit}`. On a small genome subset the 20-primer cap binds first instead, so the
+   UI names whichever limit it is blocking on.
 7. With `capture-check-genotyping-result.json`: the Alleles tab shows 12 rows (reference first), 6 `ref` / 5 `alt`,
    pi180348 with 2 copies and `paralog_copies: 1`, S1 11/11 agree, S2 10/11 with pi180348 `both`, `ref_signal_off_locus`
    and ⚠; "disagreements only" leaves exactly that one row; the `WEAK_OFF_TARGETS` notice explains itself.
