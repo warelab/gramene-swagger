@@ -15,8 +15,9 @@ const SKIP = BASE ? false : 'set PRIMERS_IT_BASE, e.g. http://127.0.0.1:50111/so
 
 // The four sorghum assemblies with a real soft-masked dna_sm (checked by sampling for lowercase).
 const SOFT_MASKED_SORGHUM = ['sorghum_rio', 'sorghum_tx2783pac', 'sorghum_tx430nano', 'sorghum_tx436pac'];
+// has_variation: the additive genotyping field (genotyping spec §2.2); genotyping_endpoints.test.js checks its values.
 const GENOME_KEYS = ['system_name', 'display_name', 'taxon_id', 'map_id', 'is_query', 'has_sequence', 'has_blastdb',
-  'has_cdna_blastdb', 'repeat_masking', 'total_bases', 'warnings'];
+  'has_cdna_blastdb', 'has_variation', 'repeat_masking', 'total_bases', 'warnings'];
 
 async function http(method, path, opts) {
   opts = opts || {};

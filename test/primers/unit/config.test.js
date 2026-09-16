@@ -34,6 +34,15 @@ test('get() merges config/default.yaml primers over DEFAULTS and deep-freezes th
   cfg.design.max_fetch_length.should.equal(2000000);
   cfg.repeat_mask.evalue.should.equal(1e-10);
   cfg.check.cpu_s_per_primer_gb.should.eql({ ws5: 5.2, ws6: 2.2, ws7: 1.2 });
+  // genotyping (genotyping spec §3.1)
+  cfg.ntthal.should.equal('/home/olson/primer3-2.6.1/bin/ntthal');
+  cfg.variation.should.match({ enabled: true, base_url: 'https://data.gramene.org/pansite-ensembl-115', release: '115', chunk_bp: 10000,
+    max_window: 50000, max_concurrent: 4, queue_wait_ms: 5000, breaker_failures: 3, max_shift: 1000, ems_source_pattern: '^EMS_' });
+  cfg.variation.species.should.eql({ sorghum_bicolor: 'sorghum_bicolor' });
+  cfg.genotyping.should.match({ template_flank: 400, max_primer3_runs: 54, max_thermo_calls: 272, as_min_tm: 52, as_min_gc: 15,
+    common_tm_low: -1, check_max_unique_primers: 13 });
+  cfg.check.should.match({ genotype_cpu_s_per_genome: 0.2, genotype_max_megablast: 30, genotype_megablast_min_bitscore_frac: 0.9, genotype_offlocus_max_mismatches: 2 });
+  Object.isFrozen(cfg.variation.species).should.equal(true);
   Object.prototype.hasOwnProperty.call(cfg.check, 'in_process').should.equal(false); // no supervisor-only keys
   Object.isFrozen(cfg).should.equal(true);
   Object.isFrozen(cfg.check.defaults).should.equal(true);
@@ -62,11 +71,18 @@ test('environment overrides (A.7) with typed parsing', function () {
     PRIMERS_REDIS_URL: 'redis://localhost:6399/1',
     PRIMERS_GLOBAL_PREFIX: 'primers:test:global:',
     PRIMERS_GLOBAL_MAX_JOBS: '1',
-    PRIMERS_MAX_QUEUED: '5'
+    PRIMERS_MAX_QUEUED: '5',
+    NTTHAL: '/opt/p3/ntthal',
+    PRIMERS_VARIATION_URL: 'https://rest.example.org/ensembl-115',
+    PRIMERS_VARIATION_ENABLED: '0'
   };
   const r = config._build({ env: env, fileConfig: {} });
   r.warnings.should.eql([]);
   const c = r.config;
+  c.ntthal.should.equal('/opt/p3/ntthal');
+  c.variation.base_url.should.equal('https://rest.example.org/ensembl-115');
+  c.variation.enabled.should.equal(false);
+  c.variation.release.should.equal('115'); // untouched siblings survive
   c.enabled.should.equal(false);
   c.site_key.should.equal('sorghum_v11_dev');
   c.primer3_core.should.equal('/opt/p3/primer3_core');
@@ -101,6 +117,29 @@ test('malformed or empty env values are ignored (with warnings), never fatal', f
   r.warnings.length.should.equal(3);
   r.warnings.join('\n').should.match(/PRIMERS_GLOBAL_MAX_JOBS/).and.match(/PRIMERS_MAX_QUEUED/).and.match(/PRIMERS_JOB_STORE/);
   config._build({ env: { PRIMERS_GLOBAL_MAX_JOBS: '0' }, fileConfig: {} }).config.check.global_max_jobs.should.equal(0);
+});
+
+// Genotyping spec §3.1 and §7.6: the `url` env type. https anywhere; plain http only for the loopback fake Ensembl.
+test('PRIMERS_VARIATION_URL accepts https:// or http://127.0.0.1 only, without credentials, query or fragment; PRIMERS_VARIATION_ENABLED is a bool', function () {
+  const DEFAULT_URL = 'https://data.gramene.org/pansite-ensembl-115';
+  ['https://data.gramene.org/pansite-ensembl-115', 'https://rest.ensembl.org', 'http://127.0.0.1:50199', 'http://127.0.0.1',
+    'http://127.0.0.1/fake/', ' https://example.org/x '].forEach(function (url) {
+    const r = config._build({ env: { PRIMERS_VARIATION_URL: url }, fileConfig: {} });
+    r.warnings.should.eql([], url);
+    r.config.variation.base_url.should.equal(url.trim());
+  });
+  ['http://data.gramene.org/pansite-ensembl-115', 'http://127.0.0.1.evil.example', 'http://127.0.0.1@evil.example', 'http://localhost:50199',
+    'http://127.0.0.2:50199', 'ftp://127.0.0.1/', 'https://user:pw@example.org', 'https://example.org/x?feature=1', 'https://example.org/#x',
+    'not a url', 'https://', 'file:///etc/passwd', 'javascript:alert(1)'].forEach(function (url) {
+    const r = config._build({ env: { PRIMERS_VARIATION_URL: url }, fileConfig: {} });
+    r.config.variation.base_url.should.equal(DEFAULT_URL, url);
+    r.warnings.should.have.length(1);
+    r.warnings[0].should.match(/^PRIMERS_VARIATION_URL /);
+  });
+  config._build({ env: { PRIMERS_VARIATION_ENABLED: 'true' }, fileConfig: { variation: { enabled: false } } }).config.variation.enabled.should.equal(true);
+  config._build({ env: { PRIMERS_VARIATION_ENABLED: 'off' }, fileConfig: {} }).config.variation.enabled.should.equal(false);
+  config._build({ env: { PRIMERS_VARIATION_ENABLED: '' }, fileConfig: {} }).config.variation.enabled.should.equal(true);
+  config.ENV_OVERRIDES.map(function (row) { return row[0]; }).should.containDeep(['NTTHAL', 'PRIMERS_VARIATION_URL', 'PRIMERS_VARIATION_ENABLED']);
 });
 
 test('file config merges deeply, arrays and null replace, prototype keys are ignored', function () {
@@ -169,7 +208,7 @@ test('siteKey(): PRIMERS_SITE_KEY || primers.site_key || "<basePath w/o slash>:<
 test('a separate process started elsewhere (like the pm2 worker) derives the same config and site_key', function () {
   const env = {};
   Object.keys(process.env).forEach(function (k) {
-    if (!/^(PRIMERS_|PRIMER3_CORE$|BLASTN$|BLASTDBCMD$|NODE_CONFIG|NODE_ENV$|NODE_APP_INSTANCE$|NODE_TEST)/.test(k)) env[k] = process.env[k];
+    if (!/^(PRIMERS_|PRIMER3_CORE$|NTTHAL$|BLASTN$|BLASTDBCMD$|NODE_CONFIG|NODE_ENV$|NODE_APP_INSTANCE$|NODE_TEST)/.test(k)) env[k] = process.env[k];
   });
   const code = "const c = require(" + JSON.stringify(path.join(REPO, 'api', 'helpers', 'primers', 'config.js')) + ");" +
     "process.stdout.write(JSON.stringify({cwd: process.cwd(), dir: process.env.NODE_CONFIG_DIR, basePath: c.basePath(), " +

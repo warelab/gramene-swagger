@@ -1,0 +1,16 @@
+{
+  "system_name": "sorghum_bicolor",
+  "mode": "gene",
+  "gene_id": "SORBI_3001G000200",
+  "checks": ["specificity"],
+  "pairs": [
+    { "id": "S1_REF", "left": "AGGATCTTTGCAACCCTGTGTT", "right": "GCAGGAAAAGAAATCCTAACATCATATG", "expected": { "region": "1", "start": 11458, "end": 11529 } },
+    { "id": "S1_ALT", "left": "AGGATCTTTGCAACCCTGTGTT", "right": "GCAGGAAAAGAAATCCTAACATCATATA", "expected": { "region": "1", "start": 11458, "end": 11529 } }
+  ],
+  "genotyping": {
+    "variant": { "region": "1", "position": 11502, "ref": "C", "alt": "CGT" },
+    "sets": [
+      { "id": "S1", "ref_pair": "S1_REF", "alt_pair": "S1_ALT" }
+    ]
+  }
+}

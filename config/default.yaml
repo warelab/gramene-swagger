@@ -42,13 +42,15 @@ swagger:
 
 # Primer design and primer check service (/primers). api/helpers/primers/config.js merges this
 # block over its built-in DEFAULTS, then applies env overrides (read in config.js, not through
-# custom-environment-variables.yaml): PRIMERS_ENABLED, PRIMERS_SITE_KEY, PRIMER3_CORE, BLASTN,
+# custom-environment-variables.yaml): PRIMERS_ENABLED, PRIMERS_SITE_KEY, PRIMER3_CORE, NTTHAL, BLASTN,
 # BLASTDBCMD, PRIMERS_FASTA_ROOT, PRIMERS_JOB_STORE, PRIMERS_REDIS_URL, PRIMERS_GLOBAL_PREFIX,
-# PRIMERS_GLOBAL_MAX_JOBS, PRIMERS_MAX_QUEUED.
+# PRIMERS_GLOBAL_MAX_JOBS, PRIMERS_MAX_QUEUED, PRIMERS_VARIATION_URL (https://, or http://127.0.0.1
+# for a loopback test server), PRIMERS_VARIATION_ENABLED.
 primers:
   enabled: true
   site_key: null                    # default "<basePath w/o slash>:<getMongoConfig().db>" e.g. sorghum_v11:sorghum11
   primer3_core: /home/olson/bin/primer3_core
+  ntthal: /home/olson/primer3-2.6.1/bin/ntthal            # env NTTHAL
   blastn: /home/olson/bin/blastn
   blastdbcmd: /home/olson/bin/blastdbcmd
   fasta_root: /scratch/olson/fasta
@@ -59,6 +61,56 @@ primers:
             max_template_length: 50000, max_flank: 10000, max_fetch_length: 2000000, max_stdout_bytes: 2000000 }
   repeat_mask: { enabled: true, min_hsp_len: 50, perc_identity: 85, evalue: 1.0e-10, min_depth: 3, threads: 2,
                  chunk: 20000, exon_pad: 100, timeout_ms: 20000, cache_entries: 200 }
+  variation:                        # known variants from Ensembl REST (genotyping spec §3.1-§3.3)
+    enabled: true                                          # env PRIMERS_VARIATION_ENABLED
+    base_url: https://data.gramene.org/pansite-ensembl-115 # env PRIMERS_VARIATION_URL
+    release: '115'
+    species: { sorghum_bicolor: sorghum_bicolor }          # system_name -> Ensembl species segment; nothing else is ever called
+    timeout_ms: 8000
+    chunk_bp: 10000                # overlap windows are fetched in fixed 10 kb chunks
+    max_chunk_bytes: 1000000       # a 10 kb chunk measured 186 KB; a 50 kb window 1.0 MB
+    max_lookup_bytes: 262144
+    max_window: 50000
+    list_limit_default: 2000
+    list_limit_max: 5000
+    max_concurrent: 4              # process-wide outbound limit
+    queue_wait_ms: 5000
+    cache_entries: 500
+    cache_ttl_ms: 3600000          # release 115 is static
+    unknown_cache_ttl_ms: 300000
+    unavailable_cache_ttl_ms: 30000
+    breaker_failures: 3
+    breaker_window_ms: 60000
+    breaker_open_ms: 60000
+    retry_after_s: 30
+    queue_retry_after_s: 5
+    max_allele_length: 50
+    max_shift: 1000
+    ems_source_pattern: '^EMS_'
+  genotyping:                       # POST /primers/genotyping/design (genotyping spec §4)
+    template_flank: 400
+    num_return_per_run: 20
+    num_sets_default: 6
+    max_sets: 10
+    max_scored_per_orientation: 8  # candidates scored per orientation, across all levels
+    max_primer3_runs: 54           # 2 x 3 design runs + 2 x 8 x 3 scoring runs (worst case: deliberate mismatch)
+    max_thermo_calls: 272          # 2 x 8 x 17 ntthal calls (worst case: tails plus deliberate mismatch)
+    thermo_concurrency: 4
+    thermo_timeout_ms: 5000
+    guard_gap: 10                  # SEQUENCE_TARGET length just outside the zone
+    mask_exempt_pad: 36            # Primer3's built-in maximum primer length
+    as_min_tm: 52                  # hard floor, every allele-specific primer
+    as_min_gc: 15                  # hard floor, derived ALT and mismatch primers only
+    structure_warn_th: 47
+    structure_high_th: 55
+    as_tm_diff_warn: 1.0
+    common_tm_low: -1.0
+    common_tm_high: 3.0
+    neighbour_3p_window: 5
+    dense_window: 30
+    dense_count: 2
+    check_max_sets: 5
+    check_max_unique_primers: 13
   check:
     store: redis                    # redis | memory
     redis_url: redis://localhost:6380/1
@@ -95,6 +147,19 @@ primers:
     realign_concurrency: 32
     max_offtargets_listed: 100
     max_annotated_amplicons: 200
+    genotype_cpu_s_per_genome: 0.2     # per-assembly allele calls of a genotyping check (genotyping spec §5.4, §5.6)
+    genotype_flank_min: 15
+    genotype_amplicon_pad: 50
+    genotype_ortholog_min_identity: 95
+    genotype_ortholog_size_tolerance: 0.2
+    genotype_max_copies: 10
+    genotype_max_anchors: 50
+    genotype_max_megablast: 30
+    genotype_megablast_timeout_ms: 20000
+    genotype_megablast_min_identity: 95
+    genotype_megablast_min_query_cover: 0.8
+    genotype_megablast_min_bitscore_frac: 0.9
+    genotype_offlocus_max_mismatches: 2    # an off-locus product changes an allele prediction only with <= this many mismatches per primer; weaker ones are reported as WEAK_OFF_TARGETS
     defaults: { max_product_size: 4000, ignore_mismatches: 6, min_total_mismatches: 2, min_3p_mismatches: 2,
                 three_prime_window: 5, include_unlikely: false, repeat_site_threshold: 5,
                 max_amplifying_mismatches: 3 }   # must stay below ignore_mismatches

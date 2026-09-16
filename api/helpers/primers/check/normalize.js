@@ -5,17 +5,25 @@
 // Returns {request, resolved, kind, warnings, estimate: {cpu_s, total}, dbs}
 //   request   the canonical request that (with dbs) determines the job id:
 //             {system_name, mode, [gene_id, transcript_id], checks (sorted, unique, incl. specificity),
-//              genomes (sorted; [] unless pangenome), params (all 8 filled), pairs [{id, left, right, [expected]}]}
+//              genomes (sorted; [] unless pangenome), params (all 8 filled), pairs [{id, left, right, [expected]}],
+//              [genotyping {variant {region, position, ref, alt}, sets [{id, ref_pair, alt_pair}]}]}
 //             params.max_amplifying_mismatches must be < ignore_mismatches (400 INVALID_PARAMS); when it is
 //             omitted, the default (3) is lowered to ignore_mismatches - 1 if needed.
-//   resolved  {assemblies: {system_name: resolved assembly}, gene: {...} | null, species: {taxon_id, name} | null}
+//             genotyping is present only when the client sent it and keeps only the client's keys, with the variant
+//             uppercased and left-aligned (genotyping spec §5.3).
+//   resolved  {assemblies: {system_name: resolved assembly}, gene: {...} | null, species: {taxon_id, name} | null,
+//              [genotyping: ./genotype.js prepare() result]}
 //             (stored in the job doc for the worker; never returned to clients)
 //   kind      'pangenome' when checks include pangenome, else 'specificity'
 //   warnings  [{code, message}]
 //   estimate  {cpu_s, total} from ./cost.js (total = number of BLAST tasks)
 //   dbs       {system_name: fingerprint} for the reference and every pan-genome genome
 //
-// deps: {cfg, catalog, mongo, genomes, assemblies, log, mongo_timeout_ms, ...anything getCatalog/resolve accept}
+// deps: {cfg, catalog, mongo, genomes, assemblies, sequence, log, mongo_timeout_ms, ...anything getCatalog/resolve accept}
+//
+// A genotyping block adds the §5.1 steps of the genotyping spec, all in ./genotype.js (required only for such bodies): its
+// shape in validateShape; the mode rule and the set links after the pairs, before any catalog lookup; the variant and set
+// positions from one FASTA read once the reference resolves (deps.sequence); and the allele-caller term of the estimate.
 
 const { PrimerHttpError } = require('../errors');
 const cost = require('./cost');
@@ -29,7 +37,7 @@ const PAIR_ID_RE = /^[A-Za-z0-9_.:-]+$/;
 const PAIR_ID_MAX = 64;
 const PRIMER_RE = /^[ACGTacgt]{15,36}$/;
 const ID_MAX = 255;
-const BODY_KEYS = Object.freeze(['system_name', 'mode', 'gene_id', 'transcript_id', 'checks', 'genomes', 'params', 'pairs']);
+const BODY_KEYS = Object.freeze(['system_name', 'mode', 'gene_id', 'transcript_id', 'checks', 'genomes', 'params', 'pairs', 'genotyping']);
 const PAIR_KEYS = Object.freeze(['id', 'left', 'right', 'expected']);
 const EXPECTED_KEYS = Object.freeze(['region', 'start', 'end']);
 const PARAM_RULES = Object.freeze({
@@ -140,6 +148,8 @@ function validateShape(body, ccfg) {
       });
     }
   });
+  // Genotyping spec §5.1 step 1: the PrimerCheckGenotyping definition.
+  if (body.genotyping !== undefined) require('./genotype').validateShape(body.genotyping);
 }
 
 // ---- mongo helpers ---------------------------------------------------------------------------------
@@ -327,6 +337,16 @@ async function normalize(body, deps) {
       'the pairs contain ' + primers.size + ' distinct primers; at most ' + maxPrimers + ' can be checked at once',
       { unique_primers: primers.size, max: maxPrimers });
   }
+  // Genotyping spec §5.1 steps 3-4 (pure, before any catalog lookup): the sets rely on expected, which only gene and
+  // region modes honour; then the §5.2 part A links between the sets and the pairs.
+  if (body.genotyping !== undefined) {
+    const genotype = require('./genotype');
+    if (genotype.MODES.indexOf(mode) < 0) {
+      throw invalid('genotyping needs expected product locations, which only gene and region modes honour, not ' + mode + ' mode',
+        { field: 'genotyping', reason: 'mode' });
+    }
+    genotype.validateLinks(body.genotyping, pairs);
+  }
   if (expectedDropped > 0) {
     warnings.push({ code: 'EXPECTED_IGNORED', message: 'expected product locations are ignored in ' + mode + ' mode' });
   }
@@ -410,6 +430,10 @@ async function normalize(body, deps) {
   }
   assemblyWarnings(systemName, ref).forEach(function (w) { warnings.push(w); });
 
+  // Genotyping spec §5.1 step 6: the variant against the reference FASTA and every set's positions, from one read.
+  const genotyped = body.genotyping === undefined ? null
+    : await require('./genotype').validateSets(body.genotyping, pairs, ref, shared);
+
   // Pan-genome genomes.
   const dbKind = mode === 'transcript' ? 'cdna' : 'dna';
   let genomeAsms = [];
@@ -456,8 +480,12 @@ async function normalize(body, deps) {
   request.genomes = genomeAsms.map(function (a) { return a.system_name; });
   request.params = params;
   request.pairs = pairs;
+  // Genotyping spec §5.1 step 8 and §5.3: the client's keys only, so job.request stays a PrimerCheckRequest.
+  if (genotyped) request.genotyping = require('./genotype').requestBlock(genotyped);
 
-  const estimate = cost.estimate({ unique_primers: primers.size, mode: mode, reference: ref, pangenome: genomeAsms, cfg: cfg });
+  const estimate = cost.estimate({
+    unique_primers: primers.size, mode: mode, reference: ref, pangenome: genomeAsms, cfg: cfg, genotyping: genotyped !== null
+  });
   cost.assertWithinLimit(estimate, cfg);
 
   const assemblies = {};
@@ -466,14 +494,16 @@ async function normalize(body, deps) {
     assemblies[a.system_name] = plain(a);
     dbs[a.system_name] = a.fingerprint === undefined ? null : a.fingerprint;
   });
+  const resolved = {
+    assemblies: assemblies,
+    gene: gene,
+    species: refGenome.species ? { taxon_id: refGenome.species.taxon_id, name: refGenome.species.name } : null
+  };
+  if (genotyped) resolved.genotyping = genotyped;
 
   return {
     request: request,
-    resolved: {
-      assemblies: assemblies,
-      gene: gene,
-      species: refGenome.species ? { taxon_id: refGenome.species.taxon_id, name: refGenome.species.name } : null
-    },
+    resolved: resolved,
     kind: kind,
     warnings: warnings,
     estimate: { cpu_s: estimate.cpu_s, total: estimate.total },
@@ -485,6 +515,7 @@ module.exports = {
   normalize,
   validateShape,
   lookupGene,
+  BODY_KEYS,
   MODES,
   CHECKS,
   PARAM_RULES,

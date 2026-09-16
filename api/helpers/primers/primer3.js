@@ -266,4 +266,5 @@ function _clearVersionCache() {
   versionCache.clear();
 }
 
-module.exports = { run, version, _clearVersionCache };
+// makeWorkDir, removeWorkDir and SPAWN_ENV are shared with thermo.js (ntthal runs the same way).
+module.exports = { run, version, makeWorkDir, removeWorkDir, SPAWN_ENV, _clearVersionCache };

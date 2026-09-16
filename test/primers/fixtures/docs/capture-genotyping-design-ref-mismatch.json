@@ -1,0 +1,6 @@
+{
+  "source": "recorded 2026-09-15 over HTTP from the genotyping dev API on 127.0.0.1:50112 (worktree HEAD 55fbb5f, live Ensembl REST release 115)",
+  "request": {"method":"POST","path":"/sorghum_v11/primers/genotyping/design","body":{"system_name":"sorghum_bicolor","variant":{"region":"1","position":11109,"ref":"A","alt":"C"},"template_only":true}},
+  "status": 400,
+  "response": {"message":"the reference allele A does not match the genome base C at 1:11109","code":"REF_MISMATCH","details":{"region":"1","position":11109,"given":"A","genome":"C"}}
+}

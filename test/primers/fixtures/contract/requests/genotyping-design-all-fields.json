@@ -1,0 +1,26 @@
+{
+  "system_name": "sorghum_bicolor",
+  "variant": { "region": "1", "position": 11109, "ref": "C", "alt": "A" },
+  "assay": {
+    "type": "as_pcr",
+    "orientation": "reverse",
+    "tails": "ref_hex_alt_fam",
+    "deliberate_mismatch": "auto",
+    "mismatch_position": 3,
+    "num_sets": 10,
+    "max_relaxation": 0,
+    "neighbour_policy": "ignore"
+  },
+  "avoid_repeats": true,
+  "repeat_mask_mode": "three_prime",
+  "template_only": false,
+  "label": "my.assay-1",
+  "params": {
+    "opt_size": 22, "min_size": 18, "max_size": 30,
+    "opt_tm": 60, "min_tm": 57, "max_tm": 63,
+    "opt_gc": 50, "min_gc": 30, "max_gc": 70,
+    "max_tm_diff": 3, "max_poly_x": 5, "gc_clamp": 1, "max_end_stability": 9,
+    "salt_monovalent": 50, "salt_divalent": 1.5, "dntp_conc": 0.6, "dna_conc": 50,
+    "product_size_ranges": [[61, 120], [150, 300]]
+  }
+}

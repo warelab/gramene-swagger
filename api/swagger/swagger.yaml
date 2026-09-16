@@ -1040,6 +1040,187 @@ paths:
           schema:
             $ref: "#/definitions/PrimerError"
 
+  # Genotyping primers (docs/genotyping_design_spec.md §2.3-§2.6). Also before /{collection}.
+  /primers/variants:
+    x-swagger-router-controller: primers
+    get:
+      summary: "Known variants (Ensembl REST) in a genomic window, normalized to left-aligned VCF keys and verified against this site's genome"
+      description: "One entry per designable biallelic key; Ensembl records describing the same event are merged. Only genomes with variation data (GET /primers/genomes has_variation) can be queried. Cache-Control: no-store."
+      operationId: listPrimerVariants
+      tags:
+        - "Primer design"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: query
+          name: system_name
+          description: "genome with variation data, e.g. sorghum_bicolor"
+          required: true
+          type: string
+          pattern: "^[a-z0-9_]+$"
+          maxLength: 128
+        - in: query
+          name: region
+          description: "sequence name of the assembly, e.g. 1"
+          required: true
+          type: string
+          maxLength: 255
+        - in: query
+          name: start
+          description: "1-based window start"
+          required: true
+          type: integer
+          minimum: 1
+        - in: query
+          name: end
+          description: "1-based inclusive window end; end - start + 1 <= 50000"
+          required: true
+          type: integer
+          minimum: 1
+        - in: query
+          name: types
+          description: "comma-separated variant kinds; default all"
+          required: false
+          type: array
+          collectionFormat: csv
+          items:
+            type: string
+            enum: [snv, mnv, insertion, deletion, complex]
+        - in: query
+          name: include_ems
+          description: "default true; false drops entries all of whose records are EMS"
+          required: false
+          type: boolean
+        - in: query
+          name: limit
+          description: "default 2000; truncated is true when more matched"
+          required: false
+          type: integer
+          minimum: 1
+          maximum: 5000
+      responses:
+        200:
+          description: "variants in the window"
+          schema:
+            $ref: "#/definitions/PrimerVariantList"
+        400:
+          description: "validator errors, VARIANT_WINDOW_TOO_LONG, REGION_OUT_OF_BOUNDS"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        404:
+          description: "UNKNOWN_GENOME, UNKNOWN_REGION"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        422:
+          description: "NO_VARIATION_DATA, NO_SEQUENCE, AMBIGUOUS_ASSEMBLY"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        503:
+          description: "VARIATION_SOURCE_UNAVAILABLE, FEATURE_DISABLED, MONGO_UNAVAILABLE; details.retry_after_s and a Retry-After header"
+          schema:
+            $ref: "#/definitions/PrimerError"
+
+  /primers/variants/{variant_id}:
+    x-swagger-router-controller: primers
+    get:
+      summary: "Resolve one Ensembl variation id to normalized variant entries (one per designable alt)"
+      description: "The id may contain ',' and '*' and must be URL-encoded. Every Ensembl id describing the same event is merged into the entry (warning DUPLICATE_VARIANT_IDS). Cache-Control: no-store."
+      operationId: getPrimerVariant
+      tags:
+        - "Primer design"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: path
+          name: variant_id
+          description: "Ensembl variation id, e.g. rs871475760 or tmp_1_11502_C_CGT"
+          required: true
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9_.:,*-]{0,254}$"
+        - in: query
+          name: system_name
+          description: "genome with variation data, e.g. sorghum_bicolor"
+          required: true
+          type: string
+          pattern: "^[a-z0-9_]+$"
+          maxLength: 128
+      responses:
+        200:
+          description: "the variant"
+          schema:
+            $ref: "#/definitions/PrimerVariantLookup"
+        400:
+          description: "validator errors"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        404:
+          description: "UNKNOWN_VARIANT, UNKNOWN_GENOME"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        422:
+          description: "NO_VARIATION_DATA, NO_SEQUENCE, AMBIGUOUS_ASSEMBLY, AMBIGUOUS_VARIANT_MAPPING, VARIANT_NOT_ON_ASSEMBLY"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        503:
+          description: "VARIATION_SOURCE_UNAVAILABLE, FEATURE_DISABLED, MONGO_UNAVAILABLE; details.retry_after_s and a Retry-After header"
+          schema:
+            $ref: "#/definitions/PrimerError"
+
+  /primers/genotyping/design:
+    x-swagger-router-controller: primers
+    post:
+      summary: "Design KASP or allele-specific PCR primer sets for one variant"
+      description: "Synchronous, 45 s deadline (Ensembl work runs before the design semaphore). Returns explicit sets (REF-specific, ALT-specific and common primers), order-sheet rows and a ready /primers/check request. Requires Content-Type: application/json. Every response is Cache-Control: no-store."
+      operationId: designGenotypingPrimers
+      tags:
+        - "Primer design"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          description: "genotyping design request; exactly one of variant {id [, alt]} or {region, position, ref, alt}"
+          required: true
+          schema:
+            $ref: "#/definitions/PrimerGenotypingRequest"
+      responses:
+        200:
+          description: "variant, template, per-orientation attempts, sets (possibly none, with warning NO_SETS), check request, warnings; a design stopped by its budget is still a 200 with DESIGN_BUDGET_EXHAUSTED"
+          schema:
+            $ref: "#/definitions/PrimerGenotypingResponse"
+        400:
+          description: "validator errors, INVALID_REQUEST, INVALID_PARAMS, INVALID_VARIANT, REF_MISMATCH, ALT_REQUIRED, ALT_NOT_AT_SITE, UNSUPPORTED_ALLELE, VARIANT_TOO_CLOSE_TO_END, VARIANT_TOO_REPETITIVE, REGION_OUT_OF_BOUNDS, PRIMER3_INPUT_ERROR"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        404:
+          description: "UNKNOWN_GENOME, UNKNOWN_REGION, UNKNOWN_VARIANT"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        413:
+          description: "Request body larger than 100 kb"
+        422:
+          description: "NO_SEQUENCE, AMBIGUOUS_ASSEMBLY, NO_VARIATION_DATA, AMBIGUOUS_VARIANT_MAPPING, VARIANT_NOT_ON_ASSEMBLY"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        500:
+          description: "PRIMER3_FAILED, THERMO_FAILED, INTERNAL"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        503:
+          description: "BUSY, PRIMER3_UNAVAILABLE, THERMO_UNAVAILABLE, VARIATION_SOURCE_UNAVAILABLE, FEATURE_DISABLED, MONGO_UNAVAILABLE; details.retry_after_s and a Retry-After header"
+          schema:
+            $ref: "#/definitions/PrimerError"
+        504:
+          description: "DEADLINE_EXCEEDED (45 s end to end)"
+          schema:
+            $ref: "#/definitions/PrimerError"
+
   /{collection}:
     x-swagger-router-controller: mongo
     get:
@@ -2196,6 +2377,37 @@ definitions:
                 region: { type: string, maxLength: 255 }
                 start: { type: integer, minimum: 1 }
                 end: { type: integer, minimum: 1 }
+      genotyping: { $ref: "#/definitions/PrimerCheckGenotyping" }
+  PrimerCheckGenotypingVariant:
+    description: "the design response's variant.vcf plus its region; ACGT alleles only, left-aligned or not (the server normalizes)"
+    type: object
+    required: [region, position, ref, alt]
+    additionalProperties: false
+    properties:
+      region: { type: string, maxLength: 255 }
+      position: { type: integer, minimum: 1 }
+      ref: { type: string, pattern: "^[ACGTacgt]{1,50}$" }
+      alt: { type: string, pattern: "^[ACGTacgt]{1,50}$" }
+  PrimerCheckGenotypingSet:
+    type: object
+    required: [id, ref_pair, alt_pair]
+    additionalProperties: false
+    properties:
+      id: { type: string, pattern: "^[A-Za-z0-9_.:-]{1,64}$" }
+      ref_pair: { type: string, pattern: "^[A-Za-z0-9_.:-]{1,64}$", description: "id of the pairs[] item whose allele-specific primer carries the REF allele" }
+      alt_pair: { type: string, pattern: "^[A-Za-z0-9_.:-]{1,64}$" }
+  PrimerCheckGenotyping:
+    description: "Allele-specific sets over ordinary pairs. gene and region modes only; every referenced pair needs expected. The server derives each set's orientation and allele side from the shared primer and verifies both allele-specific primers against the reference haplotypes at submit."
+    type: object
+    required: [variant, sets]
+    additionalProperties: false
+    properties:
+      variant: { $ref: "#/definitions/PrimerCheckGenotypingVariant" }
+      sets:
+        type: array
+        minItems: 1
+        maxItems: 5
+        items: { $ref: "#/definitions/PrimerCheckGenotypingSet" }
   PrimerError:
     description: "Handler error body. Swagger validation errors instead look like {message: 'Validation errors', errors: [{code, message, path}]}; the code INVALID_CONTENT_TYPE appears there."
     type: object
@@ -2210,6 +2422,7 @@ definitions:
     properties:
       code: { type: string }
       message: { type: string }
+      details: { type: object, description: "code-specific; present on every genotyping and variants warning" }
   PrimerBlock:
     type: object
     properties:
@@ -2317,6 +2530,13 @@ definitions:
         properties:
           taxon_id: { type: integer }
           name: { type: string }
+      variation:
+        type: object
+        description: "known-variant data for the query genome; {available: false, source: null, release: null} without data, never null"
+        properties:
+          available: { type: boolean }
+          source: { type: string, enum: [ensembl], x-nullable: true }
+          release: { type: string, x-nullable: true }
       counts:
         type: object
         properties:
@@ -2336,9 +2556,524 @@ definitions:
             has_sequence: { type: boolean }
             has_blastdb: { type: boolean }
             has_cdna_blastdb: { type: boolean }
+            has_variation:
+              type: boolean
+              description: "known-variant data (Ensembl) is available for this genome; only sorghum_bicolor on sorghum_v11"
             repeat_masking: { type: string, enum: [soft_masked, unmasked_copy, absent] }
             total_bases: { type: integer, x-nullable: true }
             warnings: { type: array, items: { $ref: "#/definitions/PrimerWarning" } }
+  PrimerVariantRecord:
+    type: object
+    properties:
+      id: { type: string, description: "Ensembl id as reported; may contain ',' or '*' and may be up to 255 characters" }
+      source: { type: string, x-nullable: true, description: "Ensembl overlap source code, e.g. EVA, EMS_PMID38100514_Jiao, SAP_PMID35653240_Boatwri (truncated to 100 characters)" }
+      ems: { type: boolean, description: "source matches primers.variation.ems_source_pattern (^EMS_)" }
+  PrimerVariantIssue:
+    type: object
+    properties:
+      code: { type: string, enum: [REF_MISMATCH, STAR_ALLELE, ALLELE_TOO_LONG, UNSUPPORTED_ALLELE, REPEAT_TOO_LONG] }
+      message: { type: string }
+      details: { type: object }
+  PrimerAlleleSite:
+    type: object
+    properties:
+      position: { type: integer, description: "plus-strand coordinate of the allele-specific primer's 3' base" }
+      ref_base: { type: string }
+      alt_base: { type: string }
+      alt_maps_to: { type: integer, x-nullable: true, description: "reference coordinate of the ALT haplotype base at this index; null for an inserted base" }
+  PrimerVariantZone:
+    type: object
+    x-nullable: true
+    description: "the guarded span: VCF span, both discriminating positions and both ALT 3' anchor mappings; null with issue REPEAT_TOO_LONG"
+    properties:
+      start: { type: integer }
+      end: { type: integer }
+  PrimerVariantVcf:
+    type: object
+    properties:
+      position: { type: integer }
+      ref: { type: string }
+      alt: { type: string }
+  PrimerVariantMinimal:
+    type: object
+    properties:
+      start: { type: integer }
+      end: { type: integer }
+      ref: { type: string, description: "'-' for an insertion" }
+      alt: { type: string, description: "'-' for a deletion" }
+  PrimerVariantMultiallelic:
+    type: object
+    x-nullable: true
+    properties:
+      alleles: { type: array, items: { type: string } }
+      other_alts: { type: array, items: { type: string } }
+  PrimerVariant:
+    type: object
+    properties:
+      key: { type: string, description: "region:position:REF:ALT, left-aligned VCF with anchor base for indels; canonical identity" }
+      ids: { type: array, items: { type: string }, description: "Ensembl ids with this key: requested id first, then rs ids, then the rest alphabetically" }
+      synonyms: { type: array, items: { type: string }, description: "id lookup only; '.' dropped" }
+      label: { type: string }
+      kind: { type: string, enum: [snv, mnv, insertion, deletion, complex] }
+      region: { type: string }
+      vcf: { $ref: "#/definitions/PrimerVariantVcf" }
+      minimal: { $ref: "#/definitions/PrimerVariantMinimal" }
+      alleles: { type: array, items: { type: string }, description: "all alleles of the site as reported, reference first ('-' and '*' kept)" }
+      multiallelic: { $ref: "#/definitions/PrimerVariantMultiallelic" }
+      shift: { type: integer, minimum: 0 }
+      zone: { $ref: "#/definitions/PrimerVariantZone" }
+      discriminating:
+        type: object
+        x-nullable: true
+        description: "null with issue REPEAT_TOO_LONG"
+        properties:
+          forward: { $ref: "#/definitions/PrimerAlleleSite" }
+          reverse: { $ref: "#/definitions/PrimerAlleleSite" }
+      records: { type: array, items: { $ref: "#/definitions/PrimerVariantRecord" } }
+      ems: { type: boolean, description: "every merged record is EMS" }
+      consequence: { type: string, x-nullable: true }
+      ref_verified: { type: boolean }
+      designable: { type: boolean }
+      issues: { type: array, items: { $ref: "#/definitions/PrimerVariantIssue" } }
+      requested_id: { type: string, x-nullable: true, description: "design responses only (the lookup response carries it at the top level)" }
+      submission_sequence: { type: string, description: "design response only: 50 bp flanks with [REF/ALT] (minimal alleles, '' for '-'), non-EMS biallelic SNV neighbours as IUPAC codes" }
+  PrimerVariantSource:
+    type: object
+    properties:
+      name: { type: string, enum: [ensembl] }
+      release: { type: string }
+  PrimerVariantList:
+    type: object
+    properties:
+      system_name: { type: string }
+      region: { type: string }
+      start: { type: integer }
+      end: { type: integer }
+      source: { $ref: "#/definitions/PrimerVariantSource" }
+      total: { type: integer }
+      returned: { type: integer }
+      truncated: { type: boolean }
+      variants: { type: array, items: { $ref: "#/definitions/PrimerVariant" } }
+      warnings: { type: array, items: { $ref: "#/definitions/PrimerWarning" } }
+  PrimerVariantLookup:
+    type: object
+    properties:
+      requested_id: { type: string }
+      system_name: { type: string }
+      source: { $ref: "#/definitions/PrimerVariantSource" }
+      variants: { type: array, items: { $ref: "#/definitions/PrimerVariant" } }
+      warnings: { type: array, items: { $ref: "#/definitions/PrimerWarning" } }
+  # Genotyping design (docs/genotyping_design_spec.md §2.7-§2.8): the strict request definitions, then the response.
+  PrimerVariantInput:
+    description: "Exactly one of: {id [, alt]} or {region, position, ref, alt}. With id, alt selects the allele at a multi-allelic site (required there). Manual alleles: VCF style (A/C/G/T strings; position = first ref base) or Ensembl style (exactly one allele '-'; deletion: position = first deleted base; insertion: position = the base after the insertion point)."
+    type: object
+    additionalProperties: false
+    properties:
+      id: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9_.:,*-]{0,254}$" }
+      region: { type: string, maxLength: 255 }
+      position: { type: integer, minimum: 1 }
+      ref: { type: string, pattern: "^([ACGTacgt]{1,50}|-)$" }
+      alt: { type: string, pattern: "^([ACGTacgt]{1,50}|-)$" }
+  PrimerGenotypingAssay:
+    description: "Unset values take the defaults of the assay type: kasp -> tails ref_fam_alt_hex, deliberate_mismatch none; as_pcr -> tails none, deliberate_mismatch auto. Both: orientation both, mismatch_position 2, num_sets 6, max_relaxation 2, neighbour_policy avoid_3p."
+    type: object
+    additionalProperties: false
+    properties:
+      type: { type: string, enum: [kasp, as_pcr] }
+      orientation: { type: string, enum: [both, forward, reverse] }
+      tails: { type: string, enum: [none, ref_fam_alt_hex, ref_hex_alt_fam] }
+      deliberate_mismatch: { type: string, enum: [none, auto] }
+      mismatch_position: { type: integer, enum: [2, 3] }
+      num_sets: { type: integer, minimum: 1, maximum: 10 }
+      max_relaxation: { type: integer, minimum: 0, maximum: 2 }
+      neighbour_policy: { type: string, enum: [avoid_3p, ignore] }
+  PrimerGenotypingParams:
+    description: "Closed subset of PrimerDesignParams with the same bounds (design.js PARAM_SPECS, lines 31-54), except product_size_ranges. Unset values come from the assay preset. A param the client sets is pinned: the relaxation ladder never changes it. The effective product-range minimum is raised to 2 x max_size + 1."
+    type: object
+    additionalProperties: false
+    properties:
+      opt_size: { type: integer, minimum: 15, maximum: 36 }
+      min_size: { type: integer, minimum: 15, maximum: 36 }
+      max_size: { type: integer, minimum: 15, maximum: 36 }
+      opt_tm: { type: number, minimum: 30, maximum: 90 }
+      min_tm: { type: number, minimum: 30, maximum: 90 }
+      max_tm: { type: number, minimum: 30, maximum: 90 }
+      opt_gc: { type: number, minimum: 0, maximum: 100 }
+      min_gc: { type: number, minimum: 0, maximum: 100 }
+      max_gc: { type: number, minimum: 0, maximum: 100 }
+      max_tm_diff: { type: number, minimum: 0, maximum: 30 }
+      max_poly_x: { type: integer, minimum: 0, maximum: 10 }
+      gc_clamp: { type: integer, minimum: 0, maximum: 5 }
+      max_end_stability: { type: number, minimum: 0, maximum: 100 }
+      salt_monovalent: { type: number, minimum: 0, maximum: 1000 }
+      salt_divalent: { type: number, minimum: 0, maximum: 100 }
+      dntp_conc: { type: number, minimum: 0, maximum: 100 }
+      dna_conc: { type: number, minimum: 0, maximum: 10000 }
+      product_size_ranges:
+        type: array
+        minItems: 1
+        maxItems: 4
+        items:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items: { type: integer, minimum: 20, maximum: 1000 }
+  PrimerGenotypingRequest:
+    description: "Design allele-specific primer sets for one variant. Omit optional fields rather than sending null."
+    type: object
+    required: [system_name, variant]
+    additionalProperties: false
+    properties:
+      system_name: { type: string, pattern: "^[a-z0-9_]+$", maxLength: 128 }
+      variant: { $ref: "#/definitions/PrimerVariantInput" }
+      assay: { $ref: "#/definitions/PrimerGenotypingAssay" }
+      avoid_repeats: { type: boolean, description: "default false (section 4.5; a default to confirm, section 11 item 6); when true, the allele-specific window is always exempt from the mask" }
+      repeat_mask_mode: { type: string, enum: [n_mask, three_prime] }
+      template_only: { type: boolean, description: "resolve and verify the variant and return the template; Primer3 is not run" }
+      label: { type: string, pattern: "^[A-Za-z0-9_.-]{1,40}$", description: "prefix of order-sheet oligo names; default: first variant id, else key" }
+      params: { $ref: "#/definitions/PrimerGenotypingParams" }
+  PrimerNeighbourHit:
+    type: object
+    properties:
+      key: { type: string }
+      ids: { type: array, items: { type: string } }
+      label: { type: string }
+      start: { type: integer }
+      end: { type: integer }
+      alleles: { type: string, description: "Ensembl allele string, e.g. A/T or -/GT" }
+      ems: { type: boolean }
+      distance_from_3p:
+        type: integer
+        x-nullable: true
+        description: "1 = the primer's own 3'-terminal base, measured along the primer (minimum over the neighbour's span); null in orientation blockers, where no primer exists yet"
+  PrimerLikelihoodAt:
+    type: object
+    properties:
+      mm_pos: { type: array, items: { type: integer }, description: "mismatch distances from the 3' end, 5'->3' (1 = terminal)" }
+      likelihood: { type: string, enum: [likely, likely_weak, unlikely] }
+  PrimerDeliberateMismatch:
+    type: object
+    x-nullable: true
+    properties:
+      position: { type: integer, enum: [2, 3], description: "distance from the 3' end" }
+      original_base: { type: string }
+      new_base: { type: string }
+      template_base: { type: string, description: "template base opposite the mismatch position (complement of original_base)" }
+      terminal_pair: { type: string, pattern: "^[ACGT]{2}$", description: "unordered pair used as the table row: the primer's 3' base and the other allele's base on the template strand the primer anneals to, written in alphabetical order, e.g. AG or CT" }
+      terminal_mismatch_class: { type: string, enum: [max, strong, medium, weak] }
+      added_mismatch_class: { type: string, enum: [max, strong, medium, weak] }
+      source: { type: string, description: "Little 1995 Table 9.8.1, or the same table applied at -3 (extrapolated)" }
+  PrimerGenotypingDiscrimination:
+    type: object
+    x-nullable: true
+    description: "allele-specific primers only"
+    properties:
+      own_allele: { $ref: "#/definitions/PrimerLikelihoodAt" }
+      other_allele: { $ref: "#/definitions/PrimerLikelihoodAt" }
+      terminal_mismatch_class: { type: string, enum: [max, strong, medium, weak], description: "Little 1995 class of the 3' base against the other allele" }
+      in_shift_tract: { type: boolean, description: "the primer's 3' base, on its own haplotype, lies inside the variant's shift tract (section 3.5: the reference bases an indel with shift > 0 can slide through, anchor base excluded); for as_alt an inserted base counts as inside. On the other allele's genomes the check reports this primer as uncertain (sections 4.12, 5.7)" }
+  PrimerTailedStructures:
+    type: object
+    x-nullable: true
+    properties:
+      hairpin_th: { type: number }
+      self_any_th: { type: number }
+      self_end_th: { type: number }
+  PrimerOligoTemplateSpan:
+    type: object
+    properties:
+      start: { type: integer }
+      end: { type: integer }
+      sequence: { type: string, enum: [ref, alt], description: "which template the span indexes: template.seq or template.alt_seq" }
+  PrimerGenotypingOligo:
+    type: object
+    properties:
+      role: { type: string, enum: [as_ref, as_alt, common] }
+      allele: { type: string, x-nullable: true, description: "plus-strand allele this primer detects (vcf.ref or vcf.alt); null for the common primer" }
+      three_prime_base: { type: string }
+      haplotype: { type: string, enum: [ref, alt, both] }
+      target_seq: { type: string, description: "anneals; as ordered (includes any deliberate mismatch); the only sequence sent to /primers/check" }
+      matched_seq: { type: string, description: "perfect-match sequence before any deliberate mismatch" }
+      dye: { type: string, enum: [FAM, HEX], x-nullable: true }
+      tail_seq: { type: string, x-nullable: true }
+      order_seq: { type: string, description: "tail_seq + target_seq" }
+      len: { type: integer, description: "length of target_seq" }
+      order_len: { type: integer }
+      tm: { type: number, description: "Primer3 Tm of target_seq, or the own-allele duplex Tm for a deliberate-mismatch primer (see tm_method)" }
+      tm_method: { type: string, enum: [primer3, ntthal_duplex] }
+      matched_tm: { type: number, x-nullable: true, description: "deliberate-mismatch primers only: Primer3 Tm of matched_seq; the Tm floor is applied to this value" }
+      gc: { type: number, description: "100 x GC / len of target_seq, rounded half away from zero to 2 decimals from the exact ratio (section 2.1); computed from the sequence, not parsed from Primer3" }
+      hairpin_th: { type: number }
+      self_any_th: { type: number }
+      self_end_th: { type: number }
+      end_stability: { type: number }
+      primer3_problems: { type: string, x-nullable: true, description: "PRIMER_*_PROBLEMS text from the scoring run, e.g. ' Temperature too low;'; informational, the hard floors of section 4.6 decide acceptance" }
+      template: { $ref: "#/definitions/PrimerOligoTemplateSpan" }
+      genomic: { $ref: "#/definitions/PrimerGenomicLocation" }
+      inserted_bases: { type: integer, description: "bases of this primer that have no reference coordinate (inside an insertion)" }
+      deliberate_mismatch: { $ref: "#/definitions/PrimerDeliberateMismatch" }
+      discrimination: { $ref: "#/definitions/PrimerGenotypingDiscrimination" }
+      tailed: { $ref: "#/definitions/PrimerTailedStructures" }
+      neighbours: { type: array, items: { $ref: "#/definitions/PrimerNeighbourHit" }, description: "known variants under this primer, sorted by distance_from_3p ascending" }
+  PrimerGenotypingOrderRow:
+    type: object
+    properties:
+      name: { type: string }
+      set_id: { type: string }
+      set_key: { type: string }
+      role: { type: string, enum: [as_ref, as_alt, common] }
+      allele: { type: string, x-nullable: true }
+      dye: { type: string, enum: [FAM, HEX], x-nullable: true }
+      order_seq: { type: string }
+      target_seq: { type: string }
+      tail_seq: { type: string, x-nullable: true }
+      length: { type: integer }
+      tm: { type: number }
+      gc: { type: number }
+      orientation: { type: string, enum: [forward, reverse] }
+      product_size_ref: { type: integer }
+      product_size_alt: { type: integer }
+      variant_key: { type: string }
+      notes: { type: string }
+  PrimerCheckPairFragment:
+    type: object
+    description: "one pairs[] item of the check request this set needs; mirrors PrimerCheckRequest.pairs.items plus nothing"
+    properties:
+      id: { type: string }
+      left: { type: string }
+      right: { type: string }
+      expected:
+        type: object
+        properties:
+          region: { type: string }
+          start: { type: integer }
+          end: { type: integer }
+  PrimerGenotypingSetRef:
+    type: object
+    properties:
+      id: { type: string }
+      ref_pair: { type: string }
+      alt_pair: { type: string }
+  PrimerGenotypingCheckFragment:
+    type: object
+    properties:
+      set: { $ref: "#/definitions/PrimerGenotypingSetRef" }
+      pairs: { type: array, items: { $ref: "#/definitions/PrimerCheckPairFragment" } }
+  PrimerGenotypingProduct:
+    type: object
+    properties:
+      size: { type: integer }
+      template: { $ref: "#/definitions/PrimerOligoTemplateSpan" }
+      genomic: { $ref: "#/definitions/PrimerGenomicLocation" }
+      inserted_bases: { type: integer, description: "ALT products only: bases of the product with no reference coordinate" }
+  PrimerGenotypingPairThermo:
+    type: object
+    properties:
+      compl_any_th: { type: number }
+      compl_end_th: { type: number }
+  PrimerGenotypingTailedThermo:
+    type: object
+    x-nullable: true
+    properties:
+      ref_alt_any_th: { type: number }
+      ref_alt_end_th: { type: number }
+      ref_common_any_th: { type: number }
+      ref_common_end_th: { type: number }
+      alt_common_any_th: { type: number }
+      alt_common_end_th: { type: number }
+  PrimerGenotypingSetIssue:
+    type: object
+    properties:
+      code: { type: string }
+      severity: { type: string, enum: [info, warn, high] }
+      message: { type: string }
+      details: { type: object }
+  PrimerGenotypingSet:
+    type: object
+    properties:
+      id: { type: string, pattern: "^S[0-9]+$" }
+      key: { type: string, pattern: "^[0-9a-f]{12}$" }
+      rank: { type: integer, description: "0-based; id is S(rank+1)" }
+      orientation: { type: string, enum: [forward, reverse] }
+      relaxation_level: { type: integer, minimum: 0, maximum: 2 }
+      quality: { type: string, enum: [good, usable, poor] }
+      score: { type: number, description: "ranking score, lower is better: the exact sum of rules S1-S6 of section 4.16, rounded half away from zero to 2 decimals (section 2.1)" }
+      primers:
+        type: object
+        properties:
+          as_ref: { $ref: "#/definitions/PrimerGenotypingOligo" }
+          as_alt: { $ref: "#/definitions/PrimerGenotypingOligo" }
+          common: { $ref: "#/definitions/PrimerGenotypingOligo" }
+      products:
+        type: object
+        properties:
+          ref: { $ref: "#/definitions/PrimerGenotypingProduct" }
+          alt: { $ref: "#/definitions/PrimerGenotypingProduct" }
+      thermo:
+        type: object
+        properties:
+          ref_common: { $ref: "#/definitions/PrimerGenotypingPairThermo" }
+          alt_common: { $ref: "#/definitions/PrimerGenotypingPairThermo" }
+          tailed: { $ref: "#/definitions/PrimerGenotypingTailedThermo" }
+      tm_balance:
+        type: object
+        properties:
+          as_tm_diff: { type: number, description: "|as_ref.tm - as_alt.tm| from unrounded values, rounded to 2 decimals (sections 2.1, 4.13)" }
+          common_minus_as: { type: number, description: "common.tm - max(nominal Tm of the two allele-specific primers) from unrounded values, rounded to 2 decimals (sections 2.1, 4.13)" }
+      neighbour_sites: { type: integer, description: "distinct non-EMS neighbour keys under the three primers" }
+      primer3_penalty: { type: number, description: "PRIMER_PAIR_i_PENALTY of the design-run pair i this set was built from (its as_ref and common primers), rounded half away from zero to 4 decimals; that is PRIMER_PAIR_0_PENALTY only when i = 0 (section 4.16 S1)" }
+      warnings: { type: array, items: { $ref: "#/definitions/PrimerWarning" }, description: "the issues of severity warn or high, as {code, message, details}; info issues appear only in issues" }
+      issues: { type: array, items: { $ref: "#/definitions/PrimerGenotypingSetIssue" }, description: "every issue of the set, with its severity" }
+      check: { $ref: "#/definitions/PrimerGenotypingCheckFragment" }
+      order: { type: array, items: { $ref: "#/definitions/PrimerGenotypingOrderRow" } }
+  PrimerGenotypingExplainSide:
+    type: object
+    description: "parsed Primer3 explain line; 'raw' plus one integer per reason, as PrimerDesignResponse.explain"
+    properties:
+      raw: { type: string }
+    additionalProperties: { type: integer }
+  PrimerGenotypingRejected:
+    type: object
+    properties:
+      force: { type: integer, description: "Primer3 ignored the forced 3' end (never observed)" }
+      overlap: { type: integer, description: "common primer footprint touched the zone or an AS footprint on either haplotype" }
+      common_neighbour_3p: { type: integer }
+      alt_scoring_failed: { type: integer, description: "the ALT or mismatch check_primers run returned no value for the derived oligo, or PRIMER_ERROR (section 4.7)" }
+      below_floor: { type: integer, description: "an AS primer was under the Tm or GC floor" }
+      duplicate: { type: integer }
+  PrimerGenotypingAttempt:
+    type: object
+    properties:
+      level: { type: integer }
+      changes: { type: object, description: "param changes of this level (empty at level 0); pinned params excluded" }
+      explain:
+        type: object
+        properties:
+          left: { $ref: "#/definitions/PrimerGenotypingExplainSide" }
+          right: { $ref: "#/definitions/PrimerGenotypingExplainSide" }
+          pair: { $ref: "#/definitions/PrimerGenotypingExplainSide" }
+      pairs_returned: { type: integer, description: "pairs Primer3 returned at this level (PRIMER_NUM_RETURN 20); always the sum of rejected, not_scored and sets" }
+      rejected: { $ref: "#/definitions/PrimerGenotypingRejected" }
+      not_scored: { type: integer, description: "pairs left unscored because the orientation already held max_scored_per_orientation candidates or the design budget could not cover them (section 4.8)" }
+      sets: { type: integer, description: "candidates from this level that were scored and kept" }
+  PrimerGenotypingOrientation:
+    type: object
+    properties:
+      status: { type: string, enum: [ok, no_sets, blocked, skipped] }
+      reason:
+        type: string
+        x-nullable: true
+        enum: [neighbour_at_3p, too_close_to_end, n_in_primer_window, not_requested, below_floor, budget_exhausted]
+      discriminating_position: { type: integer }
+      relaxation_level: { type: integer, x-nullable: true }
+      sets_found: { type: integer, description: "scored candidates in this orientation over all attempted levels, at most max_scored_per_orientation (8); the response's sets are the best num_sets over both orientations" }
+      blockers: { type: array, items: { $ref: "#/definitions/PrimerNeighbourHit" } }
+      attempts: { type: array, items: { $ref: "#/definitions/PrimerGenotypingAttempt" } }
+  PrimerGenotypingTemplateFeatures:
+    type: object
+    properties:
+      variant: { type: object, properties: { start: { type: integer }, end: { type: integer } }, description: "template span of vcf.ref" }
+      zone: { type: object, properties: { start: { type: integer }, end: { type: integer } }, description: "guarded span in template coordinates" }
+      discriminating: { type: object, properties: { forward: { type: integer }, reverse: { type: integer } } }
+      alt_offset: { type: integer, description: "len(vcf.alt) - len(vcf.ref)" }
+      exempt: { type: array, items: { $ref: "#/definitions/PrimerInterval" }, description: "template spans exempted from the repeat mask" }
+  PrimerGenotypingTemplate:
+    type: object
+    properties:
+      system_name: { type: string }
+      region: { type: string }
+      start: { type: integer }
+      end: { type: integer }
+      strand: { type: integer, enum: [1] }
+      length: { type: integer }
+      alt_length: { type: integer }
+      seq: { type: string }
+      alt_seq: { type: string }
+      masked: { type: boolean }
+      mask_source: { type: string, enum: [softmask, blast_depth], x-nullable: true }
+      mask: { type: array, items: { $ref: "#/definitions/PrimerInterval" } }
+      masked_fraction: { type: number }
+      features: { $ref: "#/definitions/PrimerGenotypingTemplateFeatures" }
+  PrimerKaspMix:
+    type: object
+    x-nullable: true
+    properties:
+      stock_uM: { type: number }
+      as_ref_uL: { type: number }
+      as_alt_uL: { type: number }
+      common_uL: { type: number }
+      water_uL: { type: number }
+      total_uL: { type: number }
+      source: { type: string }
+  PrimerGenotypingAssayEffective:
+    type: object
+    properties:
+      type: { type: string, enum: [kasp, as_pcr] }
+      orientation: { type: string, enum: [both, forward, reverse] }
+      tails: { type: string, enum: [none, ref_fam_alt_hex, ref_hex_alt_fam] }
+      deliberate_mismatch: { type: string, enum: [none, auto] }
+      mismatch_position: { type: integer, enum: [2, 3] }
+      num_sets: { type: integer }
+      max_relaxation: { type: integer }
+      neighbour_policy: { type: string, enum: [avoid_3p, ignore] }
+      ems_target: { type: boolean, description: "every Ensembl record of the target is EMS; natural neighbours then warn instead of blocking" }
+      kasp_mix: { $ref: "#/definitions/PrimerKaspMix" }
+  PrimerGenotypingNeighbourSummary:
+    type: object
+    properties:
+      data: { type: string, enum: [ensembl, none, unavailable] }
+      window: { type: object, properties: { start: { type: integer }, end: { type: integer } } }
+      variants: { type: integer }
+      non_ems: { type: integer }
+      ems: { type: integer }
+      dense_non_ems: { type: integer, description: "non-EMS neighbour keys whose minimal span overlaps [vcf.position - 30, vcf.position + len(vcf.ref) - 1 + 30], the target excluded" }
+  PrimerGenotypingLadderStep:
+    type: object
+    properties:
+      level: { type: integer }
+      changes: { type: object }
+  PrimerGenotypingSettings:
+    type: object
+    properties:
+      preset: { type: string, enum: [kasp, as_pcr] }
+      params: { type: object, description: "level-0 effective params, product-range minimum already raised" }
+      pinned: { type: array, items: { type: string } }
+      ladder: { type: array, items: { $ref: "#/definitions/PrimerGenotypingLadderStep" } }
+      floors: { type: object, properties: { as_min_tm: { type: number }, as_min_gc: { type: number } } }
+  PrimerGenotypingEngine:
+    type: object
+    properties:
+      primer3: { type: string, x-nullable: true }
+      thermo: { type: string, x-nullable: true, description: "ntthal version string" }
+      genotyping_design: { type: string, description: "design algorithm version, currently '1'" }
+      variation_source: { type: string, x-nullable: true, description: "ensembl 115" }
+  PrimerGenotypingCheckBlock:
+    type: object
+    x-nullable: true
+    properties:
+      request: { $ref: "#/definitions/PrimerCheckRequest" }
+      set_ids: { type: array, items: { type: string } }
+      unique_primers: { type: integer }
+      omitted_set_ids: { type: array, items: { type: string }, description: "sets left out because of the 5-set, 10-pair or 13-primer caps" }
+  PrimerGenotypingResponse:
+    type: object
+    properties:
+      variant: { $ref: "#/definitions/PrimerVariant" }
+      template: { $ref: "#/definitions/PrimerGenotypingTemplate" }
+      assay: { $ref: "#/definitions/PrimerGenotypingAssayEffective" }
+      neighbours: { $ref: "#/definitions/PrimerGenotypingNeighbourSummary" }
+      orientations:
+        type: object
+        x-nullable: true
+        description: "null for template_only requests"
+        properties:
+          forward: { $ref: "#/definitions/PrimerGenotypingOrientation" }
+          reverse: { $ref: "#/definitions/PrimerGenotypingOrientation" }
+      sets: { type: array, items: { $ref: "#/definitions/PrimerGenotypingSet" } }
+      check: { $ref: "#/definitions/PrimerGenotypingCheckBlock" }
+      settings: { $ref: "#/definitions/PrimerGenotypingSettings" }
+      engine: { $ref: "#/definitions/PrimerGenotypingEngine" }
+      warnings: { type: array, items: { $ref: "#/definitions/PrimerWarning" } }
   PrimerCheckJob:
     description: "POST returns job_id, status, kind, queue_position, progress, estimate, created_at and warnings; GET adds partial, started_at, finished_at, attempts, request, results and error"
     type: object
@@ -2446,8 +3181,146 @@ definitions:
         type: object
         x-nullable: true
         description: "{target, pairs: [{id, reference_size, max_size, summary {genomes_total, single_perfect, single_mismatch, multiple, no_amplicon, db_unavailable, error, amplifies, truncated}, genomes: [{system_name, display_name, status, ortholog_annotated, truncated, primary, other_amplicons, others, nearest, reason?, error?}]}]}. The status counts add up to genomes_total and amplifies = single_perfect + single_mismatch + multiple; truncated counts genomes whose search hit a cap (not a status: such a genome's status is a lower bound). nearest (no_amplicon) is the best unlikely product and may be approximate."
-      warnings: { type: array, items: { $ref: "#/definitions/PrimerWarning" } }
+      warnings:
+        type: array
+        items: { $ref: "#/definitions/PrimerWarning" }
+        description: "genotyping jobs can add REFERENCE_CONTROL_FAILED {allele, sets}, GENOTYPE_FALLBACK_FAILED, GENOTYPE_FALLBACK_BUDGET, GENOTYPE_FAILED and WEAK_OFF_TARGETS {count, max_mismatches, examples [{system_name, set_id, pair_id, allele, region, start, end, size, orientation, left_mm, right_mm}] (at most 5)}: off-locus products the check lists as amplifying but with more than check.genotype_offlocus_max_mismatches mismatches in a primer, which do not change results.genotyping predictions; the warning names the genomes that have them"
       timings_ms: { type: object }
+      genotyping: { $ref: "#/definitions/PrimerCheckGenotypingResults" }
+  PrimerGenotypeVariantInfo:
+    type: object
+    properties:
+      key: { type: string }
+      region: { type: string }
+      position: { type: integer }
+      ref: { type: string }
+      alt: { type: string }
+      shift: { type: integer, description: "with shift > 0 the indel has the shift tract [position + 1, position + len(ref) - 1 + shift] of the left-aligned variant (section 3.5)" }
+      zone: { type: object, properties: { start: { type: integer }, end: { type: integer } } }
+      flank: { type: integer, description: "K = max(15, zone length + max(len(ref), len(alt))), the flank on each side of the core" }
+      core: { type: object, properties: { ref: { type: string }, alt: { type: string } }, description: "the reference span [position - 1, position + len(ref) - 1 + shift + 1], i.e. the left-aligned VCF span with its anchor base, extended right by shift, plus one base on each side (not the shift tract), read on each haplotype (the ALT core carries the inserted bases or lacks the deleted ones); a genome is called ref or alt only on an exact match (section 5.6)" }
+      haplotypes: { type: object, properties: { ref: { type: string }, alt: { type: string } }, description: "core plus K reference bases of flank on each side" }
+  PrimerGenotypeCopy:
+    type: object
+    properties:
+      region: { type: string }
+      start: { type: integer, description: "envelope of the merged anchor amplicons, or the megablast HSP" }
+      end: { type: integer }
+      strand: { type: integer, enum: [1, -1] }
+      variant_position: { type: integer, x-nullable: true, description: "genome coordinate aligned to vcf.position" }
+      identity: { type: number, description: "percent identity over the longest anchor alignment (the anchor amplicon +-50 bp with the most alignment columns): 100 x (columns - edits) / columns, 2 decimals" }
+      gap_compressed_identity: { type: number, description: "the same alignment with each gap run counted as one edit and one column; used for the ortholog test" }
+      aligned_length: { type: integer, description: "columns of that longest anchor alignment, gap columns included" }
+      observed: { type: string, x-nullable: true, description: "the genome's core sequence, always reported, including when the call is other" }
+      flank_edits: { type: integer, x-nullable: true, description: "edits outside the core; confidence only, never part of the call" }
+      call: { type: string, enum: [ref, alt, other, missing] }
+      anchors: { type: integer, description: "products merged into this copy; 0 for a megablast copy" }
+      ortholog: { type: boolean, x-nullable: true, description: "annotation-based in gene mode; null in region mode" }
+      source: { type: string, enum: [amplicon, megablast] }
+  PrimerGenotypeGenome:
+    type: object
+    properties:
+      system_name: { type: string }
+      display_name: { type: string }
+      is_reference: { type: boolean }
+      allele: { type: string, enum: [ref, alt, other, ambiguous, missing, unavailable] }
+      observed: { type: string, x-nullable: true, description: "core shared by all orthologous copies; null when they differ" }
+      source: { type: string, enum: [amplicon, megablast], x-nullable: true }
+      copies: { type: array, items: { $ref: "#/definitions/PrimerGenotypeCopy" }, description: "the orthologous copies the call used (at most check.genotype_max_copies); paralogs are only counted" }
+      orthologous_copies: { type: integer }
+      paralog_copies: { type: integer, description: "copies that fail the ortholog test yet align to the reference segment with at least 80 % gap-compressed identity; less similar products are unrelated off-targets and are not counted" }
+      reason:
+        type: string
+        x-nullable: true
+        enum: [variant_not_covered, no_orthologous_copy, fallback_failed, fallback_budget, db_unavailable, blast_error, call_failed]
+  PrimerGenotypePrimerCall:
+    type: object
+    description: "status is the best over the primer's on-locus products and copies (section 5.7); likelihood, mm_pos and residual_mm_pos all come from the one product that supplied that status, and are null with no_product"
+    properties:
+      status: { type: string, enum: [match, weak, terminal_mismatch, uncertain, blocked, no_product, unknown] }
+      likelihood: { type: string, enum: [likely, likely_weak, unlikely], x-nullable: true, description: "classify likelihood of that product; for common_primer, the product of either pair whose common site gave status, the better likelihood first when several tie" }
+      mm_pos: { type: array, items: { type: integer }, x-nullable: true, description: "this primer's site alignment in that product; null with no_product or an approximate alignment" }
+      residual_mm_pos: { type: array, items: { type: integer }, x-nullable: true, description: "mm_pos with the set's declared deliberate-mismatch positions removed; the prediction reads this" }
+  PrimerGenotypeSetGenome:
+    type: object
+    description: "ref_primer and alt_primer come from their own pair's on-locus product; common_primer comes from the common primer's own site at the called locus, the better of its two alignments in the pairs' on-locus products. A deliberate mismatch on an allele-specific primer never changes common_primer. Each call reports the likelihood and mm_pos of the product that supplied its status (section 5.7)."
+    properties:
+      system_name: { type: string }
+      ref_primer: { $ref: "#/definitions/PrimerGenotypePrimerCall" }
+      alt_primer: { $ref: "#/definitions/PrimerGenotypePrimerCall" }
+      common_primer: { $ref: "#/definitions/PrimerGenotypePrimerCall" }
+      predicted: { type: string, enum: [ref, alt, both, none, no_call, unknown] }
+      strength: { type: string, enum: [normal, weak], x-nullable: true, description: "weak when the amplifying side, or the common primer, has a residual mismatch at distance 2-3" }
+      agrees: { type: boolean, x-nullable: true }
+      reasons:
+        type: array
+        items:
+          type: string
+          enum: [common_primer_3p_mismatch, common_primer_weak, ref_signal_off_locus, alt_signal_off_locus, shift_tract_uncertain, approx_alignment, no_orthologous_copy, third_allele]
+      off_locus_products: { type: integer, description: "off-locus products that change the prediction: amplifying, the allele-specific 3' base matched, the common site a match or weak, and at most check.genotype_offlocus_max_mismatches mismatches in each primer (a declared deliberate mismatch not counted); weaker ones are reported in results warning WEAK_OFF_TARGETS" }
+  PrimerGenotypeSetSummary:
+    type: object
+    properties:
+      genomes_total: { type: integer }
+      predicted_ref: { type: integer }
+      predicted_alt: { type: integer }
+      both: { type: integer }
+      none: { type: integer }
+      no_call: { type: integer }
+      unknown: { type: integer }
+      weak: { type: integer }
+      agree: { type: integer }
+      disagree: { type: integer }
+      not_comparable: { type: integer }
+  PrimerGenotypePairSpecificity:
+    type: object
+    properties:
+      verdict: { type: string }
+      consistent_with_allele: { type: boolean, description: "true when a blocked (or absent) allele-specific primer on the reference goes with verdict on_target_missing, or any other status with specific or off_targets (section 5.5)" }
+  PrimerGenotypeReferenceControl:
+    type: object
+    properties:
+      status: { type: string, enum: [pass, warn, fail] }
+      allele: { type: string, enum: [ref, alt, other, ambiguous, missing, unavailable] }
+      reasons: { type: array, items: { type: string }, description: "allele_not_ref and prediction_not_ref (fail), weak and off_locus_products (warn), then the reference call's own reasons" }
+  PrimerGenotypeSetResult:
+    type: object
+    properties:
+      id: { type: string }
+      ref_pair: { type: string }
+      alt_pair: { type: string }
+      orientation: { type: string, enum: [forward, reverse], description: "derived at submit from the shared primer, not taken from the client" }
+      deliberate_mismatch_positions: { type: array, items: { type: integer }, description: "positions accepted at submit on each allele-specific primer (2 or 3), removed before prediction" }
+      specificity:
+        type: object
+        properties:
+          ref_pair: { $ref: "#/definitions/PrimerGenotypePairSpecificity" }
+          alt_pair: { $ref: "#/definitions/PrimerGenotypePairSpecificity" }
+          off_target_count: { type: integer, description: "distinct reference off-target products of the two pairs" }
+      control: { $ref: "#/definitions/PrimerGenotypeReferenceControl" }
+      reference: { $ref: "#/definitions/PrimerGenotypeSetGenome" }
+      summary: { $ref: "#/definitions/PrimerGenotypeSetSummary" }
+      genomes: { type: array, items: { $ref: "#/definitions/PrimerGenotypeSetGenome" } }
+  PrimerGenotypeSummary:
+    type: object
+    description: "pan-genome genomes only; the counts add up to genomes_total"
+    properties:
+      genomes_total: { type: integer }
+      ref: { type: integer }
+      alt: { type: integer }
+      other: { type: integer }
+      ambiguous: { type: integer }
+      missing: { type: integer }
+      unavailable: { type: integer }
+  PrimerCheckGenotypingResults:
+    type: object
+    description: "present only for requests that carried a genotyping block; absent (not null) otherwise"
+    properties:
+      algorithm_version: { type: string, description: "caller and prediction version, currently 'g1'" }
+      variant: { $ref: "#/definitions/PrimerGenotypeVariantInfo" }
+      summary: { $ref: "#/definitions/PrimerGenotypeSummary" }
+      genomes: { type: array, items: { $ref: "#/definitions/PrimerGenotypeGenome" }, description: "reference control first, then finished pan-genome genomes in request order" }
+      sets: { type: array, items: { $ref: "#/definitions/PrimerGenotypeSetResult" } }
 
 parameters:
   q:

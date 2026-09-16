@@ -20,6 +20,7 @@ const DEFAULTS = deepFreeze({
   enabled: true,
   site_key: null,
   primer3_core: '/home/olson/bin/primer3_core',
+  ntthal: '/home/olson/primer3-2.6.1/bin/ntthal',
   blastn: '/home/olson/bin/blastn',
   blastdbcmd: '/home/olson/bin/blastdbcmd',
   fasta_root: '/scratch/olson/fasta',
@@ -48,6 +49,60 @@ const DEFAULTS = deepFreeze({
     exon_pad: 100,
     timeout_ms: 20000,
     cache_entries: 200
+  },
+  // Known variants from Ensembl REST (genotyping spec §3.1-§3.3). Only the species listed here are ever called.
+  variation: {
+    enabled: true,
+    base_url: 'https://data.gramene.org/pansite-ensembl-115',
+    release: '115',
+    species: { sorghum_bicolor: 'sorghum_bicolor' },
+    timeout_ms: 8000,
+    chunk_bp: 10000,
+    max_chunk_bytes: 1000000,
+    max_lookup_bytes: 262144,
+    max_window: 50000,
+    list_limit_default: 2000,
+    list_limit_max: 5000,
+    max_concurrent: 4,
+    queue_wait_ms: 5000,
+    cache_entries: 500,
+    cache_ttl_ms: 3600000,
+    unknown_cache_ttl_ms: 300000,
+    unavailable_cache_ttl_ms: 30000,
+    breaker_failures: 3,
+    breaker_window_ms: 60000,
+    breaker_open_ms: 60000,
+    retry_after_s: 30,
+    queue_retry_after_s: 5,
+    max_allele_length: 50,
+    max_shift: 1000,
+    ems_source_pattern: '^EMS_'
+  },
+  // POST /primers/genotyping/design (genotyping spec §3.1, §4).
+  genotyping: {
+    template_flank: 400,
+    num_return_per_run: 20,
+    num_sets_default: 6,
+    max_sets: 10,
+    max_scored_per_orientation: 8,
+    max_primer3_runs: 54,
+    max_thermo_calls: 272,
+    thermo_concurrency: 4,
+    thermo_timeout_ms: 5000,
+    guard_gap: 10,
+    mask_exempt_pad: 36,
+    as_min_tm: 52,
+    as_min_gc: 15,
+    structure_warn_th: 47,
+    structure_high_th: 55,
+    as_tm_diff_warn: 1.0,
+    common_tm_low: -1.0,
+    common_tm_high: 3.0,
+    neighbour_3p_window: 5,
+    dense_window: 30,
+    dense_count: 2,
+    check_max_sets: 5,
+    check_max_unique_primers: 13
   },
   check: {
     store: 'redis',
@@ -85,6 +140,22 @@ const DEFAULTS = deepFreeze({
     realign_concurrency: 32,
     max_offtargets_listed: 100,
     max_annotated_amplicons: 200,
+    // per-assembly allele calls of a genotyping check (genotyping spec §5.4, §5.6)
+    genotype_cpu_s_per_genome: 0.2,
+    genotype_flank_min: 15,
+    genotype_amplicon_pad: 50,
+    genotype_ortholog_min_identity: 95,
+    genotype_ortholog_size_tolerance: 0.2,
+    genotype_max_copies: 10,
+    genotype_max_anchors: 50,
+    genotype_max_megablast: 30,
+    genotype_megablast_timeout_ms: 20000,
+    genotype_megablast_min_identity: 95,
+    genotype_megablast_min_query_cover: 0.8,
+    genotype_megablast_min_bitscore_frac: 0.9,
+    // an off-locus product changes an allele prediction only with at most this many mismatches in each primer; weaker ones that
+    // the check still lists are reported as WEAK_OFF_TARGETS
+    genotype_offlocus_max_mismatches: 2,
     defaults: {
       max_product_size: 4000,
       ignore_mismatches: 6,
@@ -104,6 +175,7 @@ const ENV_OVERRIDES = [
   ['PRIMERS_ENABLED', 'enabled', 'bool'],
   ['PRIMERS_SITE_KEY', 'site_key', 'string'],
   ['PRIMER3_CORE', 'primer3_core', 'string'],
+  ['NTTHAL', 'ntthal', 'string'],
   ['BLASTN', 'blastn', 'string'],
   ['BLASTDBCMD', 'blastdbcmd', 'string'],
   ['PRIMERS_FASTA_ROOT', 'fasta_root', 'string'],
@@ -111,8 +183,24 @@ const ENV_OVERRIDES = [
   ['PRIMERS_REDIS_URL', 'check.redis_url', 'string'],
   ['PRIMERS_GLOBAL_PREFIX', 'check.global_prefix', 'string'],
   ['PRIMERS_GLOBAL_MAX_JOBS', 'check.global_max_jobs', 'int'],
-  ['PRIMERS_MAX_QUEUED', 'check.max_queued', 'int']
+  ['PRIMERS_MAX_QUEUED', 'check.max_queued', 'int'],
+  ['PRIMERS_VARIATION_URL', 'variation.base_url', 'url'],
+  ['PRIMERS_VARIATION_ENABLED', 'variation.enabled', 'bool']
 ];
+
+// The `url` env type (PRIMERS_VARIATION_URL): https anywhere, or plain http only on the IPv4 loopback, for the
+// fake Ensembl server of the integration tests. No credentials, query or fragment: the client appends paths.
+function isAllowedUrl(s) {
+  let u;
+  try {
+    u = new URL(s);
+  } catch (e) {
+    return false;
+  }
+  if (u.username || u.password || u.search || u.hash) return false;
+  if (/^https:\/\//i.test(s)) return u.protocol === 'https:' && u.hostname !== '';
+  return /^http:\/\/127\.0\.0\.1(:\d+)?(\/|$)/i.test(s) && u.protocol === 'http:' && u.hostname === '127.0.0.1';
+}
 
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -177,6 +265,10 @@ function applyEnv(cfg, env, warnings) {
       case 'store':
         if (s === 'redis' || s === 'memory') setPath(cfg, row[1], s);
         else warnings.push(name + ' must be redis or memory; ignored');
+        break;
+      case 'url':
+        if (isAllowedUrl(s)) setPath(cfg, row[1], s);
+        else warnings.push(name + ' must be an https:// URL (or http://127.0.0.1 for a loopback test server) without query or credentials; ignored');
         break;
       default:
         setPath(cfg, row[1], s);

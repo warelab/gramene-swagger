@@ -1,0 +1,485 @@
+{
+  "algorithm_version": "g1",
+  "variant": {
+    "key": "1:11109:C:A",
+    "region": "1",
+    "position": 11109,
+    "ref": "C",
+    "alt": "A",
+    "shift": 0,
+    "zone": {
+      "start": 11109,
+      "end": 11109
+    },
+    "flank": 15,
+    "core": {
+      "ref": "TCT",
+      "alt": "TAT"
+    },
+    "haplotypes": {
+      "ref": "ATAGTCATACTCTATTCTGAATTTCTCGCTAGT",
+      "alt": "ATAGTCATACTCTATTATGAATTTCTCGCTAGT"
+    }
+  },
+  "summary": {
+    "genomes_total": 3,
+    "ref": 2,
+    "alt": 1,
+    "other": 0,
+    "ambiguous": 0,
+    "missing": 0,
+    "unavailable": 0
+  },
+  "genomes": [
+    {
+      "system_name": "sorghum_bicolor",
+      "display_name": "Sb bicolor BTx623 v3",
+      "is_reference": true,
+      "allele": "ref",
+      "observed": "TCT",
+      "source": "amplicon",
+      "copies": [
+        {
+          "region": "1",
+          "start": 11068,
+          "end": 11172,
+          "strand": 1,
+          "variant_position": 11109,
+          "identity": 100,
+          "gap_compressed_identity": 100,
+          "aligned_length": 192,
+          "observed": "TCT",
+          "flank_edits": 0,
+          "call": "ref",
+          "anchors": 2,
+          "ortholog": null,
+          "source": "amplicon"
+        }
+      ],
+      "orthologous_copies": 1,
+      "paralog_copies": 0,
+      "reason": null
+    },
+    {
+      "system_name": "sorghum_bicolorv5",
+      "display_name": "Sb bicolor BTx623 v5",
+      "is_reference": false,
+      "allele": "ref",
+      "observed": "TCT",
+      "source": "amplicon",
+      "copies": [
+        {
+          "region": "1",
+          "start": 31523,
+          "end": 31627,
+          "strand": 1,
+          "variant_position": 31564,
+          "identity": 100,
+          "gap_compressed_identity": 100,
+          "aligned_length": 192,
+          "observed": "TCT",
+          "flank_edits": 0,
+          "call": "ref",
+          "anchors": 2,
+          "ortholog": null,
+          "source": "amplicon"
+        }
+      ],
+      "orthologous_copies": 1,
+      "paralog_copies": 0,
+      "reason": null
+    },
+    {
+      "system_name": "sorghum_pi180348",
+      "display_name": "Sb bicolor PI180348 Juar (IS 12876)",
+      "is_reference": false,
+      "allele": "alt",
+      "observed": "TAT",
+      "source": "amplicon",
+      "copies": [
+        {
+          "region": "1",
+          "start": 15028,
+          "end": 15132,
+          "strand": -1,
+          "variant_position": 15091,
+          "identity": 98.44,
+          "gap_compressed_identity": 98.44,
+          "aligned_length": 192,
+          "observed": "TAT",
+          "flank_edits": 2,
+          "call": "alt",
+          "anchors": 2,
+          "ortholog": null,
+          "source": "amplicon"
+        },
+        {
+          "region": "1",
+          "start": 38342,
+          "end": 38446,
+          "strand": 1,
+          "variant_position": 38383,
+          "identity": 98.45,
+          "gap_compressed_identity": 98.45,
+          "aligned_length": 193,
+          "observed": "TAT",
+          "flank_edits": 2,
+          "call": "alt",
+          "anchors": 2,
+          "ortholog": null,
+          "source": "amplicon"
+        }
+      ],
+      "orthologous_copies": 2,
+      "paralog_copies": 0,
+      "reason": null
+    },
+    {
+      "system_name": "sorghum_pi329250",
+      "display_name": "Sb verticilliflorum PI329250 ADAR",
+      "is_reference": false,
+      "allele": "ref",
+      "observed": "TCT",
+      "source": "amplicon",
+      "copies": [
+        {
+          "region": "1",
+          "start": 203934,
+          "end": 204038,
+          "strand": 1,
+          "variant_position": 203975,
+          "identity": 100,
+          "gap_compressed_identity": 100,
+          "aligned_length": 192,
+          "observed": "TCT",
+          "flank_edits": 0,
+          "call": "ref",
+          "anchors": 2,
+          "ortholog": null,
+          "source": "amplicon"
+        }
+      ],
+      "orthologous_copies": 1,
+      "paralog_copies": 0,
+      "reason": null
+    }
+  ],
+  "sets": [
+    {
+      "id": "S1",
+      "ref_pair": "S1_REF",
+      "alt_pair": "S1_ALT",
+      "orientation": "reverse",
+      "deliberate_mismatch_positions": [],
+      "specificity": {
+        "ref_pair": {
+          "verdict": "specific",
+          "consistent_with_allele": true
+        },
+        "alt_pair": {
+          "verdict": "specific",
+          "consistent_with_allele": true
+        },
+        "off_target_count": 0
+      },
+      "control": {
+        "status": "pass",
+        "allele": "ref",
+        "reasons": []
+      },
+      "reference": {
+        "system_name": "sorghum_bicolor",
+        "ref_primer": {
+          "status": "match",
+          "likelihood": "likely",
+          "mm_pos": [],
+          "residual_mm_pos": []
+        },
+        "alt_primer": {
+          "status": "terminal_mismatch",
+          "likelihood": "likely_weak",
+          "mm_pos": [
+            1
+          ],
+          "residual_mm_pos": [
+            1
+          ]
+        },
+        "common_primer": {
+          "status": "match",
+          "likelihood": "likely",
+          "mm_pos": [],
+          "residual_mm_pos": []
+        },
+        "predicted": "ref",
+        "strength": "normal",
+        "agrees": true,
+        "reasons": [],
+        "off_locus_products": 0
+      },
+      "summary": {
+        "genomes_total": 3,
+        "predicted_ref": 2,
+        "predicted_alt": 1,
+        "both": 0,
+        "none": 0,
+        "no_call": 0,
+        "unknown": 0,
+        "weak": 0,
+        "agree": 3,
+        "disagree": 0,
+        "not_comparable": 0
+      },
+      "genomes": [
+        {
+          "system_name": "sorghum_bicolorv5",
+          "ref_primer": {
+            "status": "match",
+            "likelihood": "likely",
+            "mm_pos": [],
+            "residual_mm_pos": []
+          },
+          "alt_primer": {
+            "status": "terminal_mismatch",
+            "likelihood": "likely_weak",
+            "mm_pos": [
+              1
+            ],
+            "residual_mm_pos": [
+              1
+            ]
+          },
+          "common_primer": {
+            "status": "match",
+            "likelihood": "likely",
+            "mm_pos": [],
+            "residual_mm_pos": []
+          },
+          "predicted": "ref",
+          "strength": "normal",
+          "agrees": true,
+          "reasons": [],
+          "off_locus_products": 0
+        },
+        {
+          "system_name": "sorghum_pi180348",
+          "ref_primer": {
+            "status": "terminal_mismatch",
+            "likelihood": "likely_weak",
+            "mm_pos": [
+              1
+            ],
+            "residual_mm_pos": [
+              1
+            ]
+          },
+          "alt_primer": {
+            "status": "match",
+            "likelihood": "likely",
+            "mm_pos": [],
+            "residual_mm_pos": []
+          },
+          "common_primer": {
+            "status": "match",
+            "likelihood": "likely",
+            "mm_pos": [],
+            "residual_mm_pos": []
+          },
+          "predicted": "alt",
+          "strength": "normal",
+          "agrees": true,
+          "reasons": [],
+          "off_locus_products": 0
+        },
+        {
+          "system_name": "sorghum_pi329250",
+          "ref_primer": {
+            "status": "match",
+            "likelihood": "likely",
+            "mm_pos": [],
+            "residual_mm_pos": []
+          },
+          "alt_primer": {
+            "status": "terminal_mismatch",
+            "likelihood": "likely_weak",
+            "mm_pos": [
+              1
+            ],
+            "residual_mm_pos": [
+              1
+            ]
+          },
+          "common_primer": {
+            "status": "match",
+            "likelihood": "likely",
+            "mm_pos": [],
+            "residual_mm_pos": []
+          },
+          "predicted": "ref",
+          "strength": "normal",
+          "agrees": true,
+          "reasons": [],
+          "off_locus_products": 0
+        }
+      ]
+    },
+    {
+      "id": "S2",
+      "ref_pair": "S2_REF",
+      "alt_pair": "S2_ALT",
+      "orientation": "forward",
+      "deliberate_mismatch_positions": [],
+      "specificity": {
+        "ref_pair": {
+          "verdict": "specific",
+          "consistent_with_allele": true
+        },
+        "alt_pair": {
+          "verdict": "specific",
+          "consistent_with_allele": true
+        },
+        "off_target_count": 0
+      },
+      "control": {
+        "status": "pass",
+        "allele": "ref",
+        "reasons": []
+      },
+      "reference": {
+        "system_name": "sorghum_bicolor",
+        "ref_primer": {
+          "status": "match",
+          "likelihood": "likely",
+          "mm_pos": [],
+          "residual_mm_pos": []
+        },
+        "alt_primer": {
+          "status": "terminal_mismatch",
+          "likelihood": "likely_weak",
+          "mm_pos": [
+            1
+          ],
+          "residual_mm_pos": [
+            1
+          ]
+        },
+        "common_primer": {
+          "status": "match",
+          "likelihood": "likely",
+          "mm_pos": [],
+          "residual_mm_pos": []
+        },
+        "predicted": "ref",
+        "strength": "normal",
+        "agrees": true,
+        "reasons": [],
+        "off_locus_products": 0
+      },
+      "summary": {
+        "genomes_total": 3,
+        "predicted_ref": 2,
+        "predicted_alt": 1,
+        "both": 0,
+        "none": 0,
+        "no_call": 0,
+        "unknown": 0,
+        "weak": 0,
+        "agree": 3,
+        "disagree": 0,
+        "not_comparable": 0
+      },
+      "genomes": [
+        {
+          "system_name": "sorghum_bicolorv5",
+          "ref_primer": {
+            "status": "match",
+            "likelihood": "likely",
+            "mm_pos": [],
+            "residual_mm_pos": []
+          },
+          "alt_primer": {
+            "status": "terminal_mismatch",
+            "likelihood": "likely_weak",
+            "mm_pos": [
+              1
+            ],
+            "residual_mm_pos": [
+              1
+            ]
+          },
+          "common_primer": {
+            "status": "match",
+            "likelihood": "likely",
+            "mm_pos": [],
+            "residual_mm_pos": []
+          },
+          "predicted": "ref",
+          "strength": "normal",
+          "agrees": true,
+          "reasons": [],
+          "off_locus_products": 0
+        },
+        {
+          "system_name": "sorghum_pi180348",
+          "ref_primer": {
+            "status": "terminal_mismatch",
+            "likelihood": "likely_weak",
+            "mm_pos": [
+              1
+            ],
+            "residual_mm_pos": [
+              1
+            ]
+          },
+          "alt_primer": {
+            "status": "match",
+            "likelihood": "likely",
+            "mm_pos": [],
+            "residual_mm_pos": []
+          },
+          "common_primer": {
+            "status": "match",
+            "likelihood": "likely",
+            "mm_pos": [],
+            "residual_mm_pos": []
+          },
+          "predicted": "alt",
+          "strength": "normal",
+          "agrees": true,
+          "reasons": [],
+          "off_locus_products": 0
+        },
+        {
+          "system_name": "sorghum_pi329250",
+          "ref_primer": {
+            "status": "match",
+            "likelihood": "likely",
+            "mm_pos": [],
+            "residual_mm_pos": []
+          },
+          "alt_primer": {
+            "status": "terminal_mismatch",
+            "likelihood": "likely_weak",
+            "mm_pos": [
+              1
+            ],
+            "residual_mm_pos": [
+              1
+            ]
+          },
+          "common_primer": {
+            "status": "match",
+            "likelihood": "likely",
+            "mm_pos": [],
+            "residual_mm_pos": []
+          },
+          "predicted": "ref",
+          "strength": "normal",
+          "agrees": true,
+          "reasons": [],
+          "off_locus_products": 0
+        }
+      ]
+    }
+  ]
+}
