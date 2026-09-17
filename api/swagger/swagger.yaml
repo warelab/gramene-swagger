@@ -3105,7 +3105,7 @@ definitions:
         type: object
         x-nullable: true
         properties:
-          code: { type: string, description: "REFERENCE_BLAST_FAILED (details.cause, e.g. BLAST_TIMEOUT), NO_BLASTDB, JOB_TIMEOUT, RESULT_TOO_LARGE, WORKER_LOST, MONGO_UNAVAILABLE (a mongo connection failure on the last attempt; genes query timeouts are not fatal), CHECK_FAILED" }
+          code: { type: string, description: "REFERENCE_BLAST_FAILED (details.cause, e.g. BLAST_TIMEOUT), NO_BLASTDB, JOB_TIMEOUT, RESULT_TOO_LARGE, WORKER_LOST, MONGO_UNAVAILABLE (on the job's last attempt: a mongo connection failure, or genes queries the worker found hung or timing out job after job; a genes query timeout alone is not fatal), CHECK_FAILED" }
           message: { type: string }
           details: { type: object }
   PrimerCheckAmplicon:

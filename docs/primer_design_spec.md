@@ -53,6 +53,7 @@ current behaviour.** These are the deltas from the sections below:
   - If gene annotation fails at the connection level (no collection, or a query error) while `ctx.fatalOnMongoUnavailable` is set, the run throws `MONGO_UNAVAILABLE` (`fatal`). The worker requeues the job and exits 75.
   - A genes query that times out is retried once with twice the budget, and the first attempt stays in the race. A second timeout is not fatal: the job completes with `ANNOTATION_UNAVAILABLE` (`details.cause: "timeout"`).
   - At most 5 genes queries per mongo handle are outstanding on the driver. A timed-out query keeps its slot until mongo answers it, so abandoned queries cannot pile up on the connections across jobs.
+  - Self-heal: a genes query timeout escalates to a connection failure (`MONGO_UNAVAILABLE`, `fatal`, cause `hung` or `repeated_timeouts` in the message) when all 5 slots are held and no genes query has settled for 5 min (counted from the later of the last settle and the first query sent to an idle handle), or when it is the third job in a row to time out with no genes query succeeding in between.
 - **Security:** BLAST+ and Primer3 run with `NCBI_DONT_USE_NCBIRC=1` in private 0700 working directories, never `/tmp`.
 - **Design:**
   - `n_mask` designs recompute `product_tm` on the unmasked template (Primer3 `long_seq_tm`).

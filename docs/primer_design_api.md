@@ -470,8 +470,9 @@ POST ─► queued ─► running ─► done   (results kept 24 h)
   design and genomes keep working. The worker runs nothing without a claimed slot, so checks fail closed.
 - **Job error codes:** `REFERENCE_BLAST_FAILED` (BLAST failed twice, or timed out once: `details {target, cause}`;
   stderr tail with paths reduced to basenames), `NO_BLASTDB`, `JOB_TIMEOUT`, `RESULT_TOO_LARGE {bytes, limit}`,
-  `WORKER_LOST`, `MONGO_UNAVAILABLE` (a mongo connection failure during the run on the job's last attempt; genes
-  query timeouts are not fatal; see Operations),
+  `WORKER_LOST`, `MONGO_UNAVAILABLE` (on the job's last attempt: a mongo connection failure during the run, or genes
+  queries that the worker found hung or timing out job after job; a genes query timeout alone is not fatal; see
+  Operations),
   `CHECK_FAILED`.
 
 ### Cost guard
@@ -704,7 +705,8 @@ annotation finished before it keep their genes, the genome products annotated fr
 `ortholog: null`, and cDNA products whose transcripts were not mapped yet are grouped by transcript id without the
 isoform suffix. With `details: {cause: "timeout"}` a genes
 query timed out twice, so mongo did not answer it within 45 s: it was slow, saturated or hung (see Operations), and
-the worker finishes the job with this warning. A mongo connection failure makes the worker fail the attempt with
+the worker finishes the job with this warning, unless its self-heal valve takes the timeout for a hung mongo and
+restarts the worker instead (see Operations). A mongo connection failure makes the worker fail the attempt with
 `MONGO_UNAVAILABLE` and retry it after a restart instead, so a finished job carries the warning without `details`
 only when run outside the worker),
 `TRANSCRIPT_GENE_UNMAPPED`, `PANGENOME_TRANSCRIPT_MODELS_ONLY`,
@@ -3051,7 +3053,8 @@ pm2 save
   `primers worker: fatal MONGO_UNAVAILABLE; requeueing running jobs and exiting`. A mongod that is back within those
   30 s answers the held queries and the job carries on. A retry line alone therefore does not prove that a query was
   slow.
-- A genes query that **times out** never exits the worker. The worker sends at most 5 genes queries to mongo at a time
+- A genes query that **times out** does not exit the worker by itself (the self-heal restart below is the only
+  exception). The worker sends at most 5 genes queries to mongo at a time
   (the driver's 5 connections), and the others wait in the worker, in order. Each query has a 15 s budget counted from
   dispatch, so that wait counts. A query that runs out of time is retried once, with another 30 s: the first attempt
   keeps running and, if it had been sent, the query is sent once more; the first to settle decides (an error from
@@ -3071,9 +3074,60 @@ pm2 save
   - **Slow or hung.** A timed-out query is not cancelled on the server. It keeps its slot until mongo answers it, so
     the queries of later jobs wait in the worker instead of piling up behind it on mongo's connections. A mongod that
     stops answering but keeps its connections open (a stalled disk, `SIGSTOP`, memory pressure) looks exactly like a
-    slow one: every check then waits about 45 s for mongo and completes with `{cause: "timeout"}`, and the worker does
-    not restart (the driver gives up on such connections only after its 6 min socket timeout, and a query still
-    running on one then fails as a connection failure). When these warnings recur, first check that mongod answers:
+    slow one to a single query. The driver fails the queries stuck on such connections only after its 6 min socket
+    timeout (errors that no check is waiting for any more) and reconnects, but the new connections hang the same way:
+    the 5 slots stay held or fill up again, and every later check would wait about 45 s for mongo and complete with
+    `{cause: "timeout"}`. The self-heal restart replaces the worker's connections instead of waiting on them; it
+    cannot make a hung mongod answer (see the end of the next bullet).
+  - **Self-heal restart.** Each time a job gives up on a genes query that timed out, the worker also looks at all of
+    its genes queries (all jobs of the process) and treats mongo as lost, exactly like a connection failure, when
+    either holds:
+    - **hung:** all 5 query slots are held and no genes query has been answered (or has failed) for 5 min, counted
+      from the later of the last answer and the moment a query was sent while no other query was outstanding, so
+      time without checks does not count. Full slots alone never qualify: a large healthy pan-genome check keeps all
+      5 busy for minutes, but its queries are answered every few milliseconds.
+    - **repeated_timeouts:** this is the third job in a row whose genes queries timed out, with no genes query
+      answered successfully in between (a late answer to an abandoned query also resets the count). The driver's
+      6 min socket-timeout errors are not answers, so this still fires when those errors have restarted the 5 min
+      count of the hung condition.
+
+    With a hung mongod the worker therefore restarts at the third check in a row that times out, or earlier at the
+    first check that times out while all 5 query slots are held and no genes query has been answered (or has failed)
+    for 5 min; the checks that timed out before it completed with `{cause: "timeout"}`. With little traffic (small
+    checks that never hold all 5 slots) the restart comes at the third such check. The worker's log then shows, after
+    that job's `annotation unavailable: mongo genes query timed out` warning, these lines (the first and third at
+    error level):
+
+    ```
+    primers worker [<site_key>] job <id> primers check: mongo genes queries appear hung (no answer for 312 s, 5 of 5 query slots held, 2 consecutive timed-out jobs); treating mongo as unavailable so that the check worker restarts with fresh connections
+    primers worker [<site_key>] job <id> requeued (MONGO_UNAVAILABLE)
+    primers worker [<site_key>] job <id>: fatal error MONGO_UNAVAILABLE (requeued): gene annotation (mongo) is unavailable (cause: hung; no genes query answered for 312 s with 5 of 5 query slots held)
+    primers worker: fatal MONGO_UNAVAILABLE; requeueing running jobs and exiting
+    ```
+
+    or `mongo genes queries repeatedly timed out (...)` and
+    `(cause: repeated_timeouts; genes queries timed out in 3 consecutive jobs)`, followed by `job <id> requeued (shutdown)`
+    for each other running job. `no answer for` and `answered for` count the seconds since a genes query of the worker
+    last succeeded (or since its first genes query); the driver's socket-timeout errors are not answers.
+
+    The worker exits 75 and pm2 restarts it with fresh connections. Its running jobs go back
+    to the front of their queues and run again after the restart, but the attempt each was on counts toward
+    `check.max_attempts` (2): if that was the escalating job's second attempt, it ends with error `MONGO_UNAVAILABLE`
+    (`(error)` instead of `(requeued)` in the fatal line, and the cause in the job's error message) instead of being
+    requeued, and a requeued job that is hit by a fatal mongo error again ends with that error too.
+
+    What happens after the restart depends on how mongod hangs. The restarted worker's startup probe only connects
+    and gets the genes collection; it sends no genes query. If mongod no longer answers connections, the probe times
+    out after 15 s (`primers worker: mongo probe failed: mongo probe timed out`, then
+    `mongo is unavailable; exiting with code 75`) and pm2 keeps restarting the worker with its backoff, so no check
+    runs and queued checks wait until mongod answers. If mongod still answers connections but not queries (a stalled
+    disk can do that), the probe passes and the restarted worker runs checks again: they complete with
+    `{cause: "timeout"}`, and at the latest every third one in a row restarts the worker again, so the self-heal lines
+    recur. The two `mongosh` commands below tell this case apart (the ping answers, the genes query does not).
+    Checks that completed with `{cause: "timeout"}`, before or between restarts, stay cached (below): drop them once
+    mongo is fixed.
+  - **Recurring timeouts.** When `{cause: "timeout"}` warnings or self-heal restarts recur, first check that mongod
+    answers:
 
     ```bash
     timeout 10 mongosh --quiet --eval 'db.adminCommand({ping: 1})'
@@ -3083,9 +3137,10 @@ pm2 save
     If it does not answer, restart mongod. If it answers, check the genes indexes (overlap queries use
     `{location.map, location.region, location.start, location.end}`) and the mongo host's disk. If all of that is
     fine and checks still time out, `pm2 restart sorghum_primers11` drops the worker's connections.
-  - **Cached for 24 h.** A check that completed this way is a normal `done` job: identical requests share it and get
-    the degraded result for 24 h. Once mongo is healthy, drop each affected job (its id is in the log prefix) so that
-    the next POST of that request runs it again; until then `GET /primers/check/<id>` answers `404 UNKNOWN_JOB`:
+  - **Cached for 24 h.** A check that completed with `{cause: "timeout"}` is a normal `done` job: identical requests
+    share it and get the degraded result for 24 h. Once mongo is healthy, drop each affected job (its id is in the log
+    prefix) so that the next POST of that request runs it again; until then `GET /primers/check/<id>` answers
+    `404 UNKNOWN_JOB`:
 
     ```bash
     K=primers:sorghum_v11:sorghum11

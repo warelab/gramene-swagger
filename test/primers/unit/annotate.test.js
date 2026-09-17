@@ -602,3 +602,396 @@ describe('Annotator query slots: at most MAX_IN_FLIGHT genes queries per mongo h
     should(f.calls).have.length(5); // the dropped lookup was never sent
   });
 });
+
+describe('Annotator self-heal: a hung or repeatedly timed-out mongo handle escalates to a lost connection (ops-mongo-self-heal)', () => {
+  // Timeouts run on real timers (timeoutMs 20, retry 40 ms); the self-heal clock is injected and moved by the tests.
+  // Every test uses its own fake mongo handle: the counters live per handle, for the whole process.
+  const T = 20;
+  const STUCK = 300000;
+  const ON = { region: '4', start: 7423537, end: 7423746 };
+  const WAITING = 'primers check: mongo genes query timed out after 20 ms waiting for one of the 5 genes query slots; waiting once more with a 40 ms budget';
+  const GAVE_UP = 'primers check: annotation unavailable: mongo genes query timed out after 40 ms';
+  const line = (what, seconds, held, jobs) => 'primers check: mongo genes queries ' + what + ' (no answer for ' + seconds + ' s, ' + held +
+    ' of 5 query slots held, ' + jobs + ' consecutive timed-out jobs); treating mongo as unavailable so that the check worker restarts with fresh connections';
+  const recordingLog = () => {
+    const warns = [];
+    const errors = [];
+    return { warns, errors, log: { info() {}, warn: (m) => warns.push(m), error: (m) => errors.push(m) } };
+  };
+  const flags = (ann) => ({ unavailable: ann.unavailable, mongoFailed: ann.mongoFailed, timedOut: ann.timedOut, escalation: ann.escalation });
+  const TIMED_OUT_ONLY = { unavailable: true, mongoFailed: false, timedOut: true, escalation: null };
+  const turn = () => new Promise((resolve) => setImmediate(resolve));
+  const products = (n) => Array.from({ length: n }, (_, k) => makeAmplicon({ region: '4', start: 7423537 + k * 10, end: 7423746 + k * 10 }));
+  const clockAt = (t) => {
+    const clock = { t };
+    clock.now = () => clock.t;
+    return clock;
+  };
+  // answers every held query, also those sent meanwhile, until done settles
+  const drain = async (held, done) => {
+    let finished = false;
+    done.then(() => { finished = true; }, () => { finished = true; });
+    while (!finished) {
+      held.splice(0).forEach((resolve) => resolve([]));
+      await turn();
+    }
+    return done;
+  };
+
+  it('defaults: 5 min without an answer with every slot held, 3 timed-out jobs in a row, Date.now', () => {
+    should([annotate.DEFAULT_STUCK_MS, annotate.DEFAULT_TIMEOUT_JOBS_BEFORE_RESTART]).eql([300000, 3]);
+    const ann = new annotate.Annotator({ mongo: fakeMongo(GENES).mongo });
+    should([ann.stuckMs, ann.timeoutJobsBeforeRestart, ann.now, ann.escalation]).eql([300000, 3, Date.now, null]);
+    const custom = new annotate.Annotator({ mongo: fakeMongo(GENES).mongo, stuckMs: 1000, timeoutJobsBeforeRestart: 1, now: () => 7 });
+    should([custom.stuckMs, custom.timeoutJobsBeforeRestart, custom.now()]).eql([1000, 1, 7]);
+  });
+
+  it('hung: all 5 slots held by queries mongo never answers and no answer for stuckMs: the next timeout escalates with cause hung', async () => {
+    const clock = clockAt(5000000);
+    const stuck = [];
+    const f = fakeMongo(GENES, { script: (call) => (call.n < 5 ? new Promise((resolve) => stuck.push(resolve)) : 'ok') });
+    // timeoutJobsBeforeRestart 10 keeps repeated_timeouts out of the way
+    const job = (log) => new annotate.Annotator({ mongo: f.mongo, timeoutMs: T, now: clock.now, log, timeoutJobsBeforeRestart: 10 });
+
+    // job 1: its 5 queries are sent and hang; it times out without escalating (no time has passed)
+    const j1 = recordingLog();
+    const job1 = job(j1.log);
+    should((await job1.overlaps(BICOLOR, products(5))).available).be.false();
+    should(flags(job1)).eql(TIMED_OUT_ONLY);
+    should([job1._slots.active, f.calls.length, j1.errors.length]).eql([5, 5, 0]);
+
+    // job 2, 1 ms short of stuckMs after they were sent: its query waits for a slot and times out; not hung yet
+    clock.t += STUCK - 1;
+    const j2 = recordingLog();
+    const job2 = job(j2.log);
+    should((await job2.overlaps(BICOLOR, [makeAmplicon(ON)])).available).be.false();
+    should(flags(job2)).eql(TIMED_OUT_ONLY);
+    should(j2.errors).eql([]);
+
+    // job 3, stuckMs after: hung
+    clock.t += 1;
+    const j3 = recordingLog();
+    const job3 = job(j3.log);
+    should((await job3.overlaps(BICOLOR, [makeAmplicon(ON)])).available).be.false();
+    should(flags(job3)).eql({
+      unavailable: true,
+      mongoFailed: true,
+      timedOut: true,
+      escalation: { cause: 'hung', secondsWithoutAnswer: 300, slotsHeld: 5, slots: 5, consecutiveTimedOutJobs: 3 }
+    });
+    should(j3.errors).eql([line('appear hung', 300, 5, 3)]);
+    should(j3.warns).eql([WAITING, GAVE_UP]);
+    should([job3.queries, f.calls.length]).eql([0, 5]);
+    // the jobs that did not escalate keep their flags
+    should([job1.mongoFailed, job2.mongoFailed, job1.escalation, job2.escalation]).eql([false, false, null, null]);
+
+    // mongo answers: the slots free up, the count is reset and the next job is annotated
+    stuck.forEach((resolve) => resolve([]));
+    await turn();
+    await turn();
+    const job4 = job();
+    const a = makeAmplicon(ON);
+    should(await job4.overlaps(BICOLOR, [a])).eql({ available: true, annotated: 1, skipped: 0 });
+    should(a.genes.map((g) => g.id)).eql(['SORBI_3004G087700']);
+    should([flags(job4), job4._handle.consecutiveTimedOutJobs]).eql([{ unavailable: false, mongoFailed: false, timedOut: false, escalation: null }, 0]);
+  });
+
+  it('hung: a handle hung from its very first query qualifies (the clock starts with the handle), also through the log warn fallback', async () => {
+    const clock = clockAt(0);
+    // the clock jumps past stuckMs once the fifth query has been sent, before any timeout of this job can fire
+    const f = fakeMongo(GENES, { script: (call) => { if (call.n === 4) clock.t = STUCK + 1500; return 'hang'; } });
+    const warns = [];
+    const ann = new annotate.Annotator({ mongo: f.mongo, timeoutMs: T, now: clock.now, log: { info() {}, warn: (m) => warns.push(m) }, timeoutJobsBeforeRestart: 10 });
+    const done = ann.overlaps(BICOLOR, products(6));
+    await turn();
+    should(f.calls).have.length(5);
+    should(clock.t).equal(STUCK + 1500);
+    should((await done).available).be.false();
+    should(flags(ann)).eql({
+      unavailable: true,
+      mongoFailed: true,
+      timedOut: true,
+      escalation: { cause: 'hung', secondsWithoutAnswer: 301, slotsHeld: 5, slots: 5, consecutiveTimedOutJobs: 1 }
+    });
+    // a logger without error() gets the line as a warning, once
+    should(warns.filter((m) => /appear hung/.test(m))).eql([line('appear hung', 301, 5, 1)]);
+    should(f.calls).have.length(5);
+  });
+
+  it('no false positive: all slots held for longer than stuckMs by a large job whose queries keep settling do not escalate a timeout', async () => {
+    const clock = clockAt(5000000);
+    const held = [];
+    // every query is answered only when the test says so, so nothing settles while the small job waits and times out
+    const f = fakeMongo(GENES, { script: () => new Promise((resolve) => held.push(resolve)) });
+    const big = new annotate.Annotator({ mongo: f.mongo, timeoutMs: 60000, now: clock.now });
+    const bigDone = big.overlaps(BICOLOR, products(40));
+    await turn();
+    should([f.calls.length, big._slots.active]).eql([5, 5]);
+    // 10 min of full slots: the large job gets an answer every minute and its next query takes the freed slot
+    for (let i = 0; i < 10; i++) {
+      clock.t += 60000;
+      held.shift()([]);
+      await turn();
+      await turn();
+      should(big._slots.active).equal(5);
+    }
+    should(f.calls).have.length(15);
+    should([big._handle.lastSettledAt, big._handle.lastAnsweredAt, big._handle.busySince]).eql([5600000, 5600000, 5000000]);
+    // a small job now waits for one of those slots and times out without ever being sent
+    const r = recordingLog();
+    const ann = new annotate.Annotator({ mongo: f.mongo, timeoutMs: T, now: clock.now, log: r.log, timeoutJobsBeforeRestart: 10 });
+    should(await ann.overlaps(BICOLOR, [makeAmplicon(ON)])).eql({ available: false, annotated: 0, skipped: 1 });
+    // every slot was held when the timeout was evaluated, and had been for 10 min, but the last answer was just now
+    should([ann._slots.active, ann.queries, ann._handle.lastSettledAt, ann._handle.busySince]).eql([5, 0, 5600000, 5000000]);
+    should(flags(ann)).eql(TIMED_OUT_ONLY);
+    should(r.warns).eql([WAITING, GAVE_UP]);
+    should(r.errors).eql([]);
+    should((await drain(held, bigDone)).available).be.true();
+  });
+
+  it('no hung escalation while a slot is free: one slow query, however long nothing answered', async () => {
+    const clock = clockAt(5000000);
+    // the clock jumps 10 x stuckMs on as soon as the query has been sent, before the job's first timeout
+    const f = fakeMongo(GENES, { script: (call) => { if (call.n === 0) clock.t += 10 * STUCK; return 'hang'; } });
+    const r = recordingLog();
+    const ann = new annotate.Annotator({ mongo: f.mongo, timeoutMs: T, now: clock.now, log: r.log, timeoutJobsBeforeRestart: 10 });
+    const done = ann.overlaps(BICOLOR, [makeAmplicon(ON)]);
+    await turn();
+    should(clock.t).equal(5000000 + 10 * STUCK);
+    should((await done).available).be.false();
+    should([f.calls.length, ann._slots.active]).eql([2, 2]); // the query and its resend
+    should(flags(ann)).eql(TIMED_OUT_ONLY);
+    should(r.errors).eql([]);
+  });
+
+  it('no hung escalation right after an idle gap: the quiet time counts from the first query sent to an idle handle', async () => {
+    const clock = clockAt(5000000);
+    let hang = false;
+    // once the hung job's five queries are out, the clock jumps to 1 ms short of stuckMs after they were sent
+    const f = fakeMongo(GENES, { script: (call) => { if (!hang) return 'ok'; if (call.n === 5) clock.t += STUCK - 1; return 'hang'; } });
+    const first = new annotate.Annotator({ mongo: f.mongo, timeoutMs: T, now: clock.now });
+    should((await first.overlaps(BICOLOR, [makeAmplicon(ON)])).available).be.true();
+    await turn();
+    should([first._slots.active, first._handle.lastSettledAt, first._handle.lastAnsweredAt]).eql([0, 5000000, 5000000]);
+    // an hour without jobs, then mongo stops answering
+    clock.t += 3600000;
+    hang = true;
+    const r = recordingLog();
+    const ann = new annotate.Annotator({ mongo: f.mongo, timeoutMs: T, now: clock.now, log: r.log, timeoutJobsBeforeRestart: 10 });
+    const done = ann.overlaps(BICOLOR, products(5));
+    await turn();
+    should([ann._handle.busySince, clock.t]).eql([8600000, 8600000 + STUCK - 1]);
+    should((await done).available).be.false();
+    should([ann._slots.active, r.errors.length]).eql([5, 0]);
+    should(flags(ann)).eql(TIMED_OUT_ONLY);
+    // stuckMs after those queries were sent, the next timeout escalates; the last answer is an hour older still
+    clock.t += 1;
+    const next = new annotate.Annotator({ mongo: f.mongo, timeoutMs: T, now: clock.now, timeoutJobsBeforeRestart: 10 });
+    should((await next.overlaps(BICOLOR, [makeAmplicon(ON)])).available).be.false();
+    should(next.escalation).eql({ cause: 'hung', secondsWithoutAnswer: 3900, slotsHeld: 5, slots: 5, consecutiveTimedOutJobs: 2 });
+  });
+
+  it('repeated_timeouts: the third job in a row to time out escalates; any query answered in between resets the count', async () => {
+    const clock = clockAt(5000000); // never moves: nothing is ever hung here
+    const stuck = [];
+    const f = fakeMongo(GENES, { script: () => new Promise((resolve) => stuck.push(resolve)) });
+    const job = (mongo, log) => new annotate.Annotator({ mongo, timeoutMs: T, now: clock.now, log });
+
+    // job 1 times out on both of its products: counted once
+    const job1 = job(f.mongo);
+    should((await job1.overlaps(BICOLOR, products(2))).available).be.false();
+    should([flags(job1), job1._handle.consecutiveTimedOutJobs]).eql([TIMED_OUT_ONLY, 1]);
+    const job2 = job(f.mongo);
+    should((await job2.overlaps(BICOLOR, [makeAmplicon(ON)])).available).be.false();
+    should([flags(job2), job2._handle.consecutiveTimedOutJobs]).eql([TIMED_OUT_ONLY, 2]);
+    const j3 = recordingLog();
+    const job3 = job(f.mongo, j3.log);
+    should((await job3.overlaps(BICOLOR, [makeAmplicon(ON)])).available).be.false();
+    should(flags(job3)).eql({
+      unavailable: true,
+      mongoFailed: true,
+      timedOut: true,
+      escalation: { cause: 'repeated_timeouts', secondsWithoutAnswer: 0, slotsHeld: 5, slots: 5, consecutiveTimedOutJobs: 3 }
+    });
+    should(j3.errors).eql([line('repeatedly timed out', 0, 5, 3)]);
+    should(stuck).have.length(5);
+    stuck.splice(0).forEach((resolve) => resolve([]));
+
+    // on another handle: two timed-out jobs, a job whose query is answered, then two more timed-out jobs: no escalation
+    const held = [];
+    let answer = false;
+    const g = fakeMongo(GENES, { script: () => (answer ? 'ok' : new Promise((resolve) => held.push(resolve))) });
+    const a = job(g.mongo);
+    const b = job(g.mongo);
+    should((await a.overlaps(BICOLOR, [makeAmplicon(ON)])).available).be.false();
+    should((await b.overlaps(BICOLOR, [makeAmplicon(ON)])).available).be.false();
+    should(b._handle.consecutiveTimedOutJobs).equal(2);
+    answer = true;
+    const ok = job(g.mongo);
+    should((await ok.overlaps(BICOLOR, [makeAmplicon(ON)])).available).be.true();
+    should(ok._handle.consecutiveTimedOutJobs).equal(0);
+    answer = false;
+    await turn();
+    const r = recordingLog();
+    const c = job(g.mongo, r.log);
+    const d = job(g.mongo, r.log);
+    should((await c.overlaps(BICOLOR, [makeAmplicon(ON)])).available).be.false();
+    should((await d.overlaps(BICOLOR, [makeAmplicon(ON)])).available).be.false();
+    should([flags(c), flags(d), d._handle.consecutiveTimedOutJobs, r.errors.length]).eql([TIMED_OUT_ONLY, TIMED_OUT_ONLY, 2, 0]);
+    // a late answer to one of the abandoned queries resets it too
+    held.shift()([]);
+    await turn();
+    should(d._handle.consecutiveTimedOutJobs).equal(0);
+    const e = job(g.mongo, r.log);
+    should((await e.overlaps(BICOLOR, [makeAmplicon(ON)])).available).be.false();
+    should([flags(e), e._handle.consecutiveTimedOutJobs, r.errors.length]).eql([TIMED_OUT_ONLY, 1, 0]);
+    held.splice(0).forEach((resolve) => resolve([]));
+  });
+
+  it('never escalates over a connection-level failure, and a timeout escalates once per annotator', async () => {
+    const clock = clockAt(0);
+    // 5 queries sent: 4 hang, the fifth fails with the clock past stuckMs (a failed query has settled too)
+    const f = fakeMongo(GENES, {
+      script: (call) => {
+        if (call.n !== 4) return 'hang';
+        clock.t = 10 * STUCK;
+        return Promise.reject(new Error('Topology was destroyed'));
+      }
+    });
+    const r = recordingLog();
+    const ann = new annotate.Annotator({ mongo: f.mongo, timeoutMs: T, now: clock.now, log: r.log, timeoutJobsBeforeRestart: 1 });
+    const done = ann.overlaps(BICOLOR, products(5));
+    should((await done).available).be.false();
+    should([ann.mongoFailed, ann.timedOut, ann.escalation, r.errors, ann._handle.lastSettledAt, ann._handle.lastAnsweredAt])
+      .eql([true, true, null, [], 10 * STUCK, 0]); // the failed query settled, but it answered nothing
+
+    const g = fakeMongo(GENES, { hang: true });
+    const warns = [];
+    const errors = [];
+    const twice = new annotate.Annotator({ mongo: g.mongo, timeoutMs: T, now: clockAt(0).now, log: { warn: (m) => warns.push(m), error: (m) => errors.push(m) }, timeoutJobsBeforeRestart: 1 });
+    should((await twice.overlaps(BICOLOR, products(3))).available).be.false();
+    should(twice.escalation).match({ cause: 'repeated_timeouts', consecutiveTimedOutJobs: 1 });
+    should(errors).have.length(1);
+  });
+
+  it('repeated_timeouts: the driver failing the abandoned queries (its 6 min socket timeout) settles them without resetting the count', async () => {
+    const clock = clockAt(5000000);
+    const stuck = [];
+    const f = fakeMongo(GENES, { script: () => new Promise((resolve, reject) => stuck.push(reject)) });
+    const r = recordingLog();
+    const job = () => new annotate.Annotator({ mongo: f.mongo, timeoutMs: T, now: clock.now, log: r.log });
+
+    // two jobs a minute apart time out; their 4 queries are still on the hung connections
+    const job1 = job();
+    should((await job1.overlaps(BICOLOR, [makeAmplicon(ON)])).available).be.false();
+    should(job1._handle.consecutiveTimedOutJobs).equal(1);
+    clock.t += 60000;
+    const job2 = job();
+    should((await job2.overlaps(BICOLOR, [makeAmplicon(ON)])).available).be.false();
+    should([flags(job1), flags(job2)]).eql([TIMED_OUT_ONLY, TIMED_OUT_ONLY]);
+    should([job2._handle.consecutiveTimedOutJobs, job2._slots.active, stuck.length]).eql([2, 4, 4]);
+
+    // 6 min after the first query the driver fails every stuck query and reconnects: errors no job waits for
+    clock.t = 5360000;
+    stuck.splice(0).forEach((reject) => reject(new Error('connection 0 to localhost:27017 timed out')));
+    await turn();
+    await turn();
+    should([job2._handle.lastSettledAt, job2._handle.lastAnsweredAt, job2._slots.active]).eql([5360000, 5000000, 0]);
+    should(job2._handle.consecutiveTimedOutJobs).equal(2); // an error is not an answer: the count stands
+    should([flags(job1), flags(job2), r.errors]).eql([TIMED_OUT_ONLY, TIMED_OUT_ONLY, []]);
+
+    // the queries on the new connections hang the same way, so the third job in a row to time out escalates
+    clock.t += 10000;
+    const job3 = job();
+    should((await job3.overlaps(BICOLOR, [makeAmplicon(ON)])).available).be.false();
+    should(flags(job3)).eql({
+      unavailable: true,
+      mongoFailed: true,
+      timedOut: true,
+      escalation: { cause: 'repeated_timeouts', secondsWithoutAnswer: 370, slotsHeld: 2, slots: 5, consecutiveTimedOutJobs: 3 }
+    });
+    should(r.errors).eql([line('repeatedly timed out', 370, 2, 3)]);
+    stuck.splice(0).forEach((reject) => reject(new Error('connection 1 to localhost:27017 timed out')));
+  });
+
+  it('hung: a later query timeout of the same job is evaluated again, and escalates once nothing settled for stuckMs', async () => {
+    const clock = clockAt(5000000);
+    let jump = false;
+    // the clock moves stuckMs on right after the first timeout of the job has been evaluated (an evaluation reads the
+    // clock once), so that first evaluation is too early and the next one, of another query of the same job, is not
+    const now = () => {
+      const t = clock.t;
+      if (jump) {
+        jump = false;
+        clock.t += STUCK;
+      }
+      return t;
+    };
+    const warns = [];
+    const errors = [];
+    const log = { info() {}, warn: (m) => { warns.push(m); if (m === GAVE_UP) jump = true; }, error: (m) => errors.push(m) };
+    const f = fakeMongo(GENES, { hang: true });
+    // 3 products: their 3 queries and 2 of the resends hold the 5 slots, and every one of them times out
+    const ann = new annotate.Annotator({ mongo: f.mongo, timeoutMs: T, now, log, timeoutJobsBeforeRestart: 10 });
+    should((await ann.overlaps(BICOLOR, products(3))).available).be.false();
+    should([f.calls.length, ann._slots.active]).eql([5, 5]);
+    should(warns.filter((m) => m === GAVE_UP)).have.length(1); // only the first timeout of the job is logged
+    should(flags(ann)).eql({
+      unavailable: true,
+      mongoFailed: true,
+      timedOut: true,
+      escalation: { cause: 'hung', secondsWithoutAnswer: 300, slotsHeld: 5, slots: 5, consecutiveTimedOutJobs: 1 }
+    });
+    should(errors).eql([line('appear hung', 300, 5, 1)]);
+  });
+
+  it('a find() that throws synchronously settles its query: the slot is freed, lastSettledAt moves, the count stands', async () => {
+    const clock = clockAt(5000000);
+    let n = 0;
+    const hanging = { limit() { return hanging; }, toArray: () => new Promise(() => {}) };
+    const coll = {
+      find() {
+        if (n++ < 2) return hanging;
+        clock.t += 1000;
+        throw new Error('cursor could not be created');
+      }
+    };
+    const mongo = { genes: { mongoCollection: async () => coll } };
+    const timedOut = new annotate.Annotator({ mongo, timeoutMs: T, now: clock.now });
+    should((await timedOut.overlaps(BICOLOR, [makeAmplicon(ON)])).available).be.false();
+    should([flags(timedOut), timedOut._handle.consecutiveTimedOutJobs]).eql([TIMED_OUT_ONLY, 1]);
+
+    const r = recordingLog();
+    const ann = new annotate.Annotator({ mongo, timeoutMs: T, now: clock.now, log: r.log });
+    should((await ann.overlaps(BICOLOR, [makeAmplicon(ON)])).available).be.false();
+    should(flags(ann)).eql({ unavailable: true, mongoFailed: true, timedOut: false, escalation: null });
+    await turn();
+    // the throw settled the query (no answer), so its slot is back and the timed-out job is still counted
+    should([ann._handle.lastSettledAt, ann._handle.lastAnsweredAt, ann._handle.consecutiveTimedOutJobs, ann._slots.active])
+      .eql([5001000, 5000000, 1, 2]);
+    should(r.errors).eql([]);
+    should(r.warns).eql(['primers check: annotation unavailable: cursor could not be created']);
+  });
+
+  it('a transcript → gene lookup that times out escalates like an overlap query', async () => {
+    const clock = clockAt(5000000);
+    const f = fakeMongo(GENES, { hang: true });
+    const tx = ['SORBI_3004G087700.1'];
+    for (let k = 0; k < 2; k++) {
+      const j = new annotate.Annotator({ mongo: f.mongo, timeoutMs: T, now: clock.now });
+      should((await j.transcriptGenes(BICOLOR, tx)).available).be.false();
+      should(flags(j)).eql(TIMED_OUT_ONLY);
+    }
+    const r = recordingLog();
+    const third = new annotate.Annotator({ mongo: f.mongo, timeoutMs: T, now: clock.now, log: r.log });
+    const out = await third.transcriptGenes(BICOLOR, tx);
+    should([out.available, out.unmapped, Array.from(out.map)]).eql([false, [], []]);
+    should(flags(third)).eql({
+      unavailable: true,
+      mongoFailed: true,
+      timedOut: true,
+      escalation: { cause: 'repeated_timeouts', secondsWithoutAnswer: 0, slotsHeld: 5, slots: 5, consecutiveTimedOutJobs: 3 }
+    });
+    should(r.errors).eql([line('repeatedly timed out', 0, 5, 3)]);
+  });
+});

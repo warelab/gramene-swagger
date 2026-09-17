@@ -607,4 +607,84 @@ describe('run(): stringency, identical primers, BLAST timeouts, private cwd and 
     plainBoth.annotationUnavailable();
     should(plainBoth.warnings.toArray()).eql([{ code: 'ANNOTATION_UNAVAILABLE', message: 'gene annotation (mongo) is unavailable; genes and ortholog flags are null' }]);
   });
+
+  it('with ctx.fatalOnMongoUnavailable, a timeout that escalates (repeated_timeouts, hung) is a fatal MONGO_UNAVAILABLE naming its cause; without the flag the run completes with ANNOTATION_UNAVAILABLE (ops-mongo-self-heal)', async () => {
+    const opts = { retryDelayMs: 0, mongoTimeoutMs: 20 };
+    const fatal = (ctx) => Object.assign(ctx, { fatalOnMongoUnavailable: true });
+    const TIMED_OUT = { code: 'ANNOTATION_UNAVAILABLE', message: 'gene annotation (mongo) queries timed out, also on retry; genes and ortholog flags are null', details: { cause: 'timeout' } };
+    const UNAVAILABLE = { code: 'ANNOTATION_UNAVAILABLE', message: 'gene annotation (mongo) is unavailable; genes and ortholog flags are null' };
+    const body = W.request({ mode: 'region', pairs: [pairP] });
+
+    // repeated_timeouts: jobs of one worker share its mongo handle; every overlap query hangs, and the third job in a
+    // row to time out ends the attempt
+    const hung = switchableMongo([]);
+    hung.state.hangOverlap = true;
+    const errors = [];
+    const logged = (ctx) => Object.assign(ctx, { log: { info() {}, warn() {}, error: (m) => errors.push(m) } });
+    should((await run(body, fatal(ctxOf({ mongo: hung.mongo }).ctx), opts)).warnings).eql([TIMED_OUT]);
+    should((await run(body, fatal(ctxOf({ mongo: hung.mongo }).ctx), opts)).warnings).eql([TIMED_OUT]);
+    const err = await run(body, logged(fatal(ctxOf({ mongo: hung.mongo }).ctx)), opts).then(() => null, (e) => e);
+    should(err).match({ code: 'MONGO_UNAVAILABLE', fatal: true, details: { cause: 'repeated_timeouts' } });
+    should(err.message).equal('gene annotation (mongo) is unavailable (cause: repeated_timeouts; genes queries timed out in 3 consecutive jobs)');
+    should(errors).have.length(1);
+    should(errors[0]).startWith('primers check: mongo genes queries repeatedly timed out (no answer for ');
+    // the same jobs without the flag complete, the third with the connection-failure warning
+    const plain = switchableMongo([]);
+    plain.state.hangOverlap = true;
+    should((await run(body, ctxOf({ mongo: plain.mongo }).ctx, opts)).warnings).eql([TIMED_OUT]);
+    should((await run(body, ctxOf({ mongo: plain.mongo }).ctx, opts)).warnings).eql([TIMED_OUT]);
+    const third = await run(body, ctxOf({ mongo: plain.mongo }).ctx, opts);
+    should(third.warnings).eql([UNAVAILABLE]);
+    should(third.specificity.pairs[0].on_target.genes).equal(null);
+
+    // hung: the first job's queries still hold 4 slots; the second job fills the fifth, and with a quiet time over its
+    // stuckMs (1 ms here) its timeout escalates
+    const stalled = switchableMongo([]);
+    stalled.state.hangOverlap = true;
+    should((await run(body, fatal(ctxOf({ mongo: stalled.mongo }).ctx), opts)).warnings).eql([TIMED_OUT]);
+    const job = new runInternal.CheckRun(body, fatal(ctxOf({ mongo: stalled.mongo }).ctx), opts);
+    job.annotator.stuckMs = 1;
+    const herr = await job.execute().then(() => null, (e) => e);
+    should(herr).match({ code: 'MONGO_UNAVAILABLE', fatal: true, details: { cause: 'hung' } });
+    should(herr.message).match(/^gene annotation \(mongo\) is unavailable \(cause: hung; no genes query answered for \d+ s with 5 of 5 query slots held\)$/);
+    should(job.annotator.escalation).match({ cause: 'hung', slotsHeld: 5, slots: 5, consecutiveTimedOutJobs: 2 });
+    const plainJob = new runInternal.CheckRun(body, ctxOf({ mongo: stalled.mongo }).ctx, opts);
+    plainJob.annotator.stuckMs = 1;
+    should((await plainJob.execute()).warnings).eql([UNAVAILABLE]);
+    should(plainJob.annotator.escalation).match({ cause: 'hung' });
+
+    // the transcriptome stage escalates the same way: the overlap queries answer (resetting the count), then the
+    // transcript → gene lookups hang, and with timeoutJobsBeforeRestart 1 that one timed-out job is already enough
+    const txHung = switchableMongo([]);
+    txHung.state.hangTranscripts = true;
+    const txJob = new runInternal.CheckRun(W.request({ mode: 'transcript', gene_id: 'G1', pairs: [{ id: 'P', left: P.L, right: P.R }] }),
+      logged(fatal(ctxOf({ mongo: txHung.mongo }).ctx)), opts);
+    txJob.annotator.timeoutJobsBeforeRestart = 1;
+    const terr = await txJob.execute().then(() => null, (e) => e);
+    should(terr).match({ code: 'MONGO_UNAVAILABLE', fatal: true, details: { cause: 'repeated_timeouts' } });
+    should(terr.message).equal('gene annotation (mongo) is unavailable (cause: repeated_timeouts; genes queries timed out in 1 consecutive jobs)');
+    should(txJob.annotator.escalation).match({ cause: 'repeated_timeouts', consecutiveTimedOutJobs: 1 });
+    should(errors).have.length(2); // the escalation of the repeated_timeouts job above, and this one
+  });
+
+  it('annotationUnavailable: an escalation is fatal with its cause in the message and details; plain mongoFailed keeps its message (ops-mongo-self-heal)', () => {
+    const job = (flag) => new runInternal.CheckRun(W.request({ mode: 'region', pairs: [pairP] }), flag ? Object.assign(ctxOf().ctx, { fatalOnMongoUnavailable: true }) : ctxOf().ctx, { retryDelayMs: 0 });
+    const hungEsc = { cause: 'hung', secondsWithoutAnswer: 312, slotsHeld: 5, slots: 5, consecutiveTimedOutJobs: 2 };
+    const hung = job(true);
+    Object.assign(hung.annotator, { unavailable: true, timedOut: true, mongoFailed: true, escalation: hungEsc });
+    const e1 = (() => { try { hung.annotationUnavailable(); } catch (e) { return e; } return null; })();
+    should(e1).match({ code: 'MONGO_UNAVAILABLE', fatal: true, details: { cause: 'hung' } });
+    should(e1.message).equal('gene annotation (mongo) is unavailable (cause: hung; no genes query answered for 312 s with 5 of 5 query slots held)');
+    const repeated = job(true);
+    Object.assign(repeated.annotator, { unavailable: true, timedOut: true, mongoFailed: true, escalation: { cause: 'repeated_timeouts', secondsWithoutAnswer: 95, slotsHeld: 5, slots: 5, consecutiveTimedOutJobs: 3 } });
+    should(() => repeated.annotationUnavailable()).throw({ code: 'MONGO_UNAVAILABLE', fatal: true, details: { cause: 'repeated_timeouts' }, message: 'gene annotation (mongo) is unavailable (cause: repeated_timeouts; genes queries timed out in 3 consecutive jobs)' });
+    const failed = job(true);
+    Object.assign(failed.annotator, { unavailable: true, mongoFailed: true });
+    const e2 = (() => { try { failed.annotationUnavailable(); } catch (e) { return e; } return null; })();
+    should([e2.code, e2.fatal, e2.message, e2.details]).eql(['MONGO_UNAVAILABLE', true, 'gene annotation (mongo) is unavailable', undefined]);
+    const plain = job(false);
+    Object.assign(plain.annotator, { unavailable: true, timedOut: true, mongoFailed: true, escalation: hungEsc });
+    plain.annotationUnavailable();
+    should(plain.warnings.toArray()).eql([{ code: 'ANNOTATION_UNAVAILABLE', message: 'gene annotation (mongo) is unavailable; genes and ortholog flags are null' }]);
+  });
 });

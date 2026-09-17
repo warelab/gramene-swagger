@@ -517,8 +517,14 @@ function createWorker(opts) {
       tmpdir: function () { return jobTmpdir(h); },
       // Mongo loss during the run must throw MONGO_UNAVAILABLE {fatal: true} (requeue + exit 75 via onFatal)
       // instead of finishing with ANNOTATION_UNAVAILABLE: the config lib never reconnects. A genes query that times
-      // out twice (check/annotate.js retries once; 45 s in all) does not throw: mongo is slow or hung, the two cannot
-      // be told apart, and the job finishes with ANNOTATION_UNAVAILABLE {cause: 'timeout'} without a restart.
+      // out twice (check/annotate.js retries once; 45 s in all) does not throw by itself: mongo is slow or hung, one
+      // timeout cannot tell them apart, and the job finishes with ANNOTATION_UNAVAILABLE {cause: 'timeout'}. The
+      // self-heal valve in check/annotate.js does throw it, as a lost connection, when such a timeout finds the
+      // process's genes queries hung (all 5 query slots held, none answered or failed for 5 min) or timing out in 3
+      // jobs in a row (no query succeeded in between): the fatal line then reads "fatal error MONGO_UNAVAILABLE
+      // (requeued): gene annotation (mongo) is unavailable (cause: hung; ...)" or "(cause: repeated_timeouts; ...)",
+      // the running jobs are requeued (each keeps the attempt it used, toward check.max_attempts; the escalating job
+      // fails with MONGO_UNAVAILABLE instead when that was its last attempt) and the restart brings fresh connections.
       fatalOnMongoUnavailable: true,
       log: jobLog,
       // Allow-list [cfg.blastn, cfg.blastdbcmd]; niced; SIGTERM then SIGKILL after 3 s on job abort.

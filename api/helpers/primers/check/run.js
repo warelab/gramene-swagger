@@ -33,9 +33,14 @@
 // connection level (annotator.mongoFailed: no collection or a non-timeout query error) and
 // ctx.fatalOnMongoUnavailable is true (the worker), run() throws err.code 'MONGO_UNAVAILABLE' with
 // err.fatal = true. A genes query that timed out on its retry too (annotator.timedOut; annotate.js retries a
-// timed-out query once with twice the budget: mongo slow, saturated or hung) is never fatal: run() adds warning
-// ANNOTATION_UNAVAILABLE with details {cause: 'timeout'} and completes. In every other case (no mongo handle, or the flag not set) it adds
-// warning ANNOTATION_UNAVAILABLE and completes.
+// timed-out query once with twice the budget: mongo slow, saturated or hung) is not fatal by itself: run() adds
+// warning ANNOTATION_UNAVAILABLE with details {cause: 'timeout'} and completes. The exception is annotate.js's
+// self-heal: when the timeout shows the handle's genes queries hung (all 5 query slots held, none answered or
+// failed for 5 min) or timing out in 3 jobs in a row, the annotator sets mongoFailed and annotator.escalation, and in
+// the worker run() throws the fatal MONGO_UNAVAILABLE with the cause in its message ('(cause: hung; ...)' or
+// '(cause: repeated_timeouts; ...)', the worker's fatal log line) and err.details {cause}, so the worker requeues its
+// running jobs and exits 75 and pm2 restarts it with fresh connections. In every other case (no mongo handle, or the
+// flag not set, escalated or not) it adds warning ANNOTATION_UNAVAILABLE and completes.
 //
 // Genotyping (genotyping spec §5.6-§5.9), only for a request with a genotyping block in gene or region mode:
 // before the reference stage, check/genotype.js validateSets re-derives the prepared variant and sets over
@@ -557,10 +562,20 @@ class CheckRun {
   // Called by annotateGenome (genome products) and groupCdna (cDNA subjects) when the annotator reports
   // available: false. Only mongoFailed is fatal (the worker exits 75 and retries the job after a restart). timedOut
   // is not: mongo did not answer a genes query within 3 x the budget (45 s), which a slow or saturated mongo and a
-  // hung one that keeps its connections open both give, and the job completes with ANNOTATION_UNAVAILABLE.
+  // hung one that keeps its connections open both give, and the job completes with ANNOTATION_UNAVAILABLE. A timeout
+  // that escalated (annotator.escalation: hung, or repeated_timeouts) has set mongoFailed, and its cause is named in
+  // the fatal error.
   annotationUnavailable() {
     const ann = this.annotator;
     if (this.ctx.fatalOnMongoUnavailable === true && ann.mongoFailed) {
+      const esc = ann.escalation;
+      if (esc) {
+        const why = esc.cause === 'hung'
+          ? 'no genes query answered for ' + esc.secondsWithoutAnswer + ' s with ' + esc.slotsHeld + ' of ' + esc.slots + ' query slots held'
+          : 'genes queries timed out in ' + esc.consecutiveTimedOutJobs + ' consecutive jobs';
+        throw codedError('MONGO_UNAVAILABLE', 'gene annotation (mongo) is unavailable (cause: ' + esc.cause + '; ' + why + ')',
+          { fatal: true, details: { cause: esc.cause } });
+      }
       throw codedError('MONGO_UNAVAILABLE', 'gene annotation (mongo) is unavailable', { fatal: true });
     }
     if (ann.timedOut && !ann.mongoFailed) {
