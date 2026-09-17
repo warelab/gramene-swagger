@@ -50,7 +50,9 @@ current behaviour.** These are the deltas from the sections below:
   - The transcript-to-gene fallback handles `_T<n>`, `.t<n>` and `.<n>.v<x>.<y>` ids.
 - **Worker:**
   - `BLAST_TIMEOUT` is not retried.
-  - If gene annotation fails while `ctx.fatalOnMongoUnavailable` is set, the run throws `MONGO_UNAVAILABLE` (`fatal`). The worker requeues the job and exits 75.
+  - If gene annotation fails at the connection level (no collection, or a query error) while `ctx.fatalOnMongoUnavailable` is set, the run throws `MONGO_UNAVAILABLE` (`fatal`). The worker requeues the job and exits 75.
+  - A genes query that times out is retried once with twice the budget, and the first attempt stays in the race. A second timeout is not fatal: the job completes with `ANNOTATION_UNAVAILABLE` (`details.cause: "timeout"`).
+  - At most 5 genes queries per mongo handle are outstanding on the driver. A timed-out query keeps its slot until mongo answers it, so abandoned queries cannot pile up on the connections across jobs.
 - **Security:** BLAST+ and Primer3 run with `NCBI_DONT_USE_NCBIRC=1` in private 0700 working directories, never `/tmp`.
 - **Design:**
   - `n_mask` designs recompute `product_tm` on the unmasked template (Primer3 `long_seq_tm`).

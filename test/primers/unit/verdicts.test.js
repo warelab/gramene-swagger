@@ -364,18 +364,26 @@ describe('run() on a synthetic reference (fake BLAST, real bgzip FASTA re-alignm
   });
 });
 
-// Mongo whose overlap or transcript queries can be switched to fail mid-job ('Topology was destroyed').
+// Mongo whose overlap or transcript queries can be switched to fail mid-job ('Topology was destroyed'), or to
+// hang (never answer, so the annotator's query timeout and its one retry expire).
 function switchableMongo(docs) {
   const base = fakeMongo(docs || []);
-  const state = { failOverlap: false, failTranscripts: false };
+  const state = { failOverlap: false, failTranscripts: false, hangOverlap: false, hangTranscripts: false, hung: 0 };
   const failing = () => {
     const cursor = { limit: () => cursor, toArray: () => Promise.reject(new Error('Topology was destroyed')) };
+    return cursor;
+  };
+  const hanging = () => {
+    state.hung++;
+    const cursor = { limit: () => cursor, toArray: () => new Promise(() => {}) };
     return cursor;
   };
   const collection = {
     find(query, options) {
       const overlap = Object.prototype.hasOwnProperty.call(query, 'location.map');
-      return (overlap ? state.failOverlap : state.failTranscripts) ? failing() : base.collection.find(query, options);
+      if (overlap ? state.failOverlap : state.failTranscripts) return failing();
+      if (overlap ? state.hangOverlap : state.hangTranscripts) return hanging();
+      return base.collection.find(query, options);
     }
   };
   return { state, mongo: { genes: { mongoCollection: async () => collection } } };
@@ -532,5 +540,71 @@ describe('run(): stringency, identical primers, BLAST timeouts, private cwd and 
     fatal(g.ctx);
     const ge = await run(W.request({ mode: 'region', checks: ['pangenome'], genomes: ['pan1'], pairs: [pairP] }), g.ctx, { retryDelayMs: 0 }).then(() => null, (e) => e);
     should(ge).match({ code: 'MONGO_UNAVAILABLE', fatal: true });
+  });
+
+  it('with ctx.fatalOnMongoUnavailable, genes queries that time out twice complete the run with ANNOTATION_UNAVAILABLE in every stage (ops-mongo-timeout-nonfatal)', async () => {
+    const opts = { retryDelayMs: 0, mongoTimeoutMs: 20 };
+    const fatal = (ctx) => Object.assign(ctx, { fatalOnMongoUnavailable: true });
+    const TIMED_OUT = { code: 'ANNOTATION_UNAVAILABLE', message: 'gene annotation (mongo) queries timed out, also on retry; genes and ortholog flags are null', details: { cause: 'timeout' } };
+    const body = W.request({ mode: 'region', pairs: [pairP] });
+
+    // reference stage: every overlap query hangs; the verdicts are those of a run with a working mongo
+    const hung = switchableMongo([]);
+    hung.state.hangOverlap = true;
+    const r = await run(body, fatal(ctxOf({ mongo: hung.mongo }).ctx), opts);
+    should(r.warnings).eql([TIMED_OUT]);
+    should(hung.state.hung).equal(4); // the on-target and the off-target product, dispatched together, each retried once
+    const ok = await run(body, fatal(ctxOf().ctx), opts);
+    should(ok.warnings).eql([]);
+    should(r.specificity.pairs.map((p) => p.verdict)).eql(ok.specificity.pairs.map((p) => p.verdict));
+    should(ok.specificity.pairs[0].on_target.genes).eql([]);
+    should(r.specificity.pairs[0].on_target.genes).equal(null);
+    should(r.specificity.pairs[0].off_targets.every((a) => a.genes === null)).be.true();
+    // the same timeouts without the flag give the same warning
+    const plain = switchableMongo([]);
+    plain.state.hangOverlap = true;
+    should((await run(body, ctxOf({ mongo: plain.mongo }).ctx, opts)).warnings).eql([TIMED_OUT]);
+
+    // a non-timeout query error in the same stage is still fatal
+    const broken = switchableMongo([]);
+    broken.state.failOverlap = true;
+    should(await run(body, fatal(ctxOf({ mongo: broken.mongo }).ctx), opts).then(() => null, (e) => e)).match({ code: 'MONGO_UNAVAILABLE', fatal: true });
+
+    // transcriptome stage: overlaps work, the transcript → gene lookups hang (groups fall back to stripped ids)
+    const txBody = W.request({ mode: 'transcript', gene_id: 'G1', pairs: [{ id: 'P', left: P.L, right: P.R }] });
+    const tx = switchableMongo([]);
+    tx.state.hangTranscripts = true;
+    const t = await run(txBody, fatal(ctxOf({ mongo: tx.mongo }).ctx), opts);
+    should(t.warnings).eql([TIMED_OUT]); // and no TRANSCRIPT_GENE_UNMAPPED: nothing is known to be unmapped
+    should(t.transcriptome.pairs[0]).match({ verdict: 'specific', on_target: { gene_id: 'G1' } });
+    should(t.specificity.pairs[0].off_targets.map((a) => a.genes)).eql([[], []]); // the genome stage was annotated
+    const txBroken = switchableMongo([]);
+    txBroken.state.failTranscripts = true;
+    should(await run(txBody, fatal(ctxOf({ mongo: txBroken.mongo }).ctx), opts).then(() => null, (e) => e)).match({ code: 'MONGO_UNAVAILABLE', fatal: true });
+
+    // pan-genome stage: overlap queries start hanging after the reference stage
+    const pan = switchableMongo([]);
+    const g = ctxOf({ mongo: pan.mongo, onProgress: (pr) => { if (pr.stage === 'pangenome') pan.state.hangOverlap = true; } });
+    const pr = await run(W.request({ mode: 'region', checks: ['pangenome'], genomes: ['pan1'], pairs: [pairP] }), fatal(g.ctx), opts);
+    should(pr.warnings).eql([TIMED_OUT]);
+    should(pr.specificity.pairs[0].on_target.genes).eql([]);
+    should(pr.pangenome.pairs[0].genomes[0]).match({ system_name: 'pan1', status: 'single_perfect', primary: { genes: null } });
+  });
+
+  it('annotationUnavailable: mongoFailed stays fatal when a timeout happened too; a timeout alone is a warning (ops-mongo-timeout-nonfatal)', () => {
+    const job = () => new runInternal.CheckRun(W.request({ mode: 'region', pairs: [pairP] }), Object.assign(ctxOf().ctx, { fatalOnMongoUnavailable: true }), { retryDelayMs: 0 });
+    const both = job();
+    Object.assign(both.annotator, { unavailable: true, timedOut: true, mongoFailed: true });
+    should(() => both.annotationUnavailable()).throw({ code: 'MONGO_UNAVAILABLE', fatal: true });
+    const timedOut = job();
+    Object.assign(timedOut.annotator, { unavailable: true, timedOut: true });
+    timedOut.annotationUnavailable();
+    timedOut.annotationUnavailable(); // deduplicated
+    should(timedOut.warnings.toArray()).eql([{ code: 'ANNOTATION_UNAVAILABLE', message: 'gene annotation (mongo) queries timed out, also on retry; genes and ortholog flags are null', details: { cause: 'timeout' } }]);
+    // outside the worker (no fatal flag) a connection failure is not reported as a timeout, even after a timeout
+    const plainBoth = new runInternal.CheckRun(W.request({ mode: 'region', pairs: [pairP] }), ctxOf().ctx, { retryDelayMs: 0 });
+    Object.assign(plainBoth.annotator, { unavailable: true, timedOut: true, mongoFailed: true });
+    plainBoth.annotationUnavailable();
+    should(plainBoth.warnings.toArray()).eql([{ code: 'ANNOTATION_UNAVAILABLE', message: 'gene annotation (mongo) is unavailable; genes and ortholog flags are null' }]);
   });
 });

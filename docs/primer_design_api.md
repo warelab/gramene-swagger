@@ -470,7 +470,8 @@ POST ─► queued ─► running ─► done   (results kept 24 h)
   design and genomes keep working. The worker runs nothing without a claimed slot, so checks fail closed.
 - **Job error codes:** `REFERENCE_BLAST_FAILED` (BLAST failed twice, or timed out once: `details {target, cause}`;
   stderr tail with paths reduced to basenames), `NO_BLASTDB`, `JOB_TIMEOUT`, `RESULT_TOO_LARGE {bytes, limit}`,
-  `WORKER_LOST`, `MONGO_UNAVAILABLE` (mongo failed during the run on the job's last attempt; see Operations),
+  `WORKER_LOST`, `MONGO_UNAVAILABLE` (a mongo connection failure during the run on the job's last attempt; genes
+  query timeouts are not fatal; see Operations),
   `CHECK_FAILED`.
 
 ### Cost guard
@@ -698,8 +699,14 @@ size_min, size_max, likelihood, left_mm, right_mm, left_3p_mm, right_3p_mm, left
 terminal_mismatch, approx}`. `unlikely[]` appears on a pair only with `include_unlikely`.
 
 Result warnings: `NO_FASTA_FOR_REALIGN` (mismatch counts are lower bounds, `approx: true`), `ANNOTATION_UNAVAILABLE`
-(mongo was unreachable: `genes: null`, `ortholog: null`; the worker instead fails the attempt with `MONGO_UNAVAILABLE`
-and retries it after a restart, so a finished job carries this warning only when run outside the worker),
+(gene annotation could not be read from mongo from the failure to the end of the job: the reference or genomes whose
+annotation finished before it keep their genes, the genome products annotated from then on have `genes: null` and
+`ortholog: null`, and cDNA products whose transcripts were not mapped yet are grouped by transcript id without the
+isoform suffix. With `details: {cause: "timeout"}` a genes
+query timed out twice, so mongo did not answer it within 45 s: it was slow, saturated or hung (see Operations), and
+the worker finishes the job with this warning. A mongo connection failure makes the worker fail the attempt with
+`MONGO_UNAVAILABLE` and retry it after a restart instead, so a finished job carries the warning without `details`
+only when run outside the worker),
 `TRANSCRIPT_GENE_UNMAPPED`, `PANGENOME_TRANSCRIPT_MODELS_ONLY`,
 and assembly warnings; genotyping jobs can add the
 [genotyping results warnings](#results-warnings). Submit warnings: `EXPECTED_IGNORED`, `MAX_PRODUCT_SIZE_RAISED`, `GENOMES_IGNORED`, and the
@@ -3031,11 +3038,62 @@ pm2 save
 - The worker holds a per-site lock in Redis (a second worker for the same site waits), exits with **75** when mongo is
   unavailable (gramene-mongodb-config never reconnects) and lets pm2 restart it, and on SIGTERM/SIGINT requeues its
   running jobs and exits within a second (pm2's default kill timeout is enough).
-- Mongo failing **during** a check (no collection, a query error or a 15 s timeout, in any stage) also ends in exit
-  75: the job fails internally with `MONGO_UNAVAILABLE`, is requeued at the front of its queue, and the restarted
-  worker runs it again, so no check finishes with `ANNOTATION_UNAVAILABLE` because of an outage. A job that is still
-  hit on its last attempt (`check.max_attempts`, 2) ends with error `MONGO_UNAVAILABLE` (1 h error TTL; a re-POST runs
-  it again) instead of being requeued forever.
+- Mongo **connection** failures during a check (no genes collection, including a 15 s timeout getting it, or a genes
+  query that fails with an error, in any stage) also end in exit 75: the job fails internally with `MONGO_UNAVAILABLE`,
+  is requeued at the front of its queue, and the restarted worker runs it again, so no check finishes with
+  `ANNOTATION_UNAVAILABLE` because mongo refused or dropped its connections (a mongod that hangs is different: see the
+  next bullet). A job that is still hit on its last attempt (`check.max_attempts`, 2) ends with error
+  `MONGO_UNAVAILABLE` (1 h error TTL; a re-POST runs it again) instead of being requeued forever. The driver holds
+  queries while it reconnects (30 attempts, 1 s apart), so after mongod stops or restarts, the job's log lines (prefixed
+  `primers worker [<site_key>] job <id>`) can first show the retry line of the next bullet, then, about 30 s after the
+  loss, `primers check: annotation unavailable: failed to reconnect after 30 attempts with interval 1000 ms` (or
+  another driver error, such as `Topology was destroyed`), then
+  `primers worker: fatal MONGO_UNAVAILABLE; requeueing running jobs and exiting`. A mongod that is back within those
+  30 s answers the held queries and the job carries on. A retry line alone therefore does not prove that a query was
+  slow.
+- A genes query that **times out** never exits the worker. The worker sends at most 5 genes queries to mongo at a time
+  (the driver's 5 connections), and the others wait in the worker, in order. Each query has a 15 s budget counted from
+  dispatch, so that wait counts. A query that runs out of time is retried once, with another 30 s: the first attempt
+  keeps running and, if it had been sent, the query is sent once more; the first to settle decides (an error from
+  either is a connection failure). The job log shows
+  `primers check: mongo genes query timed out after 15000 ms; retrying it once with a 30000 ms budget`, or, for a query
+  that had not been sent yet,
+  `primers check: mongo genes query timed out after 15000 ms waiting for one of the 5 genes query slots; waiting once more with a 30000 ms budget`.
+  If the retry gets an answer, nothing else changes. If it also times out, the log shows
+  `primers check: annotation unavailable: mongo genes query timed out after 30000 ms`, and the job stops querying
+  mongo and completes with `ANNOTATION_UNAVAILABLE`, `details: {cause: "timeout"}`.
+  - **What changes in such a result.** Genome-target specificity verdicts and pan-genome statuses do not use genes and
+    are unchanged. From the failure on, `genes` and `ortholog` are null, so in gene mode the pan-genome `primary`
+    product and the genotyping allele calls, which prefer annotated orthologs, may differ. In transcript mode, cDNA
+    products whose transcripts were not mapped yet are grouped by transcript id without the isoform suffix, and the
+    cDNA-target verdicts and statuses count those groups. The reference or genomes whose annotation finished before the
+    failure keep their genes.
+  - **Slow or hung.** A timed-out query is not cancelled on the server. It keeps its slot until mongo answers it, so
+    the queries of later jobs wait in the worker instead of piling up behind it on mongo's connections. A mongod that
+    stops answering but keeps its connections open (a stalled disk, `SIGSTOP`, memory pressure) looks exactly like a
+    slow one: every check then waits about 45 s for mongo and completes with `{cause: "timeout"}`, and the worker does
+    not restart (the driver gives up on such connections only after its 6 min socket timeout, and a query still
+    running on one then fails as a connection failure). When these warnings recur, first check that mongod answers:
+
+    ```bash
+    timeout 10 mongosh --quiet --eval 'db.adminCommand({ping: 1})'
+    timeout 20 mongosh --quiet sorghum11 --eval 'db.genes.find({_id: "SORBI_3005G072200"}, {_id: 1}).maxTimeMS(5000).toArray()'
+    ```
+
+    If it does not answer, restart mongod. If it answers, check the genes indexes (overlap queries use
+    `{location.map, location.region, location.start, location.end}`) and the mongo host's disk. If all of that is
+    fine and checks still time out, `pm2 restart sorghum_primers11` drops the worker's connections.
+  - **Cached for 24 h.** A check that completed this way is a normal `done` job: identical requests share it and get
+    the degraded result for 24 h. Once mongo is healthy, drop each affected job (its id is in the log prefix) so that
+    the next POST of that request runs it again; until then `GET /primers/check/<id>` answers `404 UNKNOWN_JOB`:
+
+    ```bash
+    K=primers:sorghum_v11:sorghum11
+    redis-cli -p 6380 -n 1 DEL $K:job:<id> $K:result:<id> $K:partial:<id>
+    redis-cli -p 6380 -n 1 ZREM $K:finished <id>
+    ```
+
+  - A query of the same job that fails with an error, not a timeout, is still fatal (exit 75), also after a timeout.
 - **BLAST+ and Primer3 isolation.** `blastn`, `blastdbcmd` (worker and design-time megablast mask) and `primer3_core`
   run with `PATH=/usr/bin:/bin` and `NCBI_DONT_USE_NCBIRC=1`, in a private `0700` `mkdtemp` directory under
   `primers.tmp_dir` that is removed afterwards, never with `/tmp` (or any shared directory) as their working directory.

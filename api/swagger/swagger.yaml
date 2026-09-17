@@ -2422,7 +2422,7 @@ definitions:
     properties:
       code: { type: string }
       message: { type: string }
-      details: { type: object, description: "code-specific; present on every genotyping and variants warning" }
+      details: { type: object, description: "code-specific; present on every genotyping and variants warning, and as {cause: timeout} on a check's ANNOTATION_UNAVAILABLE when genes queries timed out" }
   PrimerBlock:
     type: object
     properties:
@@ -3105,7 +3105,7 @@ definitions:
         type: object
         x-nullable: true
         properties:
-          code: { type: string, description: "REFERENCE_BLAST_FAILED (details.cause, e.g. BLAST_TIMEOUT), NO_BLASTDB, JOB_TIMEOUT, RESULT_TOO_LARGE, WORKER_LOST, MONGO_UNAVAILABLE (mongo failed on the last attempt), CHECK_FAILED" }
+          code: { type: string, description: "REFERENCE_BLAST_FAILED (details.cause, e.g. BLAST_TIMEOUT), NO_BLASTDB, JOB_TIMEOUT, RESULT_TOO_LARGE, WORKER_LOST, MONGO_UNAVAILABLE (a mongo connection failure on the last attempt; genes query timeouts are not fatal), CHECK_FAILED" }
           message: { type: string }
           details: { type: object }
   PrimerCheckAmplicon:

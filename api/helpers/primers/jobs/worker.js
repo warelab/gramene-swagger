@@ -516,7 +516,9 @@ function createWorker(opts) {
       },
       tmpdir: function () { return jobTmpdir(h); },
       // Mongo loss during the run must throw MONGO_UNAVAILABLE {fatal: true} (requeue + exit 75 via onFatal)
-      // instead of finishing with ANNOTATION_UNAVAILABLE: the config lib never reconnects.
+      // instead of finishing with ANNOTATION_UNAVAILABLE: the config lib never reconnects. A genes query that times
+      // out twice (check/annotate.js retries once; 45 s in all) does not throw: mongo is slow or hung, the two cannot
+      // be told apart, and the job finishes with ANNOTATION_UNAVAILABLE {cause: 'timeout'} without a restart.
       fatalOnMongoUnavailable: true,
       log: jobLog,
       // Allow-list [cfg.blastn, cfg.blastdbcmd]; niced; SIGTERM then SIGKILL after 3 s on job abort.

@@ -2,7 +2,9 @@
 
 // Fake gramene-mongodb-config for annotate/run tests. The collection evaluates the query subset the
 // check uses: equality, $in, $lte, $gte, dotted paths through arrays; find(query, {fields}).limit(n).toArray().
-// fakeMongo(docs, {fail, hang, noCollection}) → { mongo, collection, calls: [{query, options, limit}] }
+// fakeMongo(docs, {fail, hang, noCollection, script}) → { mongo, collection, calls: [{query, options, limit, n}] }
+// script(call) (per find, n = its 0-based index) returns 'ok', 'hang', 'fail', an Error (rejected with it) or a
+// promise (returned by toArray as is); it replaces fail/hang.
 
 function valuesAt(doc, path) {
   let cur = [doc];
@@ -43,7 +45,7 @@ function fakeMongo(docs, opts) {
   const calls = [];
   const collection = {
     find(query, options) {
-      const call = { query, options, limit: null };
+      const call = { query, options, limit: null, n: calls.length };
       calls.push(call);
       const cursor = {
         limit(n) {
@@ -51,8 +53,11 @@ function fakeMongo(docs, opts) {
           return cursor;
         },
         toArray() {
-          if (o.hang) return new Promise(() => {});
-          if (o.fail) return Promise.reject(new Error('fake mongo failure'));
+          const how = o.script ? o.script(call) : o.hang ? 'hang' : o.fail ? 'fail' : 'ok';
+          if (how && typeof how.then === 'function') return how;
+          if (how instanceof Error) return Promise.reject(how);
+          if (how === 'hang') return new Promise(() => {});
+          if (how === 'fail') return Promise.reject(new Error('fake mongo failure'));
           const out = docs.filter((d) => matches(d, query));
           return Promise.resolve(call.limit ? out.slice(0, call.limit) : out);
         }
