@@ -1,0 +1,39 @@
+{
+  "mode": "region",
+  "system_name": "sorghum_bicolor",
+  "region": {
+    "region": "1",
+    "start": 11080,
+    "end": 15099,
+    "strand": -1
+  },
+  "target": [
+    499,
+    50
+  ],
+  "included": [
+    100,
+    3000
+  ],
+  "excluded": [
+    [
+      1000,
+      40
+    ]
+  ],
+  "params": {
+    "min_size": 19,
+    "max_size": 22,
+    "min_tm": 58,
+    "max_tm": 61,
+    "min_gc": 40,
+    "max_gc": 60,
+    "max_tm_diff": 2,
+    "product_size_ranges": [
+      [
+        200,
+        300
+      ]
+    ]
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "source": "recorded 2026-09-15 over HTTP from the genotyping dev API on 127.0.0.1:50112 (worktree HEAD 55fbb5f, live Ensembl REST release 115)",
+  "request": {"method":"GET","path":"/sorghum_v11/primers/variants/rs0000000001?system_name=sorghum_bicolor"},
+  "status": 404,
+  "response": {"message":"unknown variant rs0000000001 for sorghum_bicolor","code":"UNKNOWN_VARIANT","details":{"id":"rs0000000001","system_name":"sorghum_bicolor"}}
+}

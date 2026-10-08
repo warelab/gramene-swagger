@@ -1,0 +1,18 @@
+{
+  "system_name": "sorghum_bicolor",
+  "mode": "region",
+  "checks": ["specificity", "pangenome"],
+  "pairs": [
+    { "id": "S1_REF", "left": "AGCTTCTCTAAGTGGTTATCCGA", "right": "ATCTTTGACTAGCGAGAAATTCAG", "expected": { "region": "1", "start": 11068, "end": 11132 } },
+    { "id": "S1_ALT", "left": "AGCTTCTCTAAGTGGTTATCCGA", "right": "ATCTTTGACTAGCGAGAAATTCAT", "expected": { "region": "1", "start": 11068, "end": 11132 } },
+    { "id": "S2_REF", "left": "GGTTATCCGAATATAGTCATACTCTATTC", "right": "TCTTTGTCTACTGAGAAATCCAGA", "expected": { "region": "1", "start": 11081, "end": 11172 } },
+    { "id": "S2_ALT", "left": "GGTTATCCGAATATAGTCATACTCTATTA", "right": "TCTTTGTCTACTGAGAAATCCAGA", "expected": { "region": "1", "start": 11081, "end": 11172 } }
+  ],
+  "genotyping": {
+    "variant": { "region": "1", "position": 11109, "ref": "C", "alt": "A" },
+    "sets": [
+      { "id": "S1", "ref_pair": "S1_REF", "alt_pair": "S1_ALT" },
+      { "id": "S2", "ref_pair": "S2_REF", "alt_pair": "S2_ALT" }
+    ]
+  }
+}

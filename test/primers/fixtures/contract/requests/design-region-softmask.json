@@ -1,0 +1,12 @@
+{
+  "mode": "region",
+  "system_name": "sorghum_tx436pac",
+  "region": {
+    "region": "4",
+    "start": 7547610,
+    "end": 7564601,
+    "strand": 1
+  },
+  "avoid_repeats": true,
+  "repeat_mask_mode": "n_mask"
+}

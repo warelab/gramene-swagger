@@ -1,0 +1,6 @@
+{
+  "method": "GET",
+  "path": "/primers/variants",
+  "query": { "system_name": "sorghum_bicolor", "region": "1", "start": "11180", "end": "11290" },
+  "expect": "valid"
+}

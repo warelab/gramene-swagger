@@ -1,0 +1,30 @@
+{
+  "about": "Genotyping spec §7.2 C1: jobs.jobId(norm.request, norm.dbs, check.ALGORITHM_VERSION) of each check-*.json request fixture that predates the feature, normalized offline with the stubs of test/primers/tools/record_compat.js. request_sha256 is sha256(canonicalJSON(body)) of the body each id was recorded from. Re-record only deliberately.",
+  "algorithm_version": "2",
+  "ids": {
+    "check-gene-pangenome-all.json": "30662bda7ef0c8931820a50599542470",
+    "check-gene-pangenome-subset.json": "b8df1491d874fa7b6abd553be736bc7a",
+    "check-gene-specificity.json": "97f2602d14b5eae6c8f4465a6b0833c5",
+    "check-gene-three-pairs.json": "35ed5e67240e9a8d669483d5eae9b4b2",
+    "check-region-large-expected.json": "e2d93e13e43446e617520a9e2435e108",
+    "check-region-params.json": "c12b9ff893f90d70ef1ded39bc276a0c",
+    "check-sequence-raised.json": "6afbed5653411b9a1f963032fbee889d",
+    "check-sequence-sensitivity.json": "9c4028b53e73b81ea737ef6de870fc9f",
+    "check-ten-pairs.json": "88ec9918728124aab8f1aea6e7948d05",
+    "check-transcript-pangenome.json": "52202d7acc2984b1c68f70f488f65285",
+    "check-transcript.json": "aa885b10798d3db17217af638acae2ec"
+  },
+  "request_sha256": {
+    "check-gene-pangenome-all.json": "992cc15e65e808dc5b354ccee2f5111c85a741dcdf8d0e0851fd99c57a54d690",
+    "check-gene-pangenome-subset.json": "b3d2f69c9ee85cb472c6cdbcc368c46363bcdaabd5e568550d60a38dca3dd8dd",
+    "check-gene-specificity.json": "89be4010af0ec19578ddc4cd3cfe07cea66a9a516cf41a37d2977bb68b729162",
+    "check-gene-three-pairs.json": "5fa8a0d790974c4565b8d65432f2c49a5ddd89a2774cd5fa7f7bf9e8a35fb372",
+    "check-region-large-expected.json": "751ed189e01bc6952bc13990bdccfdd00b7932363bb610d4436fa89b1f9600e6",
+    "check-region-params.json": "8989dcee7131e39de50ee45c0f0ba3e3a2bd08a1c3e6bc08150b26e4708c6f23",
+    "check-sequence-raised.json": "5981f11499dace4982af2ef2792d4bf5ce2abe09d1a6bae3c19bb9fda4d27f09",
+    "check-sequence-sensitivity.json": "6783abe3b8aa9ba715a0cd097f9ad3cfec4b67a3d985e8f6309a7530830b137e",
+    "check-ten-pairs.json": "5a0b8166bc9a5a20cf4e4a99a18194b182f1dc8302b92c43dc3ca43d446a6612",
+    "check-transcript-pangenome.json": "a89777db985492ffca192167b5850ac5f0478e5c098f01500a6f395899dfdefe",
+    "check-transcript.json": "4d48492519acc02ae30be37379ac1d3321682c34074a245d584e3e32010526ef"
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "mode": "transcript",
+  "gene_id": "SORBI_3004G087700",
+  "transcript_id": "SORBI_3004G087700.3",
+  "junction_spanning": true,
+  "params": {
+    "opt_size": 21,
+    "min_size": 19,
+    "max_size": 26,
+    "opt_tm": 61,
+    "min_tm": 59,
+    "max_tm": 63,
+    "opt_gc": 50,
+    "min_gc": 40,
+    "max_gc": 60,
+    "max_tm_diff": 1.5,
+    "max_poly_x": 3,
+    "gc_clamp": 1,
+    "max_end_stability": 9,
+    "max_ns": 1,
+    "salt_monovalent": 50,
+    "salt_divalent": 3,
+    "dntp_conc": 0.8,
+    "dna_conc": 250,
+    "num_return": 20,
+    "min_3_prime_overlap_of_junction": 5,
+    "min_5_prime_overlap_of_junction": 8,
+    "product_size_ranges": [
+      [
+        80,
+        120
+      ],
+      [
+        120,
+        200
+      ]
+    ]
+  }
+}

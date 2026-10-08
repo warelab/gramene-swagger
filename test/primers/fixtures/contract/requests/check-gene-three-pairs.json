@@ -1,0 +1,40 @@
+{
+  "system_name": "sorghum_bicolor",
+  "mode": "gene",
+  "gene_id": "SORBI_3004G087700",
+  "checks": [
+    "specificity"
+  ],
+  "pairs": [
+    {
+      "id": "P1",
+      "left": "GATCGACAATCCGACGATAGAAG",
+      "right": "GTGAACATCATGCTGCCCGATG",
+      "expected": {
+        "region": "4",
+        "start": 7422190,
+        "end": 7422843
+      }
+    },
+    {
+      "id": "P2",
+      "left": "GGACAGCTCCACAACATATCAG",
+      "right": "GGACATTTGAAGCCCATGGCC",
+      "expected": {
+        "region": "4",
+        "start": 7423537,
+        "end": 7423746
+      }
+    },
+    {
+      "id": "P3",
+      "left": "GATATCAGTGGAATCATAAGACCG",
+      "right": "CATCGATATCAGGATCTGGCTT",
+      "expected": {
+        "region": "4",
+        "start": 7422482,
+        "end": 7423061
+      }
+    }
+  ]
+}

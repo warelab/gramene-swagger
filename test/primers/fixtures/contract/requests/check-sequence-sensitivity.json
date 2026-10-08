@@ -1,0 +1,24 @@
+{
+  "system_name": "sorghum_bicolor",
+  "mode": "sequence",
+  "checks": [
+    "specificity"
+  ],
+  "pairs": [
+    {
+      "id": "P1",
+      "left": "GGACAGATCCACATCATATC",
+      "right": "GGACATTTGAAGCCCATGGCC"
+    },
+    {
+      "id": "P2",
+      "left": "GGACAGCTCCACAACATTCAG",
+      "right": "GGACATTTGAAGCCCATGGCC"
+    },
+    {
+      "id": "P3",
+      "left": "CGACGAGGAGGCGCTGCGATG",
+      "right": "GGACATTTGAAGCCCATGGCC"
+    }
+  ]
+}

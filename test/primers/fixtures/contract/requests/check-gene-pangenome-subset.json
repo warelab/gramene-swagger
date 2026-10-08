@@ -1,0 +1,26 @@
+{
+  "system_name": "sorghum_bicolor",
+  "mode": "gene",
+  "gene_id": "SORBI_3004G087700",
+  "checks": [
+    "specificity",
+    "pangenome"
+  ],
+  "genomes": [
+    "sorghum_353",
+    "sorghum_grassl",
+    "sorghum_leoti"
+  ],
+  "pairs": [
+    {
+      "id": "P3",
+      "left": "GATATCAGTGGAATCATAAGACCG",
+      "right": "CATCGATATCAGGATCTGGCTT",
+      "expected": {
+        "region": "4",
+        "start": 7422482,
+        "end": 7423061
+      }
+    }
+  ]
+}

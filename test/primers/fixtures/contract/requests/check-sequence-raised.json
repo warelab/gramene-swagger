@@ -1,0 +1,17 @@
+{
+  "system_name": "sorghum_bicolor",
+  "mode": "sequence",
+  "checks": [
+    "specificity"
+  ],
+  "params": {
+    "max_product_size": 6000
+  },
+  "pairs": [
+    {
+      "id": "P1",
+      "left": "ACGTACGTACGTACGTACGT",
+      "right": "TTGCATGCATGCATGCATGC"
+    }
+  ]
+}

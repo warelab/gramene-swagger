@@ -1,0 +1,649 @@
+'use strict';
+
+// Annotation of check results from mongo `genes` (spec §B.9, §B.11).
+//
+//   genome amplicons  → overlapping genes, one indexed query per distinct product
+//                        {location.map, location.region, location.start ∈ [start-1 Mb, end], location.end ≥ start}
+//                        at most `maxAnnotated` (200) distinct products per task
+//   cDNA subjects     → gene id: `_id` lookup of the id without its isoform suffix (stripIsoform: _T<n>,
+//                        .t<n>, .<n>.v<x>.<y> → .v<x>.<y>, else .<n>; indexed, verified against
+//                        gene_structure.transcripts), then the spec query
+//                        {taxon_id, 'gene_structure.transcripts.id': {$in}} batched by 500 for the rest;
+//                        still unmapped → own gene (suffix stripped), warning TRANSCRIPT_GENE_UNMAPPED
+//   groups             → likely cDNA amplicons grouped by (gene_id, orientation), isoforms collapsed
+//
+// Query slots: every genes query (overlaps and transcript → gene lookups) takes one of MAX_IN_FLIGHT (5, the
+// driver's default poolSize) slots shared by all annotators of one mongo handle (in the worker, the process-wide
+// gramene-mongodb-config), so at most 5 genes queries are outstanding on the driver; the rest wait here, in order.
+// A query keeps its slot until the driver settles it, also after it timed out here: a timed-out query is not
+// cancelled on the server, and once its 5 connections are busy driver 2.2 pipelines further ops onto them, where
+// they would wait behind the abandoned queries and that backlog would outlive the job. A query still waiting for a
+// slot is never sent once its caller gave up on it or the annotator became unavailable.
+//
+// Query timeouts: each query has a timeoutMs budget (15 s) counted from dispatch, so waiting for a slot counts. A
+// query that times out (MONGO_TIMEOUT) is retried once, with a warn line, counted in timeoutRetries: for another
+// 2 x timeoutMs the first attempt stays in the race and, when it had been sent, the same query is sent once more
+// (it waits for a slot like any query, and is not sent if the first attempt answers meanwhile); whichever attempt
+// settles first decides, an error included. A first attempt that was still waiting for a slot is not re-sent: it
+// keeps its place and the extra time, and the warn line says so. No retry once the annotator is already
+// unavailable: overlaps() would discard the result, and transcriptGenes() reports that genome available: false
+// without its mapping.
+//
+// Mongo unavailable: the annotator marks itself unavailable for the rest of the job, genes stay null and the
+// caller (run.js annotationUnavailable) decides, from two flags that can both be set in one job:
+//   timedOut     a query timed out again on its retry: mongo did not answer within 3 x timeoutMs (45 s) because it
+//                is slow, saturated or hung (a stalled mongod that keeps its connections open looks the same), so
+//                run.js completes the job with warning ANNOTATION_UNAVAILABLE (details.cause 'timeout'), also in
+//                the worker, unless the timeout escalates (Self-heal, below);
+//   mongoFailed  a supplied mongo handle failed at the connection level (no collection, including a
+//                mongoCollection() timeout, or any non-timeout query error), or a timeout escalated: the worker
+//                fails the job with a fatal MONGO_UNAVAILABLE (requeue + exit 75); elsewhere the caller adds
+//                ANNOTATION_UNAVAILABLE.
+// Without a mongo handle neither flag is set (ANNOTATION_UNAVAILABLE).
+//
+// Self-heal: a timed-out query keeps its slot until mongo answers it. On a mongod that hangs with its connections
+// open, driver 2.2.29 fails the stuck queries only at its 6 min socket timeout (MongoClient's default socketTimeoutMS
+// 360000), with errors no job is still waiting for, and reconnects; queries on the new connections hang the same way
+// (checked through a proxy). Such a hang would therefore leave every later job of the worker waiting for a slot and
+// completing with {cause: 'timeout'} until someone restarts the worker. Per mongo handle, next to its slots
+// (HandleState), the annotators keep
+//   lastSettledAt            when a genes query on the handle last settled (answered or failed); the creation of
+//                            the handle state (its first query) to begin with, so a handle hung from its first
+//                            query qualifies;
+//   lastAnsweredAt           when a genes query on the handle last succeeded (the creation to begin with); only
+//                            reported, as secondsWithoutAnswer;
+//   busySince                when a query was last sent while no other query held a slot;
+//   consecutiveTimedOutJobs  annotators that became timedOut in a row: + 1 per annotator, the first time it sets
+//                            timedOut; back to 0 whenever a genes query on the handle succeeds.
+// Every query timeout that reaches _markUnavailable (after its retry, or while the job is already unavailable)
+// escalates, once per annotator and unless mongoFailed is already set, when
+//   hung               all MAX_IN_FLIGHT slots are held and no genes query settled for stuckMs (5 min), counted from
+//                      the later of lastSettledAt and busySince. Full slots alone are not enough: a large healthy
+//                      job keeps all 5 busy for minutes while its queries settle every few ms. busySince keeps an
+//                      idle worker's quiet time out of the count;
+//   repeated_timeouts  consecutiveTimedOutJobs reached timeoutJobsBeforeRestart (3). The driver's socket-timeout
+//                      errors settle the stuck queries (so they restart the hung count) but are not successes, so
+//                      this still catches a hang whose timeouts miss the hung window.
+// An escalation treats the handle as lost: mongoFailed = true, escalation = {cause, secondsWithoutAnswer (since
+// lastAnsweredAt: an error is not an answer), slotsHeld, slots, consecutiveTimedOutJobs}, and one error line. In the
+// worker run.js then throws the fatal MONGO_UNAVAILABLE naming the cause, so the worker requeues its running jobs and
+// exits 75 and pm2 restarts it with fresh connections; elsewhere the job completes with ANNOTATION_UNAVAILABLE. The
+// counters are per process, so a restart clears them.
+
+const { compareAmplicons } = require('./amplicons');
+const classify = require('./classify');
+
+const OVERLAP_LOOKBACK = 1000000;
+const OVERLAP_LIMIT = 20;
+const DEFAULT_MAX_ANNOTATED = 200;
+const TRANSCRIPT_BATCH = 500;
+const DEFAULT_TIMEOUT_MS = 15000;
+const DEFAULT_CONCURRENCY = 8;
+const MAX_IN_FLIGHT = 5;
+const DEFAULT_STUCK_MS = 300000;
+const DEFAULT_TIMEOUT_JOBS_BEFORE_RESTART = 3;
+const QUERY_DROPPED = 'MONGO_QUERY_DROPPED';
+const OVERLAP_FIELDS = Object.freeze({ _id: 1, name: 1, biotype: 1, location: 1 });
+const TRANSCRIPT_FIELDS = Object.freeze({ _id: 1, 'gene_structure.transcripts.id': 1 });
+
+function noop() {}
+
+function codedError(code, message) {
+  const e = new Error(message);
+  e.code = code;
+  return e;
+}
+
+function withTimeout(promise, ms, what) {
+  let timer = null;
+  const timeout = new Promise((resolve, reject) => {
+    timer = setTimeout(() => reject(codedError('MONGO_TIMEOUT', what + ' timed out after ' + ms + ' ms')), ms);
+    if (timer.unref) timer.unref();
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+// FIFO counting semaphore for genes queries (see "Query slots" above). acquire(grant) runs grant() now when a slot
+// is free, else when one is released, and returns cancel(): true when grant was still waiting (it never runs).
+class QuerySlots {
+  constructor(max) {
+    this.max = max;
+    this.active = 0;
+    this.waiting = [];
+  }
+
+  acquire(grant) {
+    if (this.active < this.max) {
+      this.active++;
+      grant();
+      return () => false;
+    }
+    this.waiting.push(grant);
+    return () => {
+      const i = this.waiting.indexOf(grant);
+      if (i < 0) return false;
+      this.waiting.splice(i, 1);
+      return true;
+    };
+  }
+
+  release() {
+    this.active--;
+    while (this.active < this.max && this.waiting.length) {
+      this.active++;
+      this.waiting.shift()();
+    }
+  }
+}
+
+// The query slots of one mongo handle and the self-heal counters next to them (see "Self-heal" above). at: the
+// creation time, from the clock of the annotator that sends the handle's first query.
+class HandleState {
+  constructor(at) {
+    this.slots = new QuerySlots(MAX_IN_FLIGHT);
+    this.lastSettledAt = at;
+    this.lastAnsweredAt = at;
+    this.busySince = at;
+    this.consecutiveTimedOutJobs = 0;
+  }
+}
+
+const HANDLES = new WeakMap(); // mongo handle → HandleState
+
+function handleStateFor(mongo, now) {
+  if (!mongo || (typeof mongo !== 'object' && typeof mongo !== 'function')) return new HandleState(now());
+  let s = HANDLES.get(mongo);
+  if (!s) {
+    s = new HandleState(now());
+    HANDLES.set(mongo, s);
+  }
+  return s;
+}
+
+// Gene key of a transcript id that mongo does not map (spec §B.9 rule /\.\d+$/, extended to the
+// pan-genome id formats so isoforms still collapse and the indexed _id lookup hits):
+//   SbiPI561072.01g062000_T001    → SbiPI561072.01g062000       (_T<n>)
+//   BTx623.01G000100.t1           → BTx623.01G000100            (.t<n>, also .t<n>.<m>.<hex>)
+//   SbPI513676.01G013100.11.v1.1  → SbPI513676.01G013100.v1.1   (.<n>.v<x>.<y>)
+//   SORBI_3004G087700.3           → SORBI_3004G087700           (.<n>)
+// Surveyed on 60 cDNA ids of each of the 120 sorghum genomes against mongo: 7113 of 7140 mapped ids give
+// their gene _id (the /\.\d+$/ rule alone: 1599).
+function stripIsoform(id) {
+  const s = String(id);
+  if (/_T\d+$/.test(s)) return s.replace(/_T\d+$/, '');
+  if (/\.t\d+(\.\d+\.[0-9a-f]+)?$/.test(s)) return s.replace(/\.t\d+(\.\d+\.[0-9a-f]+)?$/, '');
+  if (/\.\d+\.v\d+\.\d+$/.test(s)) return s.replace(/\.\d+(\.v\d+\.\d+)$/, '$1');
+  return s.replace(/\.\d+$/, '');
+}
+
+// §B.11 overlap query for one product.
+function overlapQuery(mapId, region, start, end) {
+  return {
+    'location.map': String(mapId),
+    'location.region': String(region),
+    'location.start': { $lte: end, $gte: start - OVERLAP_LOOKBACK },
+    'location.end': { $gte: start }
+  };
+}
+
+// §B.9 fallback query for transcript ids.
+function transcriptQuery(taxonId, ids) {
+  return { taxon_id: taxonId, 'gene_structure.transcripts.id': { $in: ids } };
+}
+
+function geneEntry(doc) {
+  const loc = doc.location || {};
+  return { id: String(doc._id), name: doc.name != null ? doc.name : null, biotype: doc.biotype != null ? doc.biotype : null, strand: loc.strand != null ? loc.strand : null };
+}
+
+function productKey(a) {
+  return a.region + ' ' + a.start + ' ' + a.end;
+}
+
+async function pool(items, concurrency, fn) {
+  let next = 0;
+  const n = Math.max(1, Math.min(concurrency, items.length));
+  const workers = [];
+  for (let k = 0; k < n; k++) {
+    workers.push((async () => {
+      while (next < items.length) {
+        const item = items[next++];
+        await fn(item);
+      }
+    })());
+  }
+  await Promise.all(workers);
+}
+
+// Normalizes job.resolved.gene (written by check/index.js normalize) into
+//   { id, location: {map, region, start, end, strand} | null, transcripts: [id], orthologs: {system_name: [gene id]} }
+// Accepted input keys: id | _id | gene_id; location; transcripts | transcript_ids (strings or {id});
+// orthologs | ortholog_ids (object keyed by system_name, values strings or {id}).
+function geneContext(gene) {
+  if (!gene || typeof gene !== 'object') return null;
+  const idOf = (x) => (typeof x === 'string' ? x : x && (x.id || x._id));
+  const tx = (Array.isArray(gene.transcripts) ? gene.transcripts : Array.isArray(gene.transcript_ids) ? gene.transcript_ids : [])
+    .map(idOf).filter(Boolean).map(String);
+  const rawOrth = gene.orthologs && typeof gene.orthologs === 'object' ? gene.orthologs
+    : gene.ortholog_ids && typeof gene.ortholog_ids === 'object' ? gene.ortholog_ids : {};
+  const orthologs = {};
+  for (const sys of Object.keys(rawOrth)) {
+    const list = Array.isArray(rawOrth[sys]) ? rawOrth[sys] : [];
+    orthologs[sys] = list.map(idOf).filter(Boolean).map(String);
+  }
+  const id = gene.id || gene._id || gene.gene_id;
+  return { id: id != null ? String(id) : null, location: gene.location || null, transcripts: tx, orthologs };
+}
+
+// { annotated: bool|null, ids: Set|null } for one genome; null/null without a design gene
+// (region and sequence modes).
+function orthologInfo(ctxGene, systemName) {
+  if (!ctxGene) return { annotated: null, ids: null };
+  const list = ctxGene.orthologs && Array.isArray(ctxGene.orthologs[systemName]) ? ctxGene.orthologs[systemName] : [];
+  const ids = new Set(list.map(String));
+  return { annotated: ids.size > 0, ids };
+}
+
+function lookupGene(txToGene, tx) {
+  if (!txToGene) return undefined;
+  if (typeof txToGene === 'function') return txToGene(tx);
+  if (txToGene instanceof Map) return txToGene.get(tx);
+  return Object.prototype.hasOwnProperty.call(txToGene, tx) ? txToGene[tx] : undefined;
+}
+
+function compareGroups(a, b) {
+  const ra = classify.LIKELIHOOD_RANK[a.likelihood];
+  const rb = classify.LIKELIHOOD_RANK[b.likelihood];
+  if (ra !== rb) return ra - rb;
+  const ma = a.left_mm + a.right_mm;
+  const mb = b.left_mm + b.right_mm;
+  if (ma !== mb) return ma - mb;
+  if (a.gene_id !== b.gene_id) return a.gene_id < b.gene_id ? -1 : 1;
+  return a.orientation < b.orientation ? -1 : a.orientation > b.orientation ? 1 : 0;
+}
+
+// cDNA amplicons (amplicons.finalize output, region = transcript id) → gene groups (§B.9):
+//   { gene_id, orientation, isoforms: [{transcript_id, start, end, size, likelihood, left_mm, right_mm}],
+//     size_min, size_max, likelihood (best), left_mm, right_mm, left_3p_mm, right_3p_mm,
+//     left_mm_pos, right_mm_pos, terminal_mismatch, approx }
+// The mismatch fields describe the best isoform product (class, then fewest mismatches).
+// txToGene: Map | object | fn(transcript_id) → gene id; unmapped transcripts use the id without
+// its isoform suffix. Groups are sorted by class, total mismatches, gene_id, orientation.
+function groupByGene(amps, txToGene) {
+  const byKey = new Map();
+  for (const a of amps || []) {
+    const mapped = lookupGene(txToGene, a.region);
+    const geneId = mapped != null ? String(mapped) : stripIsoform(a.region);
+    const key = geneId + ' ' + a.orientation;
+    let g = byKey.get(key);
+    if (!g) {
+      g = { gene_id: geneId, orientation: a.orientation, members: [] };
+      byKey.set(key, g);
+    }
+    g.members.push(a);
+  }
+  const groups = [];
+  for (const g of byKey.values()) {
+    const members = g.members.slice().sort(compareAmplicons);
+    const best = members[0];
+    const isoforms = g.members.slice().sort((x, y) => (x.region < y.region ? -1 : x.region > y.region ? 1 : x.start - y.start))
+      .map((a) => ({ transcript_id: a.region, start: a.start, end: a.end, size: a.size, likelihood: a.likelihood, left_mm: a.left_mm, right_mm: a.right_mm }));
+    let sizeMin = Infinity;
+    let sizeMax = -Infinity;
+    for (const a of members) {
+      if (a.size < sizeMin) sizeMin = a.size;
+      if (a.size > sizeMax) sizeMax = a.size;
+    }
+    groups.push({
+      gene_id: g.gene_id,
+      orientation: g.orientation,
+      isoforms,
+      size_min: sizeMin,
+      size_max: sizeMax,
+      likelihood: best.likelihood,
+      left_mm: best.left_mm,
+      right_mm: best.right_mm,
+      left_3p_mm: best.left_3p_mm,
+      right_3p_mm: best.right_3p_mm,
+      left_mm_pos: best.left_mm_pos != null ? best.left_mm_pos : null,
+      right_mm_pos: best.right_mm_pos != null ? best.right_mm_pos : null,
+      terminal_mismatch: !!best.terminal_mismatch,
+      approx: !!best.approx
+    });
+  }
+  return groups.sort(compareGroups);
+}
+
+// Per-job annotator. opts: { mongo (gramene-mongodb-config-like: mongo.genes.mongoCollection()),
+//   log, maxAnnotated = 200, timeoutMs = 15000 (per query, from dispatch; the retry gets another 2 x), concurrency = 8,
+//   stuckMs = 300000 and timeoutJobsBeforeRestart = 3 (self-heal), now = Date.now (the self-heal clock) }
+// Genes queries share MAX_IN_FLIGHT (5) query slots per mongo handle across annotators.
+class Annotator {
+  constructor(opts) {
+    const o = opts || {};
+    this.mongo = o.mongo || null;
+    this.log = o.log || { info: noop, warn: noop, error: noop };
+    this.maxAnnotated = Number.isInteger(o.maxAnnotated) && o.maxAnnotated >= 0 ? o.maxAnnotated : DEFAULT_MAX_ANNOTATED;
+    this.timeoutMs = Number.isInteger(o.timeoutMs) && o.timeoutMs > 0 ? o.timeoutMs : DEFAULT_TIMEOUT_MS;
+    this.concurrency = Number.isInteger(o.concurrency) && o.concurrency > 0 ? o.concurrency : DEFAULT_CONCURRENCY;
+    this.stuckMs = Number.isInteger(o.stuckMs) && o.stuckMs > 0 ? o.stuckMs : DEFAULT_STUCK_MS;
+    this.timeoutJobsBeforeRestart = Number.isInteger(o.timeoutJobsBeforeRestart) && o.timeoutJobsBeforeRestart > 0
+      ? o.timeoutJobsBeforeRestart : DEFAULT_TIMEOUT_JOBS_BEFORE_RESTART;
+    this.now = typeof o.now === 'function' ? o.now : Date.now;
+    this.unavailable = false;
+    // true once a supplied mongo handle failed at the connection level (no collection, including a
+    // mongoCollection() timeout, or a non-timeout query error), or a timeout escalated (escalation); run.js turns
+    // this into a fatal MONGO_UNAVAILABLE when ctx.fatalOnMongoUnavailable is set (worker exit 75 → restart).
+    this.mongoFailed = false;
+    // true once a query timed out on its retry too (MONGO_TIMEOUT): not fatal, run.js adds ANNOTATION_UNAVAILABLE.
+    this.timedOut = false;
+    // {cause: 'hung' | 'repeated_timeouts', secondsWithoutAnswer, slotsHeld, slots, consecutiveTimedOutJobs} once a
+    // timeout escalated to a lost connection (see "Self-heal" above); null otherwise.
+    this.escalation = null;
+    this.timeoutRetries = 0;
+    this._collection = null;
+    this._txCache = new Map(); // system_name → Map(transcript id → gene id | null)
+    this._handle = null; // HandleState of this mongo handle, on the first query
+    this._slots = null; // its QuerySlots
+    this._waiting = new Set(); // attempts of this annotator still waiting for a slot
+    this.queries = 0; // queries sent to the driver
+  }
+
+  _handleState() {
+    if (!this._handle) {
+      this._handle = handleStateFor(this.mongo, this.now);
+      this._slots = this._handle.slots;
+    }
+    return this._handle;
+  }
+
+  // err: the query error, or null when there is no collection. A MONGO_TIMEOUT sets timedOut (the first one counts
+  // this annotator in consecutiveTimedOutJobs) and may escalate (_escalate); anything else sets mongoFailed when a
+  // mongo handle was supplied. The first failure is logged, and so is the first mongoFailed one after a timeout (the
+  // connection-level cause of a fatal MONGO_UNAVAILABLE). Attempts still waiting for a slot are dropped; their
+  // callers get QUERY_DROPPED, which changes no flag.
+  _markUnavailable(err) {
+    if (err && err.code === QUERY_DROPPED) {
+      this.unavailable = true;
+      return;
+    }
+    const timeout = !!(err && err.code === 'MONGO_TIMEOUT');
+    const fails = !timeout && !!this.mongo;
+    if (!this.unavailable || (fails && !this.mongoFailed)) {
+      const msg = err && err.message ? err.message : 'no genes collection';
+      if (this.log.warn) this.log.warn('primers check: annotation unavailable: ' + msg);
+    }
+    this.unavailable = true;
+    if (timeout && !this.timedOut) {
+      this.timedOut = true;
+      if (this.mongo) this._handleState().consecutiveTimedOutJobs++;
+    }
+    if (fails) this.mongoFailed = true;
+    if (timeout) this._escalate();
+    for (const att of Array.from(this._waiting)) att.drop();
+  }
+
+  // Self-heal (see the header), after a query timeout: when the handle's genes queries look hung or kept timing out,
+  // treat the handle as lost (mongoFailed, escalation, one error line). Once per annotator; never over a
+  // connection-level failure, whose own cause stays the reported one.
+  _escalate() {
+    if (this.escalation || this.mongoFailed || !this.mongo) return;
+    const h = this._handleState();
+    const at = this.now();
+    const quietMs = Math.max(0, at - Math.max(h.lastSettledAt, h.busySince));
+    let cause = null;
+    if (h.slots.active >= h.slots.max && quietMs >= this.stuckMs) cause = 'hung';
+    else if (h.consecutiveTimedOutJobs >= this.timeoutJobsBeforeRestart) cause = 'repeated_timeouts';
+    if (!cause) return;
+    const e = {
+      cause,
+      secondsWithoutAnswer: Math.floor(Math.max(0, at - h.lastAnsweredAt) / 1000),
+      slotsHeld: h.slots.active,
+      slots: h.slots.max,
+      consecutiveTimedOutJobs: h.consecutiveTimedOutJobs
+    };
+    this.escalation = e;
+    this.mongoFailed = true;
+    const line = 'primers check: mongo genes queries ' + (cause === 'hung' ? 'appear hung' : 'repeatedly timed out') +
+      ' (no answer for ' + e.secondsWithoutAnswer + ' s, ' + e.slotsHeld + ' of ' + e.slots + ' query slots held, ' +
+      e.consecutiveTimedOutJobs + ' consecutive timed-out jobs); treating mongo as unavailable so that the check worker ' +
+      'restarts with fresh connections';
+    const out = typeof this.log.error === 'function' ? this.log.error : this.log.warn;
+    if (typeof out === 'function') out.call(this.log, line);
+  }
+
+  async collection() {
+    if (this.unavailable) return null;
+    if (!this._collection) {
+      const mongo = this.mongo;
+      this._collection = (async () => {
+        if (!mongo || !mongo.genes || typeof mongo.genes.mongoCollection !== 'function') return null;
+        return withTimeout(Promise.resolve().then(() => mongo.genes.mongoCollection()), this.timeoutMs, 'mongo genes collection');
+      })().then((c) => (c && typeof c.find === 'function' ? c : null), () => null);
+    }
+    const coll = await this._collection;
+    if (!coll) this._markUnavailable(null);
+    return coll;
+  }
+
+  // One send of a genes query through the query slots → { result: Promise(docs), sent, drop() }. The query is sent
+  // (sent = true, queries + 1) when it gets a slot, unless the annotator is unavailable by then (result rejects with
+  // QUERY_DROPPED). The slot is released on the turn after the driver settles the query. drop() gives up an attempt
+  // still waiting for a slot: it is never sent and result rejects with QUERY_DROPPED; a sent attempt is left running.
+  // Self-heal counters: a send that holds the only taken slot sets busySince; the driver settling the query (or find()
+  // throwing) sets lastSettledAt, and only a success sets lastAnsweredAt and resets consecutiveTimedOutJobs.
+  _send(coll, query, fields, limit) {
+    const handle = this._handleState();
+    const slots = handle.slots;
+    const att = { sent: false, result: null, drop: null };
+    att.result = new Promise((resolve, reject) => {
+      const dropped = () => codedError(QUERY_DROPPED, 'mongo genes query dropped before it was sent');
+      let granted = false;
+      const cancel = slots.acquire(() => {
+        granted = true;
+        this._waiting.delete(att);
+        if (this.unavailable) {
+          slots.release();
+          reject(dropped());
+          return;
+        }
+        att.sent = true;
+        this.queries++;
+        if (slots.active === 1) handle.busySince = this.now();
+        // Released on the next turn, once the answer has been handled: an error has marked the annotator unavailable
+        // (dropping its waiting attempts), and a retry race won by this attempt has dropped its waiting resend, before
+        // a waiting query can take the slot.
+        const settled = (ok) => {
+          const at = this.now();
+          handle.lastSettledAt = at;
+          if (ok) {
+            handle.lastAnsweredAt = at;
+            handle.consecutiveTimedOutJobs = 0;
+          }
+          setImmediate(() => slots.release());
+        };
+        let pending;
+        try {
+          let cursor = coll.find(query, { fields });
+          if (limit) cursor = cursor.limit(limit);
+          pending = Promise.resolve(cursor.toArray());
+        } catch (e) {
+          settled(false);
+          reject(e);
+          return;
+        }
+        pending.then(() => settled(true), () => settled(false));
+        resolve(pending);
+      });
+      att.drop = () => {
+        if (!granted && cancel()) {
+          this._waiting.delete(att);
+          reject(dropped());
+        }
+      };
+      if (!granted) this._waiting.add(att);
+    });
+    att.result.catch(noop); // a dropped or abandoned attempt has no listener left
+    return att;
+  }
+
+  // One genes query within timeoutMs, counted from dispatch (a wait for a slot counts). On MONGO_TIMEOUT, unless the
+  // annotator is already unavailable: another 2 x timeoutMs in which the first attempt stays in the race and, when it
+  // was sent, the same query is sent once more; the first attempt to settle decides. The error (a second
+  // MONGO_TIMEOUT or any other error) is the caller's to classify (_markUnavailable).
+  async _find(coll, query, fields, limit) {
+    const first = this._send(coll, query, fields, limit);
+    try {
+      return await withTimeout(first.result, this.timeoutMs, 'mongo genes query');
+    } catch (e) {
+      if (!e || e.code !== 'MONGO_TIMEOUT') throw e;
+      if (this.unavailable) {
+        first.drop();
+        throw e;
+      }
+      const budget = 2 * this.timeoutMs;
+      this.timeoutRetries++;
+      const attempts = [first];
+      if (first.sent) {
+        if (this.log.warn) this.log.warn('primers check: ' + e.message + '; retrying it once with a ' + budget + ' ms budget');
+        attempts.push(this._send(coll, query, fields, limit));
+      } else if (this.log.warn) {
+        this.log.warn('primers check: ' + e.message + ' waiting for one of the ' + MAX_IN_FLIGHT + ' genes query slots; waiting once more with a ' + budget + ' ms budget');
+      }
+      try {
+        return await withTimeout(Promise.race(attempts.map((a) => a.result)), budget, 'mongo genes query');
+      } finally {
+        for (const a of attempts) a.drop();
+      }
+    }
+  }
+
+  // Sets amp.genes = [{id, name, biotype, strand}] (sorted by gene start) on the given genome
+  // amplicons, querying at most maxAnnotated distinct products in the given (priority) order.
+  // Products past the cap, and all products when mongo is unavailable, get genes: null.
+  // Returns { available, annotated (distinct products), skipped }.
+  async overlaps(asm, amps) {
+    const list = (amps || []).filter(Boolean);
+    const groups = new Map();
+    for (const a of list) {
+      const k = productKey(a);
+      let g = groups.get(k);
+      if (!g) {
+        g = { region: a.region, start: a.start, end: a.end, members: [] };
+        groups.set(k, g);
+      }
+      g.members.push(a);
+    }
+    for (const a of list) if (a.genes === undefined) a.genes = null;
+    const distinct = Array.from(groups.values());
+    const chosen = distinct.slice(0, this.maxAnnotated);
+    const skipped = distinct.length - chosen.length;
+    if (chosen.length === 0) return { available: !this.unavailable, annotated: 0, skipped };
+    if (!asm || asm.map_id == null) return { available: !this.unavailable, annotated: 0, skipped: distinct.length };
+    const coll = await this.collection();
+    if (!coll) return { available: false, annotated: 0, skipped: distinct.length };
+    let annotated = 0;
+    await pool(chosen, this.concurrency, async (g) => {
+      if (this.unavailable) return;
+      let docs;
+      try {
+        docs = await this._find(coll, overlapQuery(asm.map_id, g.region, g.start, g.end), OVERLAP_FIELDS, OVERLAP_LIMIT);
+      } catch (e) {
+        this._markUnavailable(e);
+        return;
+      }
+      const genes = docs
+        .filter((d) => d && d.location && d.location.start <= g.end && d.location.end >= g.start)
+        .sort((x, y) => x.location.start - y.location.start || (String(x._id) < String(y._id) ? -1 : 1))
+        .map(geneEntry);
+      for (const a of g.members) a.genes = genes;
+      annotated++;
+    });
+    if (this.unavailable) {
+      for (const a of list) a.genes = null;
+      return { available: false, annotated: 0, skipped: distinct.length };
+    }
+    return { available: true, annotated, skipped };
+  }
+
+  // Transcript ids of one genome → { map: Map(tx → gene id), unmapped: [tx], available }.
+  // seed: optional Map/object tx → gene id known without mongo (the design gene's transcripts).
+  // Results are cached per system_name for the job.
+  async transcriptGenes(asm, subjects, seed) {
+    const sys = asm && asm.system_name ? asm.system_name : '';
+    let cache = this._txCache.get(sys);
+    if (!cache) {
+      cache = new Map();
+      this._txCache.set(sys, cache);
+    }
+    if (seed) {
+      const entries = seed instanceof Map ? seed.entries() : Object.entries(seed);
+      for (const [tx, gene] of entries) if (!cache.has(tx)) cache.set(tx, String(gene));
+    }
+    const wanted = Array.from(new Set((subjects || []).map(String)));
+    const todo = wanted.filter((tx) => !cache.has(tx));
+    let available = !this.unavailable;
+    if (todo.length) {
+      const coll = await this.collection();
+      if (!coll) {
+        available = false;
+      } else {
+        const todoSet = new Set(todo);
+        const found = new Map();
+        const absorb = (docs) => {
+          for (const d of docs) {
+            const txs = d && d.gene_structure && Array.isArray(d.gene_structure.transcripts) ? d.gene_structure.transcripts : [];
+            for (const t of txs) {
+              const id = t && t.id != null ? String(t.id) : null;
+              if (id && todoSet.has(id) && !found.has(id)) found.set(id, String(d._id));
+            }
+          }
+        };
+        try {
+          const geneIds = Array.from(new Set(todo.map(stripIsoform)));
+          for (let i = 0; i < geneIds.length; i += TRANSCRIPT_BATCH) {
+            absorb(await this._find(coll, { _id: { $in: geneIds.slice(i, i + TRANSCRIPT_BATCH) } }, TRANSCRIPT_FIELDS, 0));
+          }
+          const rest = todo.filter((tx) => !found.has(tx));
+          if (rest.length && asm && asm.taxon_id != null) {
+            for (let i = 0; i < rest.length; i += TRANSCRIPT_BATCH) {
+              absorb(await this._find(coll, transcriptQuery(asm.taxon_id, rest.slice(i, i + TRANSCRIPT_BATCH)), TRANSCRIPT_FIELDS, 0));
+            }
+          }
+          for (const tx of todo) cache.set(tx, found.has(tx) ? found.get(tx) : null);
+        } catch (e) {
+          this._markUnavailable(e);
+          available = false;
+        }
+      }
+    }
+    const map = new Map();
+    const unmapped = [];
+    for (const tx of wanted) {
+      const g = cache.get(tx);
+      if (g != null) map.set(tx, g);
+      else if (available) unmapped.push(tx);
+    }
+    return { map, unmapped, available };
+  }
+}
+
+module.exports = {
+  OVERLAP_LOOKBACK,
+  OVERLAP_LIMIT,
+  DEFAULT_MAX_ANNOTATED,
+  MAX_IN_FLIGHT,
+  DEFAULT_STUCK_MS,
+  DEFAULT_TIMEOUT_JOBS_BEFORE_RESTART,
+  TRANSCRIPT_BATCH,
+  OVERLAP_FIELDS,
+  TRANSCRIPT_FIELDS,
+  overlapQuery,
+  transcriptQuery,
+  stripIsoform,
+  geneContext,
+  orthologInfo,
+  groupByGene,
+  compareGroups,
+  Annotator
+};

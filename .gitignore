@@ -33,6 +33,9 @@ node_modules
 # Runtime configuration for swagger app
 config/runtime.yaml
 
+# lockfile is generated per deployment and never committed
+package-lock.json
+
 .idea
 
 

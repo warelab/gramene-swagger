@@ -1,0 +1,5 @@
+{
+  "system_name": "sorghum_bicolor",
+  "variant": { "id": "rs871475760", "alt": "A" },
+  "assay": { "type": "kasp", "num_sets": 2 }
+}
