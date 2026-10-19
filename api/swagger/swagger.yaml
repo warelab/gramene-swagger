@@ -1,13 +1,12 @@
 swagger: "2.0"
 info:
   version: "0.59.0"
-  title: API for sorghumbase release 11
+  title: API for gramene release 70
 # basePath prefixes all resource paths
-basePath: /sorghum_v11
+basePath: /v70
 # public host clients build request URLs against (TLS terminated by apache,
 # proxied to the swagger server on squam:50011). For local-only testing,
 # override with host: localhost:50011 and add http to schemes below.
-host: data.sorghumbase.org
 schemes:
   # tip: remove http to make production-grade
   # - http
@@ -1765,10 +1764,35 @@ definitions:
             type: string
 
   GeneHomology:
+    description: >
+      The gene trees a gene belongs to, plus its homologs. A gene can be in SEVERAL trees at
+      once: every gene with homology is in the default (whole-plants) tree under `gene_tree`,
+      and a gene from one of the four crop cultivar sets is ALSO in that set's tree, under
+      `barley`, `oat`, `wheat` or `rice`. Each is an independent tree with its own id, and any
+      id here can be fetched from /genetrees, so a client should present the keys that are
+      actually present as a choice of which tree to load rather than assuming `gene_tree`.
+      An absent key simply means the gene is not in that set. `homologous_genes` is NOT
+      partitioned by tree -- compara stores homology pairwise, so it spans all of them.
     properties:
       gene_tree:
+        description: The default whole-plants tree. Present for every gene with homology.
+        $ref: '#/definitions/GeneTree'
+      barley:
+        description: The barley_cultivars tree, when this gene is in that set.
+        $ref: '#/definitions/GeneTree'
+      oat:
+        description: The oat_cultivars tree, when this gene is in that set.
+        $ref: '#/definitions/GeneTree'
+      wheat:
+        description: The wheat_cultivars tree, when this gene is in that set.
+        $ref: '#/definitions/GeneTree'
+      rice:
+        description: The rice_cultivars tree, when this gene is in that set.
         $ref: '#/definitions/GeneTree'
       pan_tree:
+        description: >
+          Pan-homology tree. Declared but never populated in this release -- the pan trees
+          are not loaded, so this key is always absent.
         $ref: '#/definitions/GeneTree'
       homologous_genes:
         $ref: '#/definitions/HomologyTypes'
