@@ -4,6 +4,7 @@ var _ = require('lodash');
 var mongoHelper = require('../helpers/mongo');
 var solrHelper = require('../helpers/solr');
 var mongoCollections = require('gramene-mongodb-config');
+var treeShape = require('gramene-mongodb-config/tree_shape');
 const murmur = require('murmurhash3js');
 const axios = require('axios');
 
@@ -52,6 +53,31 @@ admin.initializeApp({
   toExport['restoreList'] = restoreList;
   // dedicated genelists GET: proper site/isPublic/uid filtering + soft-delete (active vs trash) views,
   // which the generic getFactory/buildQuery can't express ($exists / isPublic scoping).
+  // /genetrees rebuilds the nested tree from the stored FLAT shape. Storage moved because the
+  // nested form cannot hold a tree deeper than ~112 levels -- the server rejects it for
+  // nested-object depth, which silently cost release 70 its 147 deepest trees. The response is
+  // unchanged: tree_shape's fromNested/toNested are byte-exact inverses, verified over real trees.
+  //
+  // fetchWholeDoc is required, not an optimisation choice: `fl` used to be a mongo projection over
+  // the nested document, but root fields such as taxon_name now live on nodes[0], so projecting in
+  // mongo would return nothing for them. The whole document is fetched and `fl` applied to the
+  // REBUILT tree instead, which is what preserves the old meaning of the parameter.
+  toExport['genetrees'] = getFactory(mongoCollections.genetrees.mongoCollection(), {
+    fetchWholeDoc: true,
+    docTransform: function (fl) {
+      return through2.obj(function (doc, enc, done) {
+        var out = (doc && doc.nodes) ? treeShape.toNested(doc) : doc;
+        if (fl && fl.length) {
+          var picked = {};
+          fl.forEach(function (f) { if (out[f] !== undefined) { picked[f] = out[f]; } });
+          out = picked;   // as before, fl also drops _id unless it was asked for
+        }
+        this.push(out);
+        done();
+      });
+    }
+  });
+
   toExport['genelists'] = genelistsHandler;
 
   // /saved_views GET has two modes: single-hash lookup vs listing. Route hash lookups to
@@ -70,7 +96,11 @@ admin.initializeApp({
   module.exports = toExport;
 }());
 
-function getFactory(collectionPromise) {
+// opts.docTransform(fl) -> a stream applied to each document before serialisation, and
+// opts.fetchWholeDoc skips the mongo projection so that transform sees the complete document.
+// Used by /genetrees, which stores trees FLAT and rebuilds them on the way out.
+function getFactory(collectionPromise, opts) {
+  opts = opts || {};
   return function _get(req, res) {
     var params, nonSchemaParams, returnTsv,
       cursorPromise, transformer, mimetype;
@@ -113,20 +143,24 @@ function getFactory(collectionPromise) {
       .verifyIdToken(token)
       .then((decodedToken) => {
         nonSchemaParams.uid = decodedToken.uid;
-        cursorPromise = mongoHelper.cursorPromise(collectionPromise, params, nonSchemaParams);
+        cursorPromise = mongoHelper.cursorPromise(collectionPromise, opts.fetchWholeDoc ? _.omit(params, 'fl') : params, nonSchemaParams);
         cursorPromise.then(function(cursor) {
           res.contentType(mimetype);
-          cursor.stream().pipe(transformer).pipe(res);
+          var src = cursor.stream();
+          if (opts.docTransform) { src = src.pipe(opts.docTransform(params.fl)); }
+          src.pipe(transformer).pipe(res);
         });
       })
       .catch((error) => {
         res.status(401).send('Authorization failed');
       });
     } else {
-      cursorPromise = mongoHelper.cursorPromise(collectionPromise, params, nonSchemaParams);
+      cursorPromise = mongoHelper.cursorPromise(collectionPromise, opts.fetchWholeDoc ? _.omit(params, 'fl') : params, nonSchemaParams);
       cursorPromise.then(function(cursor) {
         res.contentType(mimetype);
-        cursor.stream().pipe(transformer).pipe(res);
+        var src2 = cursor.stream();
+        if (opts.docTransform) { src2 = src2.pipe(opts.docTransform(params.fl)); }
+        src2.pipe(transformer).pipe(res);
       });
     }
   }
