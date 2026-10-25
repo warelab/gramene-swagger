@@ -1842,6 +1842,15 @@ definitions:
         type: integer
       root_taxon_name:
         type: string
+      supertree:
+        type: string
+        description: >
+          Id of the supertree this tree belongs to, when it has one. A supertree joins the
+          subtrees of a family too large to align in one go; its own nodes carry no genes, so this
+          records which larger family the tree sits in rather than any extra membership. Absent
+          when the tree is not under a supertree. Per set, so a gene in both a default and a
+          cultivar tree can have two different supertrees. In the genes solr core the same values
+          are queryable as supertree_attr_s (default set) and <set>_supertree_attr_s.
       representative:
         properties:
           closest:
