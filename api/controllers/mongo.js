@@ -55,8 +55,10 @@ admin.initializeApp({
   // which the generic getFactory/buildQuery can't express ($exists / isPublic scoping).
   // /genetrees rebuilds the nested tree from the stored FLAT shape. Storage moved because the
   // nested form cannot hold a tree deeper than ~112 levels -- the server rejects it for
-  // nested-object depth, which silently cost release 70 its 147 deepest trees. The response is
-  // unchanged: tree_shape's fromNested/toNested are byte-exact inverses, verified over real trees.
+  // nested-object depth, which silently cost release 70 its 147 deepest trees. The rebuilt tree
+  // is deep-equal to what this endpoint used to return: tree_shape's fromNested/toNested are
+  // exact inverses, verified over real trees by a build gate. Only _id's position needs fixing
+  // up below, and the response is byte-identical once it is.
   //
   // fetchWholeDoc is required, not an optimisation choice: `fl` used to be a mongo projection over
   // the nested document, but root fields such as taxon_name now live on nodes[0], so projecting in
@@ -66,7 +68,21 @@ admin.initializeApp({
     fetchWholeDoc: true,
     docTransform: function (fl) {
       return through2.obj(function (doc, enc, done) {
-        var out = (doc && doc.nodes) ? treeShape.toNested(doc) : doc;
+        var out = doc;
+        if (doc && doc.nodes) {
+          out = treeShape.toNested(doc);
+          // Put _id back at the front. The server hoists _id to the first key of every stored
+          // document, so the nested trees this endpoint used to return always led with it. A
+          // rebuilt root instead carries _id wherever the builder happened to set it -- release
+          // 70's builder sets it mid-object, just before `representative`. Deep-equal either
+          // way, but this response IS the public document, so keep its old byte order. The copy
+          // is one object deep; children are shared, not cloned.
+          if (out._id !== undefined && Object.keys(out)[0] !== '_id') {
+            var ordered = { _id: out._id };
+            Object.keys(out).forEach(function (k) { if (k !== '_id') { ordered[k] = out[k]; } });
+            out = ordered;
+          }
+        }
         if (fl && fl.length) {
           var picked = {};
           fl.forEach(function (f) { if (out[f] !== undefined) { picked[f] = out[f]; } });
