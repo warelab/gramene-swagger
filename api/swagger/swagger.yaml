@@ -1909,19 +1909,50 @@ definitions:
       $ref: '#/definitions/GeneDocument'
 
   capabilities:
+    # What a client can offer for this gene; the search response carries it and the gene list
+    # uses it to decide which detail panels are available. Not enforced at runtime
+    # (validateResponse is false, because responses stream straight from SOLR/Mongo), so this
+    # enum is documentation -- and it had drifted: seven values the pipeline has been emitting
+    # all along were missing from it. This list is now everything genes/mongo2solr.join.js and
+    # the adders behind it can emit in this release. maker and VEP are deliberately absent:
+    # 62_attr_atomic emits them, and release 70 configures neither.
     type: array
     items:
       type: string
       enum:
-       - "homology"
-       - "xrefs"
-       - "GO"
-       - "domains"
-       - "taxonomy"
-       - "PO"
-       - "pathways"
+       # always present
        - "location"
+       # ontology / annotation panels, from the annotations section (search/ancestor_adder.js)
+       - "taxonomy"
+       - "GO"
+       - "PO"
+       - "TO"
+       - "QTL_TO"
+       - "domains"
+       - "pathways"
+       - "familyRoot"
+       # homology
+       - "homology"
+       # which tree sets this gene is in, so the homology panel can offer a choice of tree.
+       # gene_tree is the default plants set; the rest are the crop cultivar sets, and
+       # cultivar_tree is the roll-up for "in at least one cultivar set".
+       - "gene_tree"
+       - "barley_tree"
+       - "oat_tree"
+       - "wheat_tree"
+       - "rice_tree"
+       - "cultivar_tree"
+       # expression
        - "expression"
+       - "expression_attributes"
+       # cross-references and literature
+       - "xrefs"
+       - "pubs"
+       # external resources
+       - "Grassius"
+       - "grassius_homolog"
+       - "PanOryza"
+       - "SB_PanGene"
 
   int_range:
     required:
