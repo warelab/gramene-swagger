@@ -356,8 +356,14 @@ async function baseline_experiment(req, res) {
 
     // get baseline experiment assays with non-zero tpm
     var tpm = {};
+    // Seed every REQUESTED id, not only the ones mongo returned. `genes` is the subset that
+    // has an expression doc at all, but the rows below are built from uniqueIdentifiers, so a
+    // requested gene with no doc left tpm[gene] undefined and threw there ("Cannot read
+    // properties of undefined (reading 'g1')") as a 500. Genes with no expression doc are
+    // normal, not an edge case: only 22,048 of PN40024's 35,197 genes have one.
+    uniqueIdentifiers.forEach(id => { tpm[id] = {}; });
     genes.forEach(g => {
-      tpm[g._id] = {};
+      tpm[g._id] ||= {};
       // A gene can come back with no data for THIS experiment — the caller may have mixed
       // species (sorghum ids against an arabidopsis experiment), or the gene simply is not
       // assayed here. This used to throw on .forEach of undefined and surface as a 500.
