@@ -47,7 +47,7 @@ swagger:
 # PRIMERS_GLOBAL_MAX_JOBS, PRIMERS_MAX_QUEUED, PRIMERS_VARIATION_URL (https://, or http://127.0.0.1
 # for a loopback test server), PRIMERS_VARIATION_ENABLED.
 primers:
-  enabled: true
+  enabled: false
   site_key: null                    # default "<basePath w/o slash>:<getMongoConfig().db>" e.g. sorghum_v11:sorghum11
   primer3_core: /home/olson/bin/primer3_core
   ntthal: /home/olson/primer3-2.6.1/bin/ntthal            # env NTTHAL
