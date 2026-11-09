@@ -1,9 +1,9 @@
 swagger: "2.0"
 info:
   version: "0.59.0"
-  title: API for gramene release 70
+  title: API for maize release 6
 # basePath prefixes all resource paths
-basePath: /v70
+basePath: /maize_v6
 # public host clients build request URLs against (TLS terminated by apache,
 # proxied to the swagger server on squam:50011). For local-only testing,
 # override with host: localhost:50011 and add http to schemes below.
