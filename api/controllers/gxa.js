@@ -5,8 +5,20 @@ module.exports = {
   one_baseline_experiment: baseline_experiment,
   baseline_experiments: baseline_experiments,
   redirectToEbi: function(req, res) {
-    const target = 'https://www.ebi.ac.uk' + req.originalUrl.replace('/auth_testing', '');
-    res.redirect(301, target);
+    // req.originalUrl carries THIS deployment's basePath (/v70, /sorghum_v11,
+    // /grapevine_v5, /maize_v6 ...), and that prefix is not part of EBI's URL space. The old
+    // code stripped only the literal '/auth_testing' -- the basePath of the one deployment it
+    // was written on -- so every other site redirected to
+    // https://www.ebi.ac.uk/<basePath>/gxa and EBI answered 404. The endpoint had therefore
+    // never worked on any deployed site; v69 and earlier predate the controller and return
+    // 400 from the /{collection} fallback, which is why nobody noticed.
+    //
+    // Anchor on '/gxa' rather than stripping any particular prefix: correct under every
+    // basePath without the controller knowing which one it runs under, and it preserves
+    // subpaths and the query string. Assumes no basePath itself contains '/gxa'.
+    const i = req.originalUrl.indexOf('/gxa');
+    const path = i === -1 ? '/gxa' : req.originalUrl.slice(i);
+    res.redirect(301, 'https://www.ebi.ac.uk' + path);
   }
 };
 
