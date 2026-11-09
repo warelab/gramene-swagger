@@ -98,7 +98,7 @@ SwaggerExpress.create(config, function (err, swaggerExpress) {
 
   // start it up
   var version = +basePath.match(/\d+/);
-  var port = process.env.PORT || 10070;
+  var port = process.env.PORT || 40005;
   app.listen(port, process.env.HOST); // HOST unset: all interfaces, as before
 
   console.log('Listening on', port, process.env.HOST ? 'host ' + process.env.HOST : '');

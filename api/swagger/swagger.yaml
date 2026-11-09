@@ -1,9 +1,9 @@
 swagger: "2.0"
 info:
   version: "0.59.0"
-  title: API for gramene release 70
+  title: API for grapevine release 5
 # basePath prefixes all resource paths
-basePath: /v70
+basePath: /grapevine_v5
 # public host clients build request URLs against (TLS terminated by apache,
 # proxied to the swagger server on squam:50011). For local-only testing,
 # override with host: localhost:50011 and add http to schemes below.
@@ -27,7 +27,7 @@ paths:
       summary: Redirect to EBI
       operationId: redirectToEbi
       responses:
-        301:
+        302:
           description: Redirecting
 
   /gxa/json/experiments/{experiment_id}:

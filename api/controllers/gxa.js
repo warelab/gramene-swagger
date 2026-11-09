@@ -18,7 +18,14 @@ module.exports = {
     // subpaths and the query string. Assumes no basePath itself contains '/gxa'.
     const i = req.originalUrl.indexOf('/gxa');
     const path = i === -1 ? '/gxa' : req.originalUrl.slice(i);
-    res.redirect(301, 'https://www.ebi.ac.uk' + path);
+    // 302, not 301. The target depends on deployment config (this site's basePath is
+    // stripped off above), so it is not a permanent property of the URL -- and a 301 is
+    // cached by browsers close to permanently and by intermediate proxies too. When this
+    // handler was emitting the wrong target, data.sorghumbase.org kept serving the broken
+    // redirect from its own cache after the origin was fixed (X-Cache: HIT, Age: 1345), and
+    // every browser that had hit it held the same stale 301. A 302 keeps a future mistake
+    // from outliving its fix. Keep swagger.yaml's declared response in step with this.
+    res.redirect(302, 'https://www.ebi.ac.uk' + path);
   }
 };
 
