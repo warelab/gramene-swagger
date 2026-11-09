@@ -5,8 +5,20 @@ module.exports = {
   one_baseline_experiment: baseline_experiment,
   baseline_experiments: baseline_experiments,
   redirectToEbi: function(req, res) {
-    const target = 'https://www.ebi.ac.uk' + req.originalUrl.replace('/auth_testing', '');
-    res.redirect(301, target);
+    // req.originalUrl carries THIS deployment's basePath (/maize_v6, /v70, /sorghum_v11,
+    // /grapevine_v5 ...), and that prefix is not part of EBI's URL space. The old code
+    // stripped only the literal '/auth_testing' -- the basePath of the one deployment it was
+    // written on -- so every other site redirected to https://www.ebi.ac.uk/<basePath>/gxa
+    // and EBI answered 404. Verified broken on data.gramene.org/v70, data.sorghumbase.org/
+    // sorghum_v11 and data.gramene.org/grapevine_v5 at the same time as maize_v6.
+    //
+    // So anchor on '/gxa' rather than stripping any particular prefix: that is correct for
+    // every basePath without the controller having to know which one it is running under,
+    // and it preserves subpaths and the query string. Assumes no basePath itself contains
+    // '/gxa', which none does.
+    const i = req.originalUrl.indexOf('/gxa');
+    const path = i === -1 ? '/gxa' : req.originalUrl.slice(i);
+    res.redirect(301, 'https://www.ebi.ac.uk' + path);
   }
 };
 
