@@ -111,7 +111,7 @@ async function baseline_experiments(req, res) {
                   experimentType: "RNASEQ_MRNA_BASELINE",
                   expressionUnit: "TPM",
                   expressions: Array.from({ length: colNames.length }, () => ({})),
-                  uri: `${atlasURL}/experiments/${eid}?geneQuery=%5B%7B%22value%22%3A%22${uniqueIdentifiers[0]}%22%7D%5D`
+                  uri: atlasExperimentUri(exp_lut[eid], eid, `%5B%7B%22value%22%3A%22${uniqueIdentifiers[0]}%22%7D%5D`)
                 }
                 // prepend source of experiment (EBI, JGI, etc.)
                 // rows[ef].name = `${exp_lut[eid].source} - ${rows[ef].name}`;
@@ -128,7 +128,7 @@ async function baseline_experiments(req, res) {
                 experimentType: "RNASEQ_MRNA_BASELINE",
                 expressionUnit: "TPM",
                 expressions: Array.from({ length: colNames.length }, () => ({})),
-                uri: `${atlasURL}/experiments/${eid}?geneQuery=%5B%7B%22value%22%3A%22${uniqueIdentifiers[0]}%22%7D%5D`
+                uri: atlasExperimentUri(exp_lut[eid], eid, `%5B%7B%22value%22%3A%22${uniqueIdentifiers[0]}%22%7D%5D`)
               }
                 // prepend source of experiment (EBI, JGI, etc.)
               // rows[eid].name = `${exp_lut[eid].source} - ${rows[eid].name}`;
@@ -178,6 +178,26 @@ async function baseline_experiments(req, res) {
   }
 }
 const atlasURL = 'https://www.ebi.ac.uk/gxa';
+
+// Expression Atlas deep-links are only valid for experiments that CAME from the Atlas.
+// The expression collections now also hold non-EBI studies (experiments.source === 'JGI'),
+// which have no page at EBI -- linking them there yields a 404.
+//
+// IMPORTANT: `uri` must ALWAYS be a string. The Atlas heatmap widget's
+// getHeatmapYAxisCategories() runs URI.resolve() over EVERY row, so a missing/undefined uri
+// throws "Parameter 'url' must be a string, not undefined" and takes down the entire heatmap --
+// not just that row. Point non-EBI rows at their real provenance instead of omitting the link.
+// Experiments predating the `source` field are treated as EBI, preserving old behaviour.
+const isAtlasExperiment = exp => !exp || !exp.source || exp.source === 'EBI';
+// where a non-EBI source's data actually lives, by experiments.source
+const sourceURL = {
+  JGI: 'https://phytozome-next.jgi.doe.gov/info/Sbicolor_v3_1_1'
+};
+const sourceHomeUri = exp => (exp && sourceURL[exp.source]) || atlasURL;
+const atlasExperimentUri = (exp, eid, geneQuery) =>
+  isAtlasExperiment(exp)
+    ? `${atlasURL}/experiments/${eid}?geneQuery=${geneQuery}`
+    : sourceHomeUri(exp);
 function differential_experiment(res, experiment, assays, genes, species) {
   const assayMap = new Map(assays.map(assay => [assay.group, assay]));
   let expressions = {};
@@ -444,11 +464,15 @@ async function baseline_experiment(req, res) {
         description: experiment.description,
         species: species.replace("_"," "),
         type: "rnaseq_mrna_baseline",
-        urls: {
+        // non-EBI studies (source:"JGI") have no Atlas page. Every key stays a string --
+        // see atlasExperimentUri above for why omitting them is not safe.
+        urls: isAtlasExperiment(experiment) ? {
           download: `${atlasURL}/experiments-content/${experiment_id}/download/RNASEQ_MRNA_BASELINE?unit=TPM&cutoff=0.5&heatmapMatrixSize=50&selectedColumnIds=&type=RNASEQ_MRNA_BASELINE&geneQuery=${encodedSearch}`,
           genome_browsers: `${atlasURL}/experiments/${experiment_id}/redirect/genome-browsers`,
           main_page: `${atlasURL}/experiments/${experiment_id}?geneQuery=${encodedSearch}`
-        }
+        } : { download: sourceHomeUri(experiment),
+              genome_browsers: sourceHomeUri(experiment),
+              main_page: sourceHomeUri(experiment) }
       }
     };
     if (anatomogram_parts.size === 0) {
