@@ -36,9 +36,16 @@ admin.initializeApp({
     toExport[name] = getFactory(coll.mongoCollection());
   });
 
-  module.exports.get = function get(req, res) {
+  // NB: assign onto toExport, not module.exports — `module.exports = toExport` below
+  // replaces the object wholesale, so anything hung off module.exports here is lost.
+  // That is why the /{collection} catch-all answered every request with
+  // "Controller mongo doesn't export handler function get": the handler existed but
+  // was discarded, so only collections with their own dedicated path ever worked.
+  toExport.get = function get(req, res) {
     var collection, toCall;
-    collection = req.swagger.params.collection;
+    // req.swagger.params.<name> is the param OBJECT; the value lives on .value
+    // (every other handler here does _.mapValues(req.swagger.params, 'value')).
+    collection = req.swagger.params.collection.value;
     toCall = toExport[collection];
     if (!toCall) {
       throw new Error("Required parameter `collection` not an allowed value");
