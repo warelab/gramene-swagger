@@ -28,7 +28,7 @@ paths:
       summary: Redirect to EBI
       operationId: redirectToEbi
       responses:
-        301:
+        302:
           description: Redirecting
 
   /gxa/json/experiments/{experiment_id}:
