@@ -1,9 +1,9 @@
 swagger: "2.0"
 info:
   version: "0.59.0"
-  title: API for maize release 6
+  title: API for oryza release 10
 # basePath prefixes all resource paths
-basePath: /maize_v6
+basePath: /oryza_v9
 # public host clients build request URLs against (TLS terminated by apache,
 # proxied to the swagger server on squam:50011). For local-only testing,
 # override with host: localhost:50011 and add http to schemes below.
