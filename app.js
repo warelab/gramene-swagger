@@ -98,7 +98,11 @@ SwaggerExpress.create(config, function (err, swaggerExpress) {
 
   // start it up
   var version = +basePath.match(/\d+/);
-  var port = process.env.PORT || 20010;
+  // 20009 is oryza's production port, served at basePath /oryza_v9 -- the public path is
+  // RETAINED across the v9 -> v10 rebuild, so this service replaces oryza_swagger9 on the
+  // same port and the proxy never changes. Rollback is: stop this, start oryza_swagger9.
+  // PORT=20010 was the staging override used to verify alongside the live v9 service.
+  var port = process.env.PORT || 20009;
   app.listen(port, process.env.HOST); // HOST unset: all interfaces, as before
 
   console.log('Listening on', port, process.env.HOST ? 'host ' + process.env.HOST : '');
