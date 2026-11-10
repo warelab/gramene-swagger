@@ -94,6 +94,43 @@ admin.initializeApp({
     }
   });
 
+  // `MSU_id` compatibility alias for the retained /oryza_v9 path.
+  //
+  // oryza9 served the rice RAP -> MSU/RGAP correspondence as a top-level scalar `MSU_id` on
+  // 33,938 genes. This lineage deliberately keeps alternate ids in gene.alt_id instead (an
+  // array, shared with Sobic./GRMZM/Vitvi ids for other species), so a straight rebuild drops
+  // the old key from every response. The public path does not change across the v9 -> v10
+  // rebuild, so the key is aliased back on here rather than being allowed to vanish -- the same
+  // reasoning that kept the ORYZA9GT_ gene-tree ids.
+  //
+  // alt_id remains the real field; this is a read-time alias only, so nothing writes MSU_id back.
+  var MSU_RE = /^LOC_Os/;
+  toExport['genes'] = getFactory(mongoCollections.genes.mongoCollection(), {
+    // a caller asking only for MSU_id still needs alt_id fetched to derive it
+    projectionExtras: function (fl) {
+      return (fl.indexOf('MSU_id') >= 0 && fl.indexOf('alt_id') < 0) ? ['alt_id'] : [];
+    },
+    docTransform: function (fl) {
+      var all = !fl || !fl.length;
+      var wantMsu = all || fl.indexOf('MSU_id') >= 0;
+      var wantAlt = all || fl.indexOf('alt_id') >= 0;
+      return through2.obj(function (doc, enc, done) {
+        if (doc && wantMsu) {
+          var alt = Array.isArray(doc.alt_id) ? doc.alt_id : (doc.alt_id ? [doc.alt_id] : []);
+          var msu = alt.filter(function (x) { return MSU_RE.test(x); });
+          // v9's MSU_id was a single string, and consumers parse it as one. RAP-DB maps 459 RAP
+          // loci to more than one MSU gene -- which v9's scalar hand-made table could not
+          // express at all -- so emit the first and leave the complete list in alt_id rather
+          // than changing this field's type under existing callers.
+          if (msu.length) { doc.MSU_id = msu[0]; }
+        }
+        if (doc && !wantAlt) { delete doc.alt_id; }
+        this.push(doc);
+        done();
+      });
+    }
+  });
+
   toExport['genelists'] = genelistsHandler;
 
   // /saved_views GET has two modes: single-hash lookup vs listing. Route hash lookups to
@@ -114,6 +151,8 @@ admin.initializeApp({
 
 // opts.docTransform(fl) -> a stream applied to each document before serialisation, and
 // opts.fetchWholeDoc skips the mongo projection so that transform sees the complete document.
+// opts.projectionExtras(fl) -> extra fields to FETCH (not to return) when fl is given, for a
+// response field derived from another one.
 // Used by /genetrees, which stores trees FLAT and rebuilds them on the way out.
 function getFactory(collectionPromise, opts) {
   opts = opts || {};
@@ -152,6 +191,15 @@ function getFactory(collectionPromise, opts) {
         req.swagger.operation.operationId === "savedviews") {
       nonSchemaParams.uid=0;
     }
+    // opts.projectionExtras lets a collection fetch fields it DERIVES a response field from.
+    // Applied here on purpose -- after the TSV/bed transformer has captured params.fl, and with
+    // the caller's own fl kept in requestedFl for docTransform -- so an extra fetched field adds
+    // neither a TSV column nor a key to the JSON the caller asked for.
+    var requestedFl = params.fl;
+    if (opts.projectionExtras && params.fl && params.fl.length) {
+      var extras = opts.projectionExtras(params.fl);
+      if (extras && extras.length) { params = _.assign({}, params, {fl: _.union(params.fl, extras)}); }
+    }
     const authHeader = req.headers['authorization'];
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.split(' ')[1];
@@ -163,7 +211,7 @@ function getFactory(collectionPromise, opts) {
         cursorPromise.then(function(cursor) {
           res.contentType(mimetype);
           var src = cursor.stream();
-          if (opts.docTransform) { src = src.pipe(opts.docTransform(params.fl)); }
+          if (opts.docTransform) { src = src.pipe(opts.docTransform(requestedFl)); }
           src.pipe(transformer).pipe(res);
         });
       })
@@ -175,7 +223,7 @@ function getFactory(collectionPromise, opts) {
       cursorPromise.then(function(cursor) {
         res.contentType(mimetype);
         var src2 = cursor.stream();
-        if (opts.docTransform) { src2 = src2.pipe(opts.docTransform(params.fl)); }
+        if (opts.docTransform) { src2 = src2.pipe(opts.docTransform(requestedFl)); }
         src2.pipe(transformer).pipe(res);
       });
     }
